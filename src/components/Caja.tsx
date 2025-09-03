@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MenuItem, CartItem, Order, ModuleType } from '../types';
+import { MenuItem, CartItem, Order, ModuleType, Client } from '../types';
 import { Plus, Minus, Trash2, Search, ShoppingCart } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, generateOrderNumber } from '../utils/format';
@@ -8,15 +8,21 @@ interface CajaProps {
   menuItems: MenuItem[];
   onCreateOrder: (order: Order) => void;
   onModuleChange: (module: ModuleType) => void;
+  clients: Client[];
+  onAddClient: (client: Client) => void;
 }
 
-export function Caja({ menuItems, onCreateOrder, onModuleChange }: CajaProps) {
+export function Caja({ menuItems, onCreateOrder, onModuleChange, clients, onAddClient }: CajaProps) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [showPayment, setShowPayment] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('efectivo');
   const [customerName, setCustomerName] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const matchingClients = customerName
+    ? clients.filter(c => c.nombre.toLowerCase().includes(customerName.toLowerCase()))
+    : [];
 
   const categories = Array.from(new Set(menuItems.map(item => item.categoria)));
   
@@ -64,6 +70,21 @@ export function Caja({ menuItems, onCreateOrder, onModuleChange }: CajaProps) {
 
   const processPayment = () => {
     if (cart.length === 0) return;
+    if (customerName) {
+      const existing = clients.find(
+        c => c.nombre.toLowerCase() === customerName.toLowerCase()
+      );
+      if (!existing) {
+        const contacto = window.prompt('Ingrese número de contacto del cliente:');
+        if (contacto) {
+          onAddClient({
+            id: `client-${Date.now()}`,
+            nombre: customerName,
+            contacto
+          });
+        }
+      }
+    }
 
     const order: Order = {
       id: `order-${Date.now()}`,
@@ -235,13 +256,28 @@ export function Caja({ menuItems, onCreateOrder, onModuleChange }: CajaProps) {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-2">Cliente (opcional)</label>
-                <input
-                  type="text"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Nombre del cliente"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={customerName}
+                    onChange={(e) => { setCustomerName(e.target.value); setShowSuggestions(true); }}
+                    placeholder="Nombre del cliente"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+                  />
+                  {showSuggestions && customerName && matchingClients.length > 0 && (
+                    <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto">
+                      {matchingClients.map(client => (
+                        <div
+                          key={client.id}
+                          onClick={() => { setCustomerName(client.nombre); setShowSuggestions(false); }}
+                          className="px-3 py-2 hover:bg-gray-100 cursor-pointer"
+                        >
+                          {client.nombre}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div>

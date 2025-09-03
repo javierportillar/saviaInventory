@@ -1,12 +1,10 @@
 import React from 'react';
 import { Order, MenuItem, ModuleType } from '../types';
-import { 
-  TrendingUp, 
-  ShoppingBag, 
-  Clock, 
+import {
+  ShoppingBag,
+  Clock,
   AlertTriangle,
-  DollarSign,
-  Users
+  DollarSign
 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
@@ -73,7 +71,7 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat, index) => {
+        {stats.map((stat) => {
           const Icon = stat.icon;
           return (
             <button

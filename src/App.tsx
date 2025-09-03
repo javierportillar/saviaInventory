@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Order, MenuItem, ModuleType } from './types';
+import { Order, MenuItem, ModuleType, Client } from './types';
 import { Navigation } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
 import { Caja } from './components/Caja';
 import { Comandas } from './components/Comandas';
 import { Inventario } from './components/Inventario';
 import { Cocina } from './components/Cocina';
+import { Clientes } from './components/Clientes';
 import { MENU_ITEMS, COLORS } from './data/menu';
 import { useLocalStorage } from './hooks/useLocalStorage';
 
@@ -13,6 +14,7 @@ function App() {
   const [activeModule, setActiveModule] = useState<ModuleType>('dashboard');
   const [orders, setOrders] = useLocalStorage<Order[]>('savia-orders', []);
   const [menuItems, setMenuItems] = useLocalStorage<MenuItem[]>('savia-inventory', MENU_ITEMS);
+  const [clients, setClients] = useLocalStorage<Client[]>('savia-clients', []);
 
   const handleCreateOrder = (order: Order) => {
     setOrders(prev => [...prev, order]);
@@ -45,6 +47,18 @@ function App() {
     );
   };
 
+  const addClient = (client: Client) => {
+    setClients(prev => [...prev, client]);
+  };
+
+  const updateClient = (client: Client) => {
+    setClients(prev => prev.map(c => c.id === client.id ? client : c));
+  };
+
+  const deleteClient = (id: string) => {
+    setClients(prev => prev.filter(c => c.id !== id));
+  };
+
   const renderModule = () => {
     switch (activeModule) {
       case 'dashboard':
@@ -57,10 +71,12 @@ function App() {
         );
       case 'caja':
         return (
-          <Caja 
+          <Caja
             menuItems={menuItems}
             onCreateOrder={handleCreateOrder}
             onModuleChange={setActiveModule}
+            clients={clients}
+            onAddClient={addClient}
           />
         );
       case 'comandas':
@@ -79,9 +95,18 @@ function App() {
         );
       case 'cocina':
         return (
-          <Cocina 
+          <Cocina
             orders={orders}
             onUpdateOrderStatus={handleUpdateOrderStatus}
+          />
+        );
+      case 'clientes':
+        return (
+          <Clientes
+            clients={clients}
+            onAddClient={addClient}
+            onUpdateClient={updateClient}
+            onDeleteClient={deleteClient}
           />
         );
       default:
