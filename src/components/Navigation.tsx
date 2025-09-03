@@ -3,9 +3,10 @@ import { ModuleType } from '../types';
 import { 
   Home, 
   ShoppingCart, 
-  ClipboardList, 
-  Package, 
-  ChefHat 
+  ClipboardList,
+  Package,
+  ChefHat,
+  Users
 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 
@@ -20,6 +21,7 @@ const modules = [
   { id: 'comandas' as ModuleType, label: 'Comandas', icon: ClipboardList },
   { id: 'inventario' as ModuleType, label: 'Inventario', icon: Package },
   { id: 'cocina' as ModuleType, label: 'Cocina', icon: ChefHat },
+  { id: 'clientes' as ModuleType, label: 'Clientes', icon: Users },
 ];
 
 export function Navigation({ activeModule, onModuleChange }: NavigationProps) {
