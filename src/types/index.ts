@@ -31,4 +31,10 @@ export interface InventoryAlert {
   stockMinimo: number;
 }
 
-export type ModuleType = 'dashboard' | 'caja' | 'comandas' | 'inventario' | 'cocina';
+export interface Customer {
+  id: string;
+  nombre: string;
+  telefono: string;
+}
+
+export type ModuleType = 'dashboard' | 'caja' | 'comandas' | 'inventario' | 'cocina' | 'clientes';

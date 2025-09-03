@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MenuItem, CartItem, Order, ModuleType } from '../types';
+import { MenuItem, CartItem, Order, ModuleType, Customer } from '../types';
 import { Plus, Minus, Trash2, Search, ShoppingCart } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, generateOrderNumber } from '../utils/format';
@@ -8,15 +8,18 @@ interface CajaProps {
   menuItems: MenuItem[];
   onCreateOrder: (order: Order) => void;
   onModuleChange: (module: ModuleType) => void;
+  customers: Customer[];
+  onAddCustomer: (customer: Customer) => void;
 }
 
-export function Caja({ menuItems, onCreateOrder, onModuleChange }: CajaProps) {
+export function Caja({ menuItems, onCreateOrder, onModuleChange, customers, onAddCustomer }: CajaProps) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [showPayment, setShowPayment] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('efectivo');
   const [customerName, setCustomerName] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
 
   const categories = Array.from(new Set(menuItems.map(item => item.categoria)));
   
@@ -65,6 +68,26 @@ export function Caja({ menuItems, onCreateOrder, onModuleChange }: CajaProps) {
   const processPayment = () => {
     if (cart.length === 0) return;
 
+    let customer = selectedCustomer;
+    if (!customer && customerName.trim()) {
+      const existing = customers.find(
+        c => c.nombre.toLowerCase() === customerName.trim().toLowerCase()
+      );
+      if (existing) {
+        customer = existing;
+      } else {
+        const telefono = window.prompt('Ingrese teléfono del cliente');
+        if (telefono) {
+          customer = {
+            id: `cust-${Date.now()}`,
+            nombre: customerName.trim(),
+            telefono: telefono.trim(),
+          };
+          onAddCustomer(customer);
+        }
+      }
+    }
+
     const order: Order = {
       id: `order-${Date.now()}`,
       numero: generateOrderNumber(),
@@ -72,7 +95,7 @@ export function Caja({ menuItems, onCreateOrder, onModuleChange }: CajaProps) {
       total,
       estado: 'pendiente',
       timestamp: new Date(),
-      cliente: customerName || undefined,
+      cliente: customer ? customer.nombre : undefined,
       metodoPago: paymentMethod,
     };
 
@@ -80,6 +103,7 @@ export function Caja({ menuItems, onCreateOrder, onModuleChange }: CajaProps) {
     setCart([]);
     setShowPayment(false);
     setCustomerName('');
+    setSelectedCustomer(null);
     onModuleChange('comandas');
   };
 
@@ -232,17 +256,40 @@ export function Caja({ menuItems, onCreateOrder, onModuleChange }: CajaProps) {
               Procesar Pago
             </h3>
             
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Cliente (opcional)</label>
-                <input
-                  type="text"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Nombre del cliente"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
-                />
-              </div>
+              <div className="space-y-4">
+                <div className="relative">
+                  <label className="block text-sm font-medium mb-2">Cliente (opcional)</label>
+                  <input
+                    type="text"
+                    value={customerName}
+                    onChange={(e) => {
+                      setCustomerName(e.target.value);
+                      setSelectedCustomer(null);
+                    }}
+                    placeholder="Nombre del cliente"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+                  />
+                  {customerName && (
+                    <div className="absolute z-10 bg-white border border-gray-200 rounded-lg mt-1 w-full max-h-40 overflow-y-auto">
+                      {customers
+                        .filter(c =>
+                          c.nombre.toLowerCase().includes(customerName.toLowerCase())
+                        )
+                        .map(c => (
+                          <button
+                            key={c.id}
+                            onClick={() => {
+                              setCustomerName(c.nombre);
+                              setSelectedCustomer(c);
+                            }}
+                            className="w-full text-left px-3 py-2 hover:bg-gray-100"
+                          >
+                            {c.nombre}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
 
               <div>
                 <label className="block text-sm font-medium mb-2">Método de pago</label>
