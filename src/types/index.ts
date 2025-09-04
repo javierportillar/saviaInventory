@@ -6,6 +6,9 @@ export interface MenuItem {
   keywords?: string;
   categoria: string;
   stock: number;
+  inventarioCategoria: 'Inventariables' | 'No inventariables';
+  inventarioTipo?: 'cantidad' | 'gramos';
+  unidadMedida?: 'kg' | 'g' | 'mg';
 }
 
 export interface CartItem {

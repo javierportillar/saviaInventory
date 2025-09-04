@@ -209,8 +209,60 @@ export const MENU_ITEMS: MenuItem[] = [...LEFT_SECTIONS, ...RIGHT_SECTIONS].flat
     ...item,
     categoria: section.titulo,
     stock: Math.floor(Math.random() * 50) + 10, // Stock inicial aleatorio
+    inventarioCategoria: 'No inventariables',
   }))
-);
+).concat([
+  {
+    id: 'inv-mango',
+    nombre: 'Mango',
+    precio: 0,
+    categoria: 'Frutas',
+    stock: 0,
+    inventarioCategoria: 'Inventariables',
+    inventarioTipo: 'gramos',
+    unidadMedida: 'kg',
+  },
+  {
+    id: 'inv-pina',
+    nombre: 'Piña',
+    precio: 0,
+    categoria: 'Frutas',
+    stock: 0,
+    inventarioCategoria: 'Inventariables',
+    inventarioTipo: 'gramos',
+    unidadMedida: 'kg',
+  },
+  {
+    id: 'inv-banano',
+    nombre: 'Banano',
+    precio: 0,
+    categoria: 'Frutas',
+    stock: 0,
+    inventarioCategoria: 'Inventariables',
+    inventarioTipo: 'gramos',
+    unidadMedida: 'kg',
+  },
+  {
+    id: 'inv-fresa',
+    nombre: 'Fresa',
+    precio: 0,
+    categoria: 'Frutas',
+    stock: 0,
+    inventarioCategoria: 'Inventariables',
+    inventarioTipo: 'gramos',
+    unidadMedida: 'kg',
+  },
+  {
+    id: 'inv-kiwi',
+    nombre: 'Kiwi',
+    precio: 0,
+    categoria: 'Frutas',
+    stock: 0,
+    inventarioCategoria: 'Inventariables',
+    inventarioTipo: 'gramos',
+    unidadMedida: 'kg',
+  },
+]);
 
 export const COLORS = {
   dark: "#0B1C14",

@@ -24,11 +24,12 @@ export function Caja({ menuItems, onCreateOrder, onModuleChange, customers, onAd
   const categories = Array.from(new Set(menuItems.map(item => item.categoria)));
   
   const filteredItems = menuItems.filter(item => {
-    const matchesSearch = !searchQuery || 
+    const matchesSearch = !searchQuery ||
       item.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (item.keywords && item.keywords.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesCategory = !selectedCategory || item.categoria === selectedCategory;
-    return matchesSearch && matchesCategory && item.stock > 0;
+    const isNonInventariable = item.inventarioCategoria !== 'Inventariables';
+    return matchesSearch && matchesCategory && isNonInventariable;
   });
 
   const addToCart = (item: MenuItem) => {
