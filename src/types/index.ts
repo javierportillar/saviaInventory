@@ -24,7 +24,7 @@ export interface Order {
   total: number;
   estado: 'pendiente' | 'preparando' | 'listo' | 'entregado';
   timestamp: Date;
-  cliente?: string;
+  cliente_id?: string;
   metodoPago?: 'efectivo' | 'tarjeta' | 'transferencia';
 }
 

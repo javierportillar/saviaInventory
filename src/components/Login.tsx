@@ -36,6 +36,7 @@ export function Login({ onLogin }: LoginProps) {
             <input
               id="username"
               name="username"
+              type="text"
               autoComplete="username"
               value={username}
               onChange={e => setUsername(e.target.value)}

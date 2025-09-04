@@ -6,7 +6,7 @@ interface UserCredential extends User {
 
 export const USERS: UserCredential[] = [
   { username: 'admin', password: '299381Be@', role: 'admin' },
-  { username: 'employe1', password: 'Savia123', role: 'employee' },
+  { username: 'employee', password: 'Savia123', role: 'employee' },
 ];
 
 export function authenticate(username: string, password: string): User | null {

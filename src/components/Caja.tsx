@@ -1,18 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MenuItem, CartItem, Order, ModuleType, Customer } from '../types';
 import { Plus, Minus, Trash2, Search, ShoppingCart, Edit2 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, generateOrderNumber } from '../utils/format';
+import { supabase } from '../lib/supabaseClient';
 
 interface CajaProps {
-  menuItems: MenuItem[];
-  onCreateOrder: (order: Order) => void;
   onModuleChange: (module: ModuleType) => void;
-  customers: Customer[];
-  onAddCustomer: (customer: Customer) => void;
 }
 
-export function Caja({ menuItems, onCreateOrder, onModuleChange, customers, onAddCustomer }: CajaProps) {
+export function Caja({ onModuleChange }: CajaProps) {
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
@@ -20,6 +19,35 @@ export function Caja({ menuItems, onCreateOrder, onModuleChange, customers, onAd
   const [paymentMethod, setPaymentMethod] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('efectivo');
   const [customerName, setCustomerName] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+
+  useEffect(() => {
+    fetchMenuItems();
+    fetchCustomers();
+  }, []);
+
+  const fetchMenuItems = async () => {
+    const { data, error } = await supabase
+      .from('menu_items')
+      .select('*');
+
+    if (error) {
+      console.error('Error fetching menu items:', error);
+    } else {
+      setMenuItems(data || []);
+    }
+  };
+
+  const fetchCustomers = async () => {
+    const { data, error } = await supabase
+      .from('customers')
+      .select('*');
+
+    if (error) {
+      console.error('Error fetching customers:', error);
+    } else {
+      setCustomers(data || []);
+    }
+  };
 
   const categories = Array.from(new Set(menuItems.map(item => item.categoria)));
   
@@ -66,29 +94,49 @@ export function Caja({ menuItems, onCreateOrder, onModuleChange, customers, onAd
 
   const total = cart.reduce((sum, cartItem) => sum + (cartItem.item.precio * cartItem.cantidad), 0);
 
-  const processPayment = () => {
+  const processPayment = async () => {
     if (cart.length === 0) return;
 
     let customer = selectedCustomer;
+    let customerId: string | undefined;
+
     if (!customer && customerName.trim()) {
       const existing = customers.find(
         c => c.nombre.toLowerCase() === customerName.trim().toLowerCase()
       );
       if (existing) {
         customer = existing;
+        customerId = existing.id;
       } else {
         const telefono = window.prompt('Ingrese teléfono del cliente');
         if (!telefono) {
           alert('Debe ingresar un teléfono para continuar');
           return;
         }
-        customer = {
+
+        const newCustomer: Customer = {
           id: `cust-${Date.now()}`,
           nombre: customerName.trim(),
           telefono: telefono.trim(),
         };
-        onAddCustomer(customer);
+
+        const { data: newCustomerData, error: newCustomerError } = await supabase
+          .from('customers')
+          .insert([newCustomer])
+          .select()
+          .single();
+
+        if (newCustomerError) {
+          console.error('Error adding customer:', newCustomerError);
+          return;
+        }
+
+        customer = newCustomerData;
+        customerId = newCustomerData.id;
+        setCustomers(prevCustomers => [...prevCustomers, newCustomerData]);
       }
+    } else if (customer) {
+      customerId = customer.id;
     }
 
     const order: Order = {
@@ -98,11 +146,49 @@ export function Caja({ menuItems, onCreateOrder, onModuleChange, customers, onAd
       total,
       estado: 'pendiente',
       timestamp: new Date(),
-      cliente: customer ? customer.nombre : undefined,
+      cliente_id: customerId,
       metodoPago: paymentMethod,
     };
 
-    onCreateOrder(order);
+    const { data: orderData, error: orderError } = await supabase
+      .from('orders')
+      .insert([
+        {
+          id: order.id,
+          numero: order.numero,
+          total: order.total,
+          estado: order.estado,
+          timestamp: order.timestamp.toISOString(),
+          cliente_id: order.cliente_id,
+          metodoPago: order.metodoPago,
+        },
+      ])
+      .select()
+      .single();
+
+    if (orderError) {
+      console.error('Error creating order:', orderError);
+      return;
+    }
+
+    for (const cartItem of cart) {
+      const { error: orderItemError } = await supabase
+        .from('order_items')
+        .insert([
+          {
+            order_id: orderData.id,
+            menu_item_id: cartItem.item.id,
+            cantidad: cartItem.cantidad,
+            notas: cartItem.notas,
+          },
+        ]);
+
+      if (orderItemError) {
+        console.error('Error creating order item:', orderItemError);
+        return;
+      }
+    }
+
     setCart([]);
     setShowPayment(false);
     setCustomerName('');

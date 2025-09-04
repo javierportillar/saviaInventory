@@ -131,4 +131,3 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
     </div>
   );
 }
-
