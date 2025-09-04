@@ -41,3 +41,10 @@ export interface Customer {
 }
 
 export type ModuleType = 'dashboard' | 'caja' | 'comandas' | 'inventario' | 'cocina' | 'clientes';
+
+export type UserRole = 'admin' | 'employee';
+
+export interface User {
+  username: string;
+  role: UserRole;
+}

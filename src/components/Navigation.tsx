@@ -1,18 +1,21 @@
 import React from 'react';
-import { ModuleType } from '../types';
+import { ModuleType, User } from '../types';
 import {
   Home,
   ShoppingCart,
   ClipboardList,
   Package,
   ChefHat,
-  Users
+  Users,
+  LogOut
 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 
 interface NavigationProps {
   activeModule: ModuleType;
   onModuleChange: (module: ModuleType) => void;
+  user: User;
+  onLogout: () => void;
 }
 
 const modules = [
@@ -24,7 +27,12 @@ const modules = [
   { id: 'clientes' as ModuleType, label: 'Clientes', icon: Users },
 ];
 
-export function Navigation({ activeModule, onModuleChange }: NavigationProps) {
+export function Navigation({ activeModule, onModuleChange, user, onLogout }: NavigationProps) {
+  const allowedModules =
+    user.role === 'admin'
+      ? modules
+      : modules.filter(m => ['caja', 'comandas', 'cocina', 'clientes'].includes(m.id));
+
   return (
     <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
       <div className="max-w-7xl mx-auto px-4">
@@ -41,8 +49,8 @@ export function Navigation({ activeModule, onModuleChange }: NavigationProps) {
             </h1>
           </div>
           
-          <div className="flex space-x-1">
-            {modules.map(({ id, label, icon: Icon }) => (
+          <div className="flex space-x-1 items-center">
+            {allowedModules.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 onClick={() => onModuleChange(id)}
@@ -61,6 +69,13 @@ export function Navigation({ activeModule, onModuleChange }: NavigationProps) {
                 <span className="font-medium hidden sm:inline">{label}</span>
               </button>
             ))}
+            <button
+              onClick={onLogout}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+            >
+              <LogOut size={18} />
+              <span className="font-medium hidden sm:inline">Salir</span>
+            </button>
           </div>
         </div>
       </div>

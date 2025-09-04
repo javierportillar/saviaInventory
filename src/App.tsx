@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
-import { Order, MenuItem, ModuleType, Customer } from './types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Order, MenuItem, ModuleType, Customer, User } from './types';
 import { Navigation } from './components/Navigation';
+import { Login } from './components/Login';
 import { Dashboard } from './components/Dashboard';
 import { Caja } from './components/Caja';
 import { Comandas } from './components/Comandas';
@@ -12,6 +13,7 @@ import { useLocalStorage } from './hooks/useLocalStorage';
 
 function App() {
   const [activeModule, setActiveModule] = useState<ModuleType>('dashboard');
+  const [user, setUser] = useLocalStorage<User | null>('savia-user', null);
   const [orders, setOrders] = useLocalStorage<Order[]>('savia-orders', []);
   const parsedOrders = useMemo(
     () =>
@@ -81,6 +83,12 @@ function App() {
     setCustomers(prev => prev.filter(c => c.id !== id));
   };
 
+  useEffect(() => {
+    if (user) {
+      setActiveModule(user.role === 'admin' ? 'dashboard' : 'caja');
+    }
+  }, [user]);
+
   const renderModule = () => {
     switch (activeModule) {
       case 'dashboard':
@@ -139,11 +147,17 @@ function App() {
     }
   };
 
+  if (!user) {
+    return <Login onLogin={setUser} />;
+  }
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: COLORS.beige }}>
-      <Navigation 
-        activeModule={activeModule} 
-        onModuleChange={setActiveModule} 
+      <Navigation
+        activeModule={activeModule}
+        onModuleChange={setActiveModule}
+        user={user}
+        onLogout={() => setUser(null)}
       />
       
       <main className="transition-all duration-300 ease-in-out">
