@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Order, MenuItem, ModuleType, Customer } from './types';
 import { Navigation } from './components/Navigation';
 import { Dashboard } from './components/Dashboard';
@@ -13,6 +13,14 @@ import { useLocalStorage } from './hooks/useLocalStorage';
 function App() {
   const [activeModule, setActiveModule] = useState<ModuleType>('dashboard');
   const [orders, setOrders] = useLocalStorage<Order[]>('savia-orders', []);
+  const parsedOrders = useMemo(
+    () =>
+      orders.map((order) => ({
+        ...order,
+        timestamp: new Date(order.timestamp),
+      })),
+    [orders]
+  );
   const [menuItems, setMenuItems] = useLocalStorage<MenuItem[]>('savia-inventory', MENU_ITEMS);
   const [customers, setCustomers] = useLocalStorage<Customer[]>('savia-customers', []);
 
@@ -47,6 +55,20 @@ function App() {
     );
   };
 
+  const handleAddItem = (item: MenuItem) => {
+    setMenuItems(prev => [...prev, item]);
+  };
+
+  const handleUpdateItem = (updated: MenuItem) => {
+    setMenuItems(prev =>
+      prev.map(item => (item.id === updated.id ? updated : item))
+    );
+  };
+
+  const handleDeleteItem = (id: string) => {
+    setMenuItems(prev => prev.filter(item => item.id !== id));
+  };
+
   const handleAddCustomer = (customer: Customer) => {
     setCustomers(prev => [...prev, customer]);
   };
@@ -63,8 +85,8 @@ function App() {
     switch (activeModule) {
       case 'dashboard':
         return (
-          <Dashboard 
-            orders={orders} 
+          <Dashboard
+            orders={parsedOrders}
             menuItems={menuItems}
             onModuleChange={setActiveModule}
           />
@@ -81,22 +103,25 @@ function App() {
         );
       case 'comandas':
         return (
-          <Comandas 
-            orders={orders}
+          <Comandas
+            orders={parsedOrders}
             onUpdateOrderStatus={handleUpdateOrderStatus}
           />
         );
       case 'inventario':
         return (
-          <Inventario 
+          <Inventario
             menuItems={menuItems}
             onUpdateStock={handleUpdateStock}
+            onAddItem={handleAddItem}
+            onUpdateItem={handleUpdateItem}
+            onDeleteItem={handleDeleteItem}
           />
         );
       case 'cocina':
         return (
           <Cocina
-            orders={orders}
+            orders={parsedOrders}
             onUpdateOrderStatus={handleUpdateOrderStatus}
           />
         );
@@ -110,7 +135,7 @@ function App() {
           />
         );
       default:
-        return <Dashboard orders={orders} menuItems={menuItems} onModuleChange={setActiveModule} />;
+        return <Dashboard orders={parsedOrders} menuItems={menuItems} onModuleChange={setActiveModule} />;
     }
   };
 

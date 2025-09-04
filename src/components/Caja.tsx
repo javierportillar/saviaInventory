@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { MenuItem, CartItem, Order, ModuleType, Customer } from '../types';
-import { Plus, Minus, Trash2, Search, ShoppingCart } from 'lucide-react';
+import { Plus, Minus, Trash2, Search, ShoppingCart, Edit2 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, generateOrderNumber } from '../utils/format';
 
@@ -77,14 +77,16 @@ export function Caja({ menuItems, onCreateOrder, onModuleChange, customers, onAd
         customer = existing;
       } else {
         const telefono = window.prompt('Ingrese teléfono del cliente');
-        if (telefono) {
-          customer = {
-            id: `cust-${Date.now()}`,
-            nombre: customerName.trim(),
-            telefono: telefono.trim(),
-          };
-          onAddCustomer(customer);
+        if (!telefono) {
+          alert('Debe ingresar un teléfono para continuar');
+          return;
         }
+        customer = {
+          id: `cust-${Date.now()}`,
+          nombre: customerName.trim(),
+          telefono: telefono.trim(),
+        };
+        onAddCustomer(customer);
       }
     }
 
@@ -267,10 +269,22 @@ export function Caja({ menuItems, onCreateOrder, onModuleChange, customers, onAd
                       setSelectedCustomer(null);
                     }}
                     placeholder="Nombre del cliente"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent pr-10"
+                    readOnly={!!selectedCustomer}
                   />
-                  {customerName && (
-                    <div className="absolute z-10 bg-white border border-gray-200 rounded-lg mt-1 w-full max-h-40 overflow-y-auto">
+                  {selectedCustomer && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCustomer(null)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                  )}
+                  {customerName && !selectedCustomer && (
+                    <div
+                      className="absolute z-10 bg-white border border-gray-200 rounded-lg mt-1 w-full max-h-40 overflow-y-auto"
+                    >
                       {customers
                         .filter(c =>
                           c.nombre.toLowerCase().includes(customerName.toLowerCase())

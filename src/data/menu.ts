@@ -39,6 +39,20 @@ const LEFT_SECTIONS = [
     side: "left" as const,
   },
   {
+    id: "bowlssalados",
+    titulo: "Bowls Salados",
+    subtitulo: "26 oz",
+    items: [
+      {
+        nombre: "Bowl Salado",
+        precio: 15000,
+        descripcion:
+          "Personaliza tu bowl: 2 bases (arroz, pasta, quinua), 4 toppings (maíz tierno, champiñones, pico de gallo, guacamole, tocineta, chips de arracacha, queso feta, zanahoria, pepino) y 1 proteína (pechuga de pollo, jamón de cerdo, carne desmechada). Incluye bebida.",
+      },
+    ],
+    side: "left" as const,
+  },
+  {
     id: "calientes",
     titulo: "Bebidas calientes",
     items: [
@@ -46,11 +60,8 @@ const LEFT_SECTIONS = [
       { nombre: "Latte", precio: 5500, keywords: "latte" },
       { nombre: "Americano", precio: 5500, keywords: "americano" },
       { nombre: "Cocoa", precio: 6000, keywords: "cocoa" },
-      { nombre: "Matcha latte", precio: 10000, keywords: "matcha latte" },
       { nombre: "Pitaya latte", precio: 8500, keywords: "pitaya latte" },
-      { nombre: "Blue latte", precio: 8500, keywords: "blue latte" },
       { nombre: "Infusión de frutos rojos", precio: 6000, keywords: "infusión frutos rojos" },
-      { nombre: "Infusión mariposa", precio: 6500, keywords: "infusión mariposa" },
     ],
     side: "left" as const,
   },
@@ -63,7 +74,8 @@ const LEFT_SECTIONS = [
         precio: 8000,
         keywords: "torta del día zanahoria arándanos naranja harina de almendra coco endulzada con banano cubierta yogurt griego",
       },
-      { nombre: "Galletas de avena", precio: 4500, keywords: "galletas de avena" },
+      { nombre: "Galletas de avena", precio: 4000, keywords: "galletas de avena" },
+      { nombre: "Muffin de queso", precio: 4500, keywords: "muffin de queso" },
       {
         nombre: "Tapitas",
         precio: 10000,
@@ -77,33 +89,30 @@ const LEFT_SECTIONS = [
 
 const RIGHT_SECTIONS = [
   {
-    id: "bowls",
-    titulo: "Bowls",
+    id: "bowlsfrutales",
+    titulo: "Bowls Frutales",
     subtitulo: "16 oz",
     items: [
       {
         nombre: "Açaí supremo",
-        precio: 18500,
-        descripcion: "Base: Açaí, banano, mora, yogurt natural, leche o bebida vegetal. Toppings: Fresa, mango, banano, chía, arándanos, coco, crema de maní, yogurt griego con matcha.",
-        keywords: "açaí supremo açaí banano mora yogurt natural leche bebida vegetal fresa mango chía arándanos coco crema de maní yogurt griego matcha",
-      },
-      {
-        nombre: "Berry Love",
         precio: 14500,
-        descripcion: "Base: Açaí, fresa, banano, yogurt natural, leche o bebida vegetal. Toppings: Kiwi, fresa, coco, semillas, crema de maní.",
-        keywords: "berry love açaí fresa banano yogurt leche bebida vegetal kiwi coco semillas crema de maní",
+        descripcion:
+          "Base: Açaí, fresa, banano, yogurt natural, leche o bebida vegetal. Toppings: Kiwi, fresa, banano, coco, arándanos, semillas, crema de maní.",
+        keywords: "açaí supremo açaí fresa banano yogurt leche bebida vegetal kiwi coco arándanos semillas crema de maní",
       },
       {
         nombre: "Tropical",
         precio: 12000,
-        descripcion: "Base: Mango, piña, banano, yogurt natural, leche o bebida vegetal. Toppings: Kiwi, mango, granola, semillas de girasol, coco.",
+        descripcion:
+          "Base: Mango, piña, banano, yogurt natural, leche o bebida vegetal. Toppings: Kiwi, mango, granola, semillas de girasol, coco.",
         keywords: "tropical mango piña banano yogurt leche kiwi granola semillas de girasol coco",
       },
       {
         nombre: "Vital",
         precio: 12000,
-        descripcion: "Base: Mango, banano, piña, espinaca, yogurt natural, leche o bebida vegetal. Toppings: Kiwi, arándano, chía latte, coco.",
-        keywords: "vital mango banano piña espinaca yogurt leche kiwi arándano chía latte coco",
+        descripcion:
+          "Base: Mango, banano, piña, espinaca, yogurt natural, leche o bebida vegetal. Toppings: Kiwi, arándano, granola, chía latte, coco.",
+        keywords: "vital mango banano piña espinaca yogurt leche kiwi arándano granola chía latte coco",
       },
     ],
     side: "right" as const,
@@ -126,7 +135,7 @@ const RIGHT_SECTIONS = [
       },
       {
         nombre: "Piña rosa",
-        precio: 10500,
+        precio: 9500,
         descripcion: "Hierbabuena, pitaya rosada, piña, limón.",
         keywords: "piña rosa hierbabuena pitaya rosada piña limón",
       },
@@ -176,9 +185,6 @@ const RIGHT_SECTIONS = [
     items: [
       { nombre: "Pink", precio: 12000, descripcion: "Fresa, banano, yogurt natural, leche, chía, avena.", keywords: "pink fresa banano yogurt leche chía avena" },
       { nombre: "Mocha energy", precio: 12000, descripcion: "Banano, café frío, leche, cacao puro, crema de maní, avena.", keywords: "mocha energy banano café frío leche cacao puro crema de maní avena" },
-      { nombre: "Choco avocado", precio: 12000, descripcion: "Banano, aguacate, leche, miel, cacao puro, avena.", keywords: "choco avocado banano aguacate leche miel cacao puro avena" },
-      { nombre: "Berries", precio: 13000, descripcion: "Arándano, yogurt natural, leche, avena, semillas de calabaza.", keywords: "berries arándano yogurt leche avena semillas de calabaza" },
-      { nombre: "Matcha energy", precio: 12000, descripcion: "Banano, yogurt natural, leche, miel, matcha, semillas de calabaza, avena.", keywords: "matcha energy banano yogurt leche miel matcha semillas de calabaza avena" },
       { nombre: "Matcha protein", precio: 16000, descripcion: "Té matcha, scoop de proteína whey pure (30 g).", keywords: "matcha protein té matcha proteína whey 30g" },
     ],
     side: "right" as const,
@@ -187,12 +193,10 @@ const RIGHT_SECTIONS = [
     id: "frias",
     titulo: "Bebidas frías",
     items: [
-      { nombre: "Ice matcha latte", precio: 12500, descripcion: "Té matcha en leche o bebida vegetal con hielo.", keywords: "ice matcha latte té matcha leche bebida vegetal hielo" },
-      { nombre: "Ice blue latte", precio: 12000, descripcion: "Té azul en leche o bebida vegetal con hielo.", keywords: "ice blue latte té azul leche bebida vegetal hielo" },
-      { nombre: "Ice coffee latte", precio: 11500, descripcion: "Hielos de café, en leche o bebida vegetal.", keywords: "ice coffee latte café leche bebida vegetal hielo" },
-      { nombre: "Limonada azul", precio: 12500, descripcion: "Mezcla de limón y té azul.", keywords: "limonada azul limón té azul" },
-      { nombre: "Blue coffee", precio: 10500, descripcion: "Café y té azul.", keywords: "blue coffee café té azul" },
-      { nombre: "Pink coffee", precio: 10500, descripcion: "Café y pitaya rosa.", keywords: "pink coffee café pitaya rosa" },
+      { nombre: "Matcha latte helado", precio: 11000, descripcion: "Té matcha con leche y hielo.", keywords: "matcha latte helado té matcha leche hielo" },
+      { nombre: "Blue latte helado", precio: 10500, descripcion: "Té azul en leche o bebida vegetal con hielo.", keywords: "blue latte helado té azul leche bebida vegetal hielo" },
+      { nombre: "Limonada azul", precio: 10000, descripcion: "Mezcla de limón y té azul.", keywords: "limonada azul limón té azul" },
+      { nombre: "Café Pitaya", precio: 10500, descripcion: "Café y pitaya rosa.", keywords: "café pitaya café pitaya rosa" },
     ],
     side: "right" as const,
   },
