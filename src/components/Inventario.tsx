@@ -7,12 +7,12 @@ import { formatCOP } from '../utils/format';
 interface InventarioProps {
   menuItems: MenuItem[];
   onUpdateStock: (itemId: string, newStock: number) => void;
-  onAddItem: (item: MenuItem) => void;
+  onCreateMenuItem: (item: MenuItem) => void;
   onUpdateItem: (item: MenuItem) => void;
   onDeleteItem: (id: string) => void;
 }
 
-export function Inventario({ menuItems, onUpdateStock, onAddItem, onUpdateItem, onDeleteItem }: InventarioProps) {
+export function Inventario({ menuItems, onUpdateStock, onCreateMenuItem, onUpdateItem, onDeleteItem }: InventarioProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
@@ -62,7 +62,7 @@ export function Inventario({ menuItems, onUpdateStock, onAddItem, onUpdateItem, 
 
   const handleSaveNew = () => {
     if (newItem) {
-      onAddItem({
+      onCreateMenuItem({
         id: crypto.randomUUID(),
         nombre: newItem.nombre,
         precio: newItem.precio ?? 0,
