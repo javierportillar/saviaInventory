@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { MenuItem } from '../types';
-import { Package, AlertTriangle, Plus, Minus, Search, Edit3, Trash } from 'lucide-react';
+import { Package, AlertTriangle, Plus, Minus, Search, Edit3, Trash, Filter } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
 
@@ -14,6 +14,7 @@ interface InventarioProps {
 export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDeleteMenuItem }: InventarioProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [inventoryFilter, setInventoryFilter] = useState<'all' | 'inventariables' | 'no-inventariables'>('all');
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [newItem, setNewItem] = useState<{
     nombre: string;
@@ -31,7 +32,10 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
   const filteredItems = menuItems.filter(item => {
     const matchesSearch = !searchQuery || item.nombre.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = !selectedCategory || item.categoria === selectedCategory;
-    return matchesSearch && matchesCategory;
+    const matchesInventory = inventoryFilter === 'all' || 
+      (inventoryFilter === 'inventariables' && item.inventarioCategoria === 'Inventariables') ||
+      (inventoryFilter === 'no-inventariables' && item.inventarioCategoria === 'No inventariables');
+    return matchesSearch && matchesCategory && matchesInventory;
   });
 
   const inventariableItems = filteredItems.filter(
@@ -308,7 +312,52 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
       )}
 
       {/* Filtros */}
-      <div className="flex flex-col sm:flex-row gap-4">
+      <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+        <div className="flex flex-col lg:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+            <input
+              type="text"
+              placeholder="Buscar productos..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+              style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+            />
+          </div>
+          
+          <div className="flex gap-4">
+            <div className="flex items-center gap-2">
+              <Filter size={16} className="text-gray-500" />
+              <span className="text-sm font-medium whitespace-nowrap">Tipo:</span>
+            </div>
+            <select
+              value={inventoryFilter}
+              onChange={(e) => setInventoryFilter(e.target.value as 'all' | 'inventariables' | 'no-inventariables')}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+              style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+            >
+              <option value="all">Todos</option>
+              <option value="inventariables">Inventariables</option>
+              <option value="no-inventariables">No inventariables</option>
+            </select>
+            
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+              style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+            >
+              <option value="">Todas las categorías</option>
+              {categories.map(category => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
           <input
@@ -320,20 +369,6 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
             style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
           />
         </div>
-        <select
-          value={selectedCategory}
-          onChange={(e) => setSelectedCategory(e.target.value)}
-          className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
-          style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
-        >
-          <option value="">Todas las categorías</option>
-          {categories.map(category => (
-            <option key={category} value={category}>{category}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="flex justify-end">
         <button
           onClick={() =>
             setNewItem({
@@ -452,24 +487,49 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
 
       {/* Lista de productos */}
       <div className="space-y-8">
-        {inventariableItems.length > 0 && (
+        {inventariableItems.length > 0 && (inventoryFilter === 'all' || inventoryFilter === 'inventariables') && (
           <div>
             <h3 className="text-xl font-semibold mb-4" style={{ color: COLORS.dark }}>
-              Inventariables
+              Inventariables ({inventariableItems.length})
             </h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {inventariableItems.map(renderItemCard)}
             </div>
           </div>
         )}
-        {nonInventariableItems.length > 0 && (
+        {nonInventariableItems.length > 0 && (inventoryFilter === 'all' || inventoryFilter === 'no-inventariables') && (
           <div>
             <h3 className="text-xl font-semibold mb-4" style={{ color: COLORS.dark }}>
-              No inventariables
+              No inventariables ({nonInventariableItems.length})
             </h3>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {nonInventariableItems.map(renderItemCard)}
+            
+            {/* Agrupar por categoría */}
+            {Array.from(new Set(nonInventariableItems.map(item => item.categoria))).map(categoria => {
+              const itemsInCategory = nonInventariableItems.filter(item => item.categoria === categoria);
+              return (
+                <div key={categoria} className="mb-8">
+                  <h4 className="text-lg font-medium mb-3 text-gray-700 border-b border-gray-200 pb-2">
+                    {categoria} ({itemsInCategory.length})
+                  </h4>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {itemsInCategory.map(renderItemCard)}
+                  </div>
+                </div>
+              );
+            })}
             </div>
+          </div>
+        )}
+        
+        {filteredItems.length === 0 && (
+          <div className="text-center py-12">
+            <Package size={48} className="mx-auto text-gray-400 mb-4" />
+            <h3 className="text-lg font-semibold text-gray-600 mb-2">
+              No se encontraron productos
+            </h3>
+            <p className="text-gray-500">
+              Intenta ajustar los filtros de búsqueda
+            </p>
           </div>
         )}
       </div>

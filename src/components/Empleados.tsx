@@ -3,7 +3,7 @@ import { Empleado } from '../types';
 import { Users, Edit3, Trash2, Plus, Clock, DollarSign } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
-import { supabase } from '../lib/supabaseClient';
+import * as dataService from '../lib/dataService';
 
 export function Empleados() {
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
@@ -24,44 +24,22 @@ export function Empleados() {
   }, []);
 
   const fetchEmpleados = async () => {
-    const { data, error } = await supabase
-      .from('empleados')
-      .select('*')
-      .order('nombre');
-
-    if (error) {
-      console.error('Error fetching empleados:', error);
-    } else {
-      setEmpleados(data || []);
-    }
+    const data = await dataService.fetchEmpleados();
+    setEmpleados(data);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (editingId) {
-      const { error } = await supabase
-        .from('empleados')
-        .update(formData)
-        .eq('id', editingId);
-
-      if (error) {
-        console.error('Error updating empleado:', error);
-      } else {
-        fetchEmpleados();
-        resetForm();
-      }
+      await dataService.updateEmpleado({ ...formData, id: editingId });
+      fetchEmpleados();
+      resetForm();
     } else {
-      const { error } = await supabase
-        .from('empleados')
-        .insert([formData]);
-
-      if (error) {
-        console.error('Error creating empleado:', error);
-      } else {
-        fetchEmpleados();
-        resetForm();
-      }
+      const newEmpleado = { ...formData, id: crypto.randomUUID() };
+      await dataService.createEmpleado(newEmpleado);
+      fetchEmpleados();
+      resetForm();
     }
   };
 
@@ -81,16 +59,8 @@ export function Empleados() {
 
   const handleDelete = async (id: string) => {
     if (confirm('¿Estás seguro de eliminar este empleado?')) {
-      const { error } = await supabase
-        .from('empleados')
-        .delete()
-        .eq('id', id);
-
-      if (error) {
-        console.error('Error deleting empleado:', error);
-      } else {
-        fetchEmpleados();
-      }
+      await dataService.deleteEmpleado(id);
+      fetchEmpleados();
     }
   };
 

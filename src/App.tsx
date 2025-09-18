@@ -10,7 +10,8 @@ import { Gastos } from './components/Gastos';
 import { Login } from './components/Login';
 import { Navigation } from './components/Navigation';
 import { ModuleType, User, MenuItem, Order, Customer } from './types';
-import { supabase } from './lib/supabaseClient';
+import { initializeLocalData } from './data/localData';
+import * as dataService from './lib/dataService';
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -20,13 +21,14 @@ function App() {
   const [customers, setCustomers] = useState<Customer[]>([]);
 
   useEffect(() => {
+    // Inicializar datos locales
+    initializeLocalData();
+  }, []);
+
+  useEffect(() => {
     const fetchMenuItems = async () => {
-      const { data, error } = await supabase.from('menu_items').select('*');
-      if (error) {
-        console.error('Error fetching menu items:', error);
-      } else {
-        setMenuItems(data || []);
-      }
+      const data = await dataService.fetchMenuItems();
+      setMenuItems(data);
     };
 
     fetchMenuItems();
@@ -34,12 +36,8 @@ function App() {
 
   useEffect(() => {
     const fetchOrders = async () => {
-      const { data, error } = await supabase.from('orders').select('*');
-      if (error) {
-        console.error('Error fetching orders:', error);
-      } else {
-        setOrders(data || []);
-      }
+      const data = await dataService.fetchOrders();
+      setOrders(data);
     };
 
     fetchOrders();
@@ -47,12 +45,8 @@ function App() {
 
   useEffect(() => {
     const fetchCustomers = async () => {
-      const { data, error } = await supabase.from('customers').select('*');
-      if (error) {
-        console.error('Error fetching customers:', error);
-      } else {
-        setCustomers(data || []);
-      }
+      const data = await dataService.fetchCustomers();
+      setCustomers(data);
     };
 
     fetchCustomers();
@@ -72,102 +66,51 @@ function App() {
   };
 
   const handleCreateMenuItem = async (newItem: MenuItem) => {
-    const { data, error } = await supabase
-      .from('menu_items')
-      .insert([newItem])
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error creating menu item:', error);
-    } else {
-      setMenuItems([...menuItems, data]);
-    }
+    const data = await dataService.createMenuItem(newItem);
+    setMenuItems([...menuItems, data]);
   };
 
   const handleUpdateMenuItem = async (updatedItem: MenuItem) => {
-    const { data, error } = await supabase
-      .from('menu_items')
-      .update(updatedItem)
-      .eq('id', updatedItem.id);
-
-    if (error) {
-      console.error('Error updating menu item:', error);
-    } else {
-      setMenuItems(
-        menuItems.map(item => (item.id === updatedItem.id ? updatedItem : item))
-      );
-    }
+    await dataService.updateMenuItem(updatedItem);
+    setMenuItems(
+      menuItems.map(item => (item.id === updatedItem.id ? updatedItem : item))
+    );
   };
 
   const handleDeleteMenuItem = async (id: string) => {
-    const { error } = await supabase
-      .from('menu_items')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('Error deleting menu item:', error);
-    } else {
-      setMenuItems(menuItems.filter(item => item.id !== id));
-    }
+    await dataService.deleteMenuItem(id);
+    setMenuItems(menuItems.filter(item => item.id !== id));
   };
 
   const handleCreateOrder = async (newOrder: Order) => {
-    const { data, error } = await supabase.from('orders').insert([newOrder]);
-    if (error) {
-      console.error('Error creating order:', error);
-    } else {
-      setOrders([...orders, newOrder]);
-    }
+    const data = await dataService.createOrder(newOrder);
+    setOrders([...orders, data]);
   };
 
   const handleUpdateOrderStatus = async (orderId: string, status: Order['estado']) => {
-    const { data, error } = await supabase
-      .from('orders')
-      .update({ estado: status })
-      .eq('id', orderId);
-    if (error) {
-      console.error('Error updating order status:', error);
-    } else {
-      setOrders(
-        orders.map(order => (order.id === orderId ? { ...order, estado: status } : order))
-      );
-    }
+    await dataService.updateOrderStatus(orderId, status);
+    setOrders(
+      orders.map(order => (order.id === orderId ? { ...order, estado: status } : order))
+    );
   };
 
   const handleAddCustomer = async (newCustomer: Customer) => {
-    const { data, error } = await supabase.from('customers').insert([newCustomer]);
-    if (error) {
-      console.error('Error adding customer:', error);
-    } else {
-      setCustomers([...customers, newCustomer]);
-    }
+    const data = await dataService.createCustomer(newCustomer);
+    setCustomers([...customers, data]);
   };
 
   const handleUpdateCustomer = async (updatedCustomer: Customer) => {
-    const { data, error } = await supabase
-      .from('customers')
-      .update(updatedCustomer)
-      .eq('id', updatedCustomer.id);
-    if (error) {
-      console.error('Error updating customer:', error);
-    } else {
-      setCustomers(
-        customers.map(customer =>
-          customer.id === updatedCustomer.id ? updatedCustomer : customer
-        )
-      );
-    }
+    await dataService.updateCustomer(updatedCustomer);
+    setCustomers(
+      customers.map(customer =>
+        customer.id === updatedCustomer.id ? updatedCustomer : customer
+      )
+    );
   };
 
   const handleDeleteCustomer = async (id: string) => {
-    const { data, error } = await supabase.from('customers').delete().eq('id', id);
-    if (error) {
-      console.error('Error deleting customer:', error);
-    } else {
-      setCustomers(customers.filter(customer => customer.id !== id));
-    }
+    await dataService.deleteCustomer(id);
+    setCustomers(customers.filter(customer => customer.id !== id));
   };
 
   if (!user) {

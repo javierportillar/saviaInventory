@@ -3,7 +3,7 @@ import { Gasto } from '../types';
 import { Receipt, Plus, Edit3, Trash2, Calendar, TrendingDown, Filter } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
-import { supabase } from '../lib/supabaseClient';
+import * as dataService from '../lib/dataService';
 
 export function Gastos() {
   const [gastos, setGastos] = useState<Gasto[]>([]);
@@ -35,20 +35,8 @@ export function Gastos() {
   }, []);
 
   const fetchGastos = async () => {
-    const { data, error } = await supabase
-      .from('gastos')
-      .select('*')
-      .order('fecha', { ascending: false });
-
-    if (error) {
-      console.error('Error fetching gastos:', error);
-    } else {
-      setGastos(data?.map(gasto => ({
-        ...gasto,
-        fecha: new Date(gasto.fecha),
-        created_at: gasto.created_at ? new Date(gasto.created_at) : undefined
-      })) || []);
-    }
+    const data = await dataService.fetchGastos();
+    setGastos(data);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -60,28 +48,19 @@ export function Gastos() {
     };
 
     if (editingId) {
-      const { error } = await supabase
-        .from('gastos')
-        .update(gastoData)
-        .eq('id', editingId);
-
-      if (error) {
-        console.error('Error updating gasto:', error);
-      } else {
-        fetchGastos();
-        resetForm();
-      }
+      await dataService.updateGasto({ ...gastoData, id: editingId });
+      fetchGastos();
+      resetForm();
     } else {
-      const { error } = await supabase
-        .from('gastos')
-        .insert([gastoData]);
-
-      if (error) {
-        console.error('Error creating gasto:', error);
-      } else {
-        fetchGastos();
-        resetForm();
-      }
+      const newGasto = { 
+        ...gastoData, 
+        id: crypto.randomUUID(),
+        fecha: new Date(gastoData.fecha),
+        created_at: new Date()
+      };
+      await dataService.createGasto(newGasto);
+      fetchGastos();
+      resetForm();
     }
   };
 
@@ -98,16 +77,8 @@ export function Gastos() {
 
   const handleDelete = async (id: string) => {
     if (confirm('¿Estás seguro de eliminar este gasto?')) {
-      const { error } = await supabase
-        .from('gastos')
-        .delete()
-        .eq('id', id);
-
-      if (error) {
-        console.error('Error deleting gasto:', error);
-      } else {
-        fetchGastos();
-      }
+      await dataService.deleteGasto(id);
+      fetchGastos();
     }
   };
 

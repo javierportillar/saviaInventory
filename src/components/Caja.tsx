@@ -3,7 +3,7 @@ import { MenuItem, CartItem, Order, ModuleType, Customer } from '../types';
 import { Plus, Minus, Trash2, Search, ShoppingCart, Edit2 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, generateOrderNumber } from '../utils/format';
-import { supabase } from '../lib/supabaseClient';
+import * as dataService from '../lib/dataService';
 
 interface CajaProps {
   onModuleChange: (module: ModuleType) => void;
@@ -26,27 +26,13 @@ export function Caja({ onModuleChange }: CajaProps) {
   }, []);
 
   const fetchMenuItems = async () => {
-    const { data, error } = await supabase
-      .from('menu_items')
-      .select('*');
-
-    if (error) {
-      console.error('Error fetching menu items:', error);
-    } else {
-      setMenuItems(data || []);
-    }
+    const data = await dataService.fetchMenuItems();
+    setMenuItems(data);
   };
 
   const fetchCustomers = async () => {
-    const { data, error } = await supabase
-      .from('customers')
-      .select('*');
-
-    if (error) {
-      console.error('Error fetching customers:', error);
-    } else {
-      setCustomers(data || []);
-    }
+    const data = await dataService.fetchCustomers();
+    setCustomers(data);
   };
 
   const categories = Array.from(new Set(menuItems.map(item => item.categoria)));
@@ -120,17 +106,7 @@ export function Caja({ onModuleChange }: CajaProps) {
           telefono: telefono.trim(),
         };
 
-        const { data: newCustomerData, error: newCustomerError } = await supabase
-          .from('customers')
-          .insert([newCustomer])
-          .select()
-          .single();
-
-        if (newCustomerError) {
-          console.error('Error adding customer:', newCustomerError);
-          return;
-        }
-
+        const newCustomerData = await dataService.createCustomer(newCustomer);
         customer = newCustomerData;
         customerId = newCustomerData.id;
         setCustomers(prevCustomers => [...prevCustomers, newCustomerData]);
@@ -150,44 +126,7 @@ export function Caja({ onModuleChange }: CajaProps) {
       metodoPago: paymentMethod,
     };
 
-    const { data: orderData, error: orderError } = await supabase
-      .from('orders')
-      .insert([
-        {
-          id: order.id,
-          numero: order.numero,
-          total: order.total,
-          estado: order.estado,
-          timestamp: order.timestamp.toISOString(),
-          cliente_id: order.cliente_id,
-          metodoPago: order.metodoPago,
-        },
-      ])
-      .select()
-      .single();
-
-    if (orderError) {
-      console.error('Error creating order:', orderError);
-      return;
-    }
-
-    for (const cartItem of cart) {
-      const { error: orderItemError } = await supabase
-        .from('order_items')
-        .insert([
-          {
-            order_id: orderData.id,
-            menu_item_id: cartItem.item.id,
-            cantidad: cartItem.cantidad,
-            notas: cartItem.notas,
-          },
-        ]);
-
-      if (orderItemError) {
-        console.error('Error creating order item:', orderItemError);
-        return;
-      }
-    }
+    await dataService.createOrder(order);
 
     setCart([]);
     setShowPayment(false);
