@@ -7,6 +7,8 @@ import {
   Package,
   ChefHat,
   Users,
+  UserCheck,
+  Receipt,
   LogOut
 } from 'lucide-react';
 import { COLORS } from '../data/menu';
@@ -25,13 +27,15 @@ const modules = [
   { id: 'inventario' as ModuleType, label: 'Inventario', icon: Package },
   { id: 'cocina' as ModuleType, label: 'Cocina', icon: ChefHat },
   { id: 'clientes' as ModuleType, label: 'Clientes', icon: Users },
+  { id: 'empleados' as ModuleType, label: 'Empleados', icon: UserCheck },
+  { id: 'gastos' as ModuleType, label: 'Gastos', icon: Receipt },
 ];
 
 export function Navigation({ activeModule, onModuleChange, user, onLogout }: NavigationProps) {
   const allowedModules =
     user.role === 'admin'
       ? modules
-      : modules.filter(m => ['caja', 'comandas', 'cocina', 'clientes'].includes(m.id));
+      : modules.filter(m => ['caja', 'comandas', 'cocina', 'clientes', 'empleados'].includes(m.id));
 
   return (
     <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">

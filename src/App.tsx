@@ -5,10 +5,12 @@ import { Comandas } from './components/Comandas';
 import { Inventario } from './components/Inventario';
 import { Cocina } from './components/Cocina';
 import { Clientes } from './components/Clientes';
+import { Empleados } from './components/Empleados';
+import { Gastos } from './components/Gastos';
 import { Login } from './components/Login';
+import { Navigation } from './components/Navigation';
 import { ModuleType, User, MenuItem, Order, Customer } from './types';
-import { menuItems as initialMenuItems } from './data/menu';
-import { supabase } from './supabase';
+import { supabase } from './lib/supabaseClient';
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -70,11 +72,16 @@ function App() {
   };
 
   const handleCreateMenuItem = async (newItem: MenuItem) => {
-    const { data, error } = await supabase.from('menu_items').insert([newItem]);
+    const { data, error } = await supabase
+      .from('menu_items')
+      .insert([newItem])
+      .select()
+      .single();
+
     if (error) {
       console.error('Error creating menu item:', error);
     } else {
-      setMenuItems([...menuItems, newItem]);
+      setMenuItems([...menuItems, data]);
     }
   };
 
@@ -83,6 +90,7 @@ function App() {
       .from('menu_items')
       .update(updatedItem)
       .eq('id', updatedItem.id);
+
     if (error) {
       console.error('Error updating menu item:', error);
     } else {
@@ -93,7 +101,11 @@ function App() {
   };
 
   const handleDeleteMenuItem = async (id: string) => {
-    const { data, error } = await supabase.from('menu_items').delete().eq('id', id);
+    const { error } = await supabase
+      .from('menu_items')
+      .delete()
+      .eq('id', id);
+
     if (error) {
       console.error('Error deleting menu item:', error);
     } else {
@@ -163,72 +175,15 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-100">
-      {/* Sidebar */}
-      <div className="w-64 bg-gray-200 p-4">
-        <h1 className="text-2xl font-bold mb-4">Controlador Roskuki</h1>
-        <nav>
-          <ul className="space-y-2">
-            <li>
-              <button
-                onClick={() => handleModuleChange('dashboard')}
-                className={`block w-full text-left py-2 px-4 rounded hover:bg-gray-300 ${module === 'dashboard' ? 'bg-gray-300' : ''}`}
-              >
-                Dashboard
-              </button>
-            </li>
-            <li>
-              <button
-                onClick={() => handleModuleChange('caja')}
-                className={`block w-full text-left py-2 px-4 rounded hover:bg-gray-300 ${module === 'caja' ? 'bg-gray-300' : ''}`}
-              >
-                Caja
-              </button>
-            </li>
-            <li>
-              <button
-                onClick={() => handleModuleChange('comandas')}
-                className={`block w-full text-left py-2 px-4 rounded hover:bg-gray-300 ${module === 'comandas' ? 'bg-gray-300' : ''}`}
-              >
-                Comandas
-              </button>
-            </li>
-            <li>
-              <button
-                onClick={() => handleModuleChange('inventario')}
-                className={`block w-full text-left py-2 px-4 rounded hover:bg-gray-300 ${module === 'inventario' ? 'bg-gray-300' : ''}`}
-              >
-                Inventario
-              </button>
-            </li>
-            <li>
-              <button
-                onClick={() => handleModuleChange('cocina')}
-                className={`block w-full text-left py-2 px-4 rounded hover:bg-gray-300 ${module === 'cocina' ? 'bg-gray-300' : ''}`}
-              >
-                Cocina
-              </button>
-            </li>
-            <li>
-              <button
-                onClick={() => handleModuleChange('clientes')}
-                className={`block w-full text-left py-2 px-4 rounded hover:bg-gray-300 ${module === 'clientes' ? 'bg-gray-300' : ''}`}
-              >
-                Clientes
-              </button>
-            </li>
-          </ul>
-        </nav>
-        <button
-          onClick={handleLogout}
-          className="block w-full text-left py-2 px-4 rounded hover:bg-gray-300 mt-4"
-        >
-          Cerrar Sesión
-        </button>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 p-4">
+    <div className="min-h-screen bg-gray-50">
+      <Navigation
+        activeModule={module}
+        onModuleChange={handleModuleChange}
+        user={user}
+        onLogout={handleLogout}
+      />
+      
+      <main>
         {module === 'dashboard' && (
           <Dashboard
             orders={orders}
@@ -238,11 +193,7 @@ function App() {
         )}
         {module === 'caja' && (
           <Caja
-            menuItems={menuItems}
-            onCreateOrder={handleCreateOrder}
             onModuleChange={handleModuleChange}
-            customers={customers}
-            onAddCustomer={handleAddCustomer}
           />
         )}
         {module === 'comandas' && (
@@ -254,12 +205,17 @@ function App() {
         {module === 'inventario' && (
           <Inventario
             menuItems={menuItems}
-            onCreateMenuItem={handleCreateMenuItem}
             onUpdateMenuItem={handleUpdateMenuItem}
+            onCreateMenuItem={handleCreateMenuItem}
             onDeleteMenuItem={handleDeleteMenuItem}
           />
         )}
-        {module === 'cocina' && <Cocina orders={orders} />}
+        {module === 'cocina' && (
+          <Cocina 
+            orders={orders} 
+            onUpdateOrderStatus={handleUpdateOrderStatus}
+          />
+        )}
         {module === 'clientes' && (
           <Clientes
             customers={customers}
@@ -268,7 +224,9 @@ function App() {
             onDeleteCustomer={handleDeleteCustomer}
           />
         )}
-      </div>
+        {module === 'empleados' && <Empleados />}
+        {module === 'gastos' && <Gastos />}
+      </main>
     </div>
   );
 }

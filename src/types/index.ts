@@ -40,7 +40,29 @@ export interface Customer {
   telefono: string;
 }
 
-export type ModuleType = 'dashboard' | 'caja' | 'comandas' | 'inventario' | 'cocina' | 'clientes';
+export interface Empleado {
+  id: string;
+  nombre: string;
+  telefono?: string;
+  email?: string;
+  horas_dia: number;
+  dias_semana: number;
+  salario_hora: number;
+  activo: boolean;
+  created_at?: Date;
+  updated_at?: Date;
+}
+
+export interface Gasto {
+  id: string;
+  descripcion: string;
+  monto: number;
+  categoria: string;
+  fecha: Date;
+  created_at?: Date;
+}
+
+export type ModuleType = 'dashboard' | 'caja' | 'comandas' | 'inventario' | 'cocina' | 'clientes' | 'empleados' | 'gastos';
 
 export type UserRole = 'admin' | 'employee';
 

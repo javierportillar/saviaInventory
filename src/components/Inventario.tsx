@@ -6,13 +6,12 @@ import { formatCOP } from '../utils/format';
 
 interface InventarioProps {
   menuItems: MenuItem[];
-  onUpdateStock: (itemId: string, newStock: number) => void;
-  onAddItem: (item: MenuItem) => void;
-  onUpdateItem: (item: MenuItem) => void;
-  onDeleteItem: (id: string) => void;
+  onUpdateMenuItem: (item: MenuItem) => void;
+  onCreateMenuItem: (item: MenuItem) => void;
+  onDeleteMenuItem: (id: string) => void;
 }
 
-export function Inventario({ menuItems, onUpdateStock, onAddItem, onUpdateItem, onDeleteItem }: InventarioProps) {
+export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDeleteMenuItem }: InventarioProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
@@ -49,20 +48,20 @@ export function Inventario({ menuItems, onUpdateStock, onAddItem, onUpdateItem, 
     const item = menuItems.find((i) => i.id === itemId);
     if (item) {
       const newStock = Math.max(0, (item.stock ?? 0) + adjustment);
-      onUpdateStock(itemId, newStock);
+      onUpdateMenuItem({ ...item, stock: newStock });
     }
   };
 
   const handleSaveEdit = () => {
     if (editingItem) {
-      onUpdateItem(editingItem);
+      onUpdateMenuItem(editingItem);
       setEditingItem(null);
     }
   };
 
   const handleSaveNew = () => {
     if (newItem) {
-      onAddItem({
+      onCreateMenuItem({
         id: crypto.randomUUID(),
         nombre: newItem.nombre,
         precio: newItem.precio ?? 0,
@@ -241,7 +240,7 @@ export function Inventario({ menuItems, onUpdateStock, onAddItem, onUpdateItem, 
                 <Edit3 size={14} /> Editar
               </button>
               <button
-                onClick={() => onDeleteItem(item.id)}
+                onClick={() => onDeleteMenuItem(item.id)}
                 className="flex items-center gap-1 px-3 py-1 text-sm text-red-600 hover:text-red-800"
               >
                 <Trash size={14} /> Eliminar
