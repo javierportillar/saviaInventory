@@ -14,6 +14,14 @@ import { ModuleType, User, MenuItem, Order, Customer } from './types';
 import { initializeLocalData } from './data/localData';
 import * as dataService from './lib/dataService';
 
+const SESSION_STORAGE_KEY = 'savia-user-session';
+const SESSION_DURATION_MS = 4 * 60 * 60 * 1000; // 4 horas
+
+interface StoredSession {
+  user: User;
+  timestamp: number;
+}
+
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [module, setModule] = useState<ModuleType>('dashboard');
@@ -22,44 +30,120 @@ function App() {
   const [customers, setCustomers] = useState<Customer[]>([]);
 
   useEffect(() => {
-    // Inicializar datos locales
     initializeLocalData();
+
+    try {
+      const stored = localStorage.getItem(SESSION_STORAGE_KEY);
+      if (!stored) {
+        return;
+      }
+
+      const parsed: StoredSession = JSON.parse(stored);
+      const isValidUser = parsed && parsed.user && typeof parsed.timestamp === 'number';
+      if (!isValidUser) {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        return;
+      }
+
+      const isExpired = Date.now() - parsed.timestamp > SESSION_DURATION_MS;
+      if (isExpired) {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        return;
+      }
+
+      setUser(parsed.user);
+    } catch (error) {
+      console.error('[App] No se pudo restaurar la sesión guardada.', error);
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
   }, []);
 
   useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    let isActive = true;
+
     const fetchMenuItems = async () => {
       const data = await dataService.fetchMenuItems();
-      setMenuItems(data);
+      if (isActive) {
+        setMenuItems(data);
+      }
     };
 
     fetchMenuItems();
-  }, []);
+
+    return () => {
+      isActive = false;
+    };
+  }, [user]);
 
   useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    let isActive = true;
+
     const fetchOrders = async () => {
       const data = await dataService.fetchOrders();
-      setOrders(data);
+      if (isActive) {
+        setOrders(data);
+      }
     };
 
     fetchOrders();
-  }, []);
+
+    return () => {
+      isActive = false;
+    };
+  }, [user]);
 
   useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    let isActive = true;
+
     const fetchCustomers = async () => {
       const data = await dataService.fetchCustomers();
-      setCustomers(data);
+      if (isActive) {
+        setCustomers(data);
+      }
     };
 
     fetchCustomers();
-  }, []);
+
+    return () => {
+      isActive = false;
+    };
+  }, [user]);
 
   const handleLogin = (user: User) => {
     setUser(user);
+
+    try {
+      const payload: StoredSession = { user, timestamp: Date.now() };
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      console.error('[App] No se pudo guardar la sesión del usuario.', error);
+    }
   };
 
   const handleLogout = () => {
     setUser(null);
     setModule('dashboard');
+    setMenuItems([]);
+    setOrders([]);
+    setCustomers([]);
+
+    try {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch (error) {
+      console.error('[App] No se pudo limpiar la sesión guardada.', error);
+    }
   };
 
   const handleModuleChange = (module: ModuleType) => {

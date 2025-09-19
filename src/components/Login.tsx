@@ -77,7 +77,7 @@ export function Login({ onLogin }: LoginProps) {
           </button>
         </form>
         <p className="text-center text-xs text-gray-500 mt-6">
-          La sesión se mantendrá activa por 30 minutos
+          La sesión se mantendrá activa por 4 horas
         </p>
         <p className="text-center text-xs text-gray-400 mt-2">
           © 2025 Controlador Roskuki - Sistema Seguro

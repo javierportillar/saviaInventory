@@ -124,7 +124,7 @@ const mapMenuItemRecord = (record: any): MenuItem => {
 const mapCartItemsFromRecord = (record: any): CartItem[] => {
   if (Array.isArray(record?.order_items)) {
     return record.order_items
-      .map((item: any) => {
+      .map((item: any): CartItem | null => {
         const menuRecord = item?.menu_item ?? item?.menu_items ?? item?.item;
         if (!menuRecord) {
           return null;
@@ -136,13 +136,16 @@ const mapCartItemsFromRecord = (record: any): CartItem[] => {
           notas: item?.notas ?? undefined,
         };
       })
-      .filter((entry): entry is CartItem => !!entry);
+      .filter((entry): entry is CartItem => entry !== null);
   }
 
   if (Array.isArray(record?.items)) {
     return record.items
-      .map((item: any) => {
+      .map((item: any): CartItem | null => {
         const menuRecord = item?.item ?? item?.menu_item ?? item?.menuItem ?? item;
+        if (!menuRecord) {
+          return null;
+        }
         const menuItem = mapMenuItemRecord(menuRecord);
         return {
           item: menuItem,
@@ -150,7 +153,7 @@ const mapCartItemsFromRecord = (record: any): CartItem[] => {
           notas: item?.notas ?? undefined,
         };
       })
-      .filter((entry): entry is CartItem => !!entry);
+      .filter((entry): entry is CartItem => entry !== null);
   }
 
   return [];
@@ -306,23 +309,9 @@ const mapBalanceRow = (row: any): BalanceResumen => ({
   saldoTarjetaAcumulado: Number(row.saldo_tarjeta_acumulado ?? 0)
 });
 
-// MENU ITEMS
-export const fetchMenuItems = async (): Promise<MenuItem[]> => {
-  console.info('[dataService] Fetching menu items…');
-
-  if (isSupabaseAvailable()) {
-    try {
-      const { data, error } = await supabase.from('menu_items').select('*').order('nombre');
-      if (error) throw error;
-
-      const mapped = (data || []).map(mapMenuItemRecord);
-      console.info(`[dataService] Supabase returned ${mapped.length} menu items.`);
-      return mapped;
-    } catch (error) {
-      console.error('[dataService] Supabase menu fetch failed. Falling back to local cache.', error);
-    }
-  } else {
-    console.warn('[dataService] Supabase credentials are not configured. Using local cache.');
+const loadMenuItemsFromLocalCache = (reason?: string): MenuItem[] => {
+  if (reason) {
+    console.warn(`[dataService] Usando datos locales porque: ${reason}.`);
   }
 
   const localItems = getLocalData('savia-menuItems', []);
@@ -334,6 +323,36 @@ export const fetchMenuItems = async (): Promise<MenuItem[]> => {
   }
 
   return mappedLocal;
+};
+
+// MENU ITEMS
+export const fetchMenuItems = async (): Promise<MenuItem[]> => {
+  console.info('[dataService] Fetching menu items…');
+
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase.from('menu_items').select('*').order('nombre');
+      if (error) throw error;
+
+      const mapped = (data || []).map(mapMenuItemRecord);
+      if (mapped.length > 0) {
+        console.info(`[dataService] Supabase returned ${mapped.length} menu items.`);
+        setLocalData('savia-menuItems', mapped);
+        return mapped;
+      }
+
+      console.warn('[dataService] Supabase returned 0 menu items. Falling back to local cache.');
+      return loadMenuItemsFromLocalCache('Supabase devolvió una lista vacía');
+    } catch (error) {
+      console.error('[dataService] Supabase menu fetch failed. Falling back to local cache.', error);
+      return loadMenuItemsFromLocalCache('hubo un error consultando Supabase');
+    }
+  } else {
+    console.warn('[dataService] Supabase credentials are not configured. Using local cache.');
+  }
+
+  console.warn('[dataService] Supabase credentials are not configured. Using local cache.');
+  return loadMenuItemsFromLocalCache();
 };
 
 export const createMenuItem = async (item: MenuItem): Promise<MenuItem> => {
@@ -353,7 +372,9 @@ export const createMenuItem = async (item: MenuItem): Promise<MenuItem> => {
   }
 
   // Local storage fallback
-  const items = getLocalData('savia-menuItems', []).map(mapMenuItemRecord);
+  // const items = getLocalData('savia-menuItems', []).map(mapMenuItemRecord);
+  const items = getLocalData<MenuItem[]>('savia-menuItems', []).map(mapMenuItemRecord);
+
   const newItems = [...items, sanitized];
   setLocalData('savia-menuItems', newItems);
   return sanitized;
@@ -377,7 +398,8 @@ export const updateMenuItem = async (item: MenuItem): Promise<MenuItem> => {
   }
 
   // Local storage fallback
-  const items = getLocalData('savia-menuItems', []).map(mapMenuItemRecord);
+  // const items = getLocalData('savia-menuItems', []).map(mapMenuItemRecord);
+  const items = getLocalData<MenuItem[]>('savia-menuItems', []).map(mapMenuItemRecord);
   const updatedItems = items.map(i => i.id === sanitized.id ? sanitized : i);
   setLocalData('savia-menuItems', updatedItems);
   return sanitized;
@@ -444,7 +466,7 @@ export const fetchOrders = async (): Promise<Order[]> => {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  const localOrders = getLocalData('savia-orders', []);
+  const localOrders = getLocalData<Order[]>('savia-orders', []);
   return localOrders.map(mapOrderRecord);
 };
 
@@ -544,7 +566,7 @@ export const fetchCustomers = async (): Promise<Customer[]> => {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  return getLocalData('savia-customers', []);
+  return getLocalData<Customer[]>('savia-customers', []);
 };
 
 export const createCustomer = async (customer: Customer): Promise<Customer> => {
@@ -557,9 +579,9 @@ export const createCustomer = async (customer: Customer): Promise<Customer> => {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  
+
   // Local storage fallback
-  const customers = getLocalData('savia-customers', []);
+  const customers = getLocalData<Customer[]>('savia-customers', []);
   const newCustomers = [...customers, customer];
   setLocalData('savia-customers', newCustomers);
   return customer;
@@ -578,9 +600,9 @@ export const updateCustomer = async (customer: Customer): Promise<Customer> => {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  
+
   // Local storage fallback
-  const customers = getLocalData('savia-customers', []);
+  const customers = getLocalData<Customer[]>('savia-customers', []);
   const updatedCustomers = customers.map(c => c.id === customer.id ? customer : c);
   setLocalData('savia-customers', updatedCustomers);
   return customer;
@@ -596,9 +618,9 @@ export const deleteCustomer = async (id: string): Promise<void> => {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  
+
   // Local storage fallback
-  const customers = getLocalData('savia-customers', []);
+  const customers = getLocalData<Customer[]>('savia-customers', []);
   const filteredCustomers = customers.filter(customer => customer.id !== id);
   setLocalData('savia-customers', filteredCustomers);
 };
@@ -614,7 +636,7 @@ export const fetchEmpleados = async (): Promise<Empleado[]> => {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  return getLocalData('savia-empleados', []);
+  return getLocalData<Empleado[]>('savia-empleados', []);
 };
 
 export const createEmpleado = async (empleado: Empleado): Promise<Empleado> => {
@@ -627,7 +649,7 @@ export const createEmpleado = async (empleado: Empleado): Promise<Empleado> => {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  
+
   // Local storage fallback
   const empleados = getLocalData('savia-empleados', []);
   const newEmpleados = [...empleados, empleado];
@@ -648,9 +670,9 @@ export const updateEmpleado = async (empleado: Empleado): Promise<Empleado> => {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  
+
   // Local storage fallback
-  const empleados = getLocalData('savia-empleados', []);
+  const empleados = getLocalData<Empleado[]>('savia-empleados', []);
   const updatedEmpleados = empleados.map(e => e.id === empleado.id ? empleado : e);
   setLocalData('savia-empleados', updatedEmpleados);
   return empleado;
@@ -666,9 +688,9 @@ export const deleteEmpleado = async (id: string): Promise<void> => {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  
+
   // Local storage fallback
-  const empleados = getLocalData('savia-empleados', []);
+  const empleados = getLocalData<Empleado[]>('savia-empleados', []);
   const filteredEmpleados = empleados.filter(empleado => empleado.id !== id);
   setLocalData('savia-empleados', filteredEmpleados);
 };
