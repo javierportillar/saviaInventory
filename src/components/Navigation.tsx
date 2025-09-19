@@ -2,6 +2,7 @@ import React from 'react';
 import { ModuleType, User } from '../types';
 import {
   Home,
+  PiggyBank,
   ShoppingCart,
   ClipboardList,
   Package,
@@ -22,6 +23,7 @@ interface NavigationProps {
 
 const modules = [
   { id: 'dashboard' as ModuleType, label: 'Dashboard', icon: Home },
+  { id: 'balance' as ModuleType, label: 'Balance', icon: PiggyBank },
   { id: 'caja' as ModuleType, label: 'Caja', icon: ShoppingCart },
   { id: 'comandas' as ModuleType, label: 'Comandas', icon: ClipboardList },
   { id: 'inventario' as ModuleType, label: 'Inventario', icon: Package },

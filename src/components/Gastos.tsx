@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Gasto } from '../types';
+import { Gasto, PaymentMethod } from '../types';
 import { Receipt, Plus, Edit3, Trash2, Calendar, TrendingDown, Filter } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
@@ -11,12 +11,26 @@ export function Gastos() {
   const [showForm, setShowForm] = useState(false);
   const [viewMode, setViewMode] = useState<'diario' | 'semanal' | 'mensual'>('diario');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    descripcion: string;
+    monto: number;
+    categoria: string;
+    fecha: string;
+    metodoPago: PaymentMethod;
+  }>({
     descripcion: '',
     monto: 0,
     categoria: '',
-    fecha: new Date().toISOString().split('T')[0]
+    fecha: new Date().toISOString().split('T')[0],
+    metodoPago: 'efectivo'
   });
+
+  const paymentMethods: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi'];
+  const paymentLabels: Record<PaymentMethod, string> = {
+    efectivo: 'Efectivo',
+    tarjeta: 'Tarjeta',
+    nequi: 'Nequi'
+  };
 
   const categorias = [
     'Ingredientes',
@@ -36,26 +50,38 @@ export function Gastos() {
 
   const fetchGastos = async () => {
     const data = await dataService.fetchGastos();
-    setGastos(data);
+    const normalized = data.map((gasto) => ({
+      ...gasto,
+      fecha: gasto.fecha instanceof Date ? gasto.fecha : new Date(gasto.fecha),
+      created_at: gasto.created_at
+        ? gasto.created_at instanceof Date
+          ? gasto.created_at
+          : new Date(gasto.created_at)
+        : undefined,
+      metodoPago: gasto.metodoPago ?? 'efectivo'
+    }));
+    setGastos(normalized);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const gastoData = {
       ...formData,
       monto: parseFloat(formData.monto.toString())
     };
 
+    const fecha = new Date(gastoData.fecha);
+
     if (editingId) {
-      await dataService.updateGasto({ ...gastoData, id: editingId });
+      await dataService.updateGasto({ ...gastoData, id: editingId, fecha });
       fetchGastos();
       resetForm();
     } else {
-      const newGasto = { 
-        ...gastoData, 
+      const newGasto = {
+        ...gastoData,
         id: crypto.randomUUID(),
-        fecha: new Date(gastoData.fecha),
+        fecha,
         created_at: new Date()
       };
       await dataService.createGasto(newGasto);
@@ -69,7 +95,8 @@ export function Gastos() {
       descripcion: gasto.descripcion,
       monto: gasto.monto,
       categoria: gasto.categoria,
-      fecha: gasto.fecha.toISOString().split('T')[0]
+      fecha: gasto.fecha instanceof Date ? gasto.fecha.toISOString().split('T')[0] : new Date(gasto.fecha).toISOString().split('T')[0],
+      metodoPago: gasto.metodoPago ?? 'efectivo'
     });
     setEditingId(gasto.id);
     setShowForm(true);
@@ -87,7 +114,8 @@ export function Gastos() {
       descripcion: '',
       monto: 0,
       categoria: '',
-      fecha: new Date().toISOString().split('T')[0]
+      fecha: new Date().toISOString().split('T')[0],
+      metodoPago: 'efectivo'
     });
     setEditingId(null);
     setShowForm(false);
@@ -259,6 +287,29 @@ export function Gastos() {
                 </select>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium mb-1">Método de pago *</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {paymentMethods.map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, metodoPago: method })}
+                      className={`py-2 px-3 rounded-lg border text-sm font-medium transition-colors ${
+                        formData.metodoPago === method
+                          ? 'border-transparent text-white'
+                          : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                      }`}
+                      style={{
+                        backgroundColor: formData.metodoPago === method ? COLORS.dark : 'transparent'
+                      }}
+                    >
+                      {paymentLabels[method]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
@@ -315,6 +366,9 @@ export function Gastos() {
                   Categoría
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Método
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Monto
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -334,6 +388,11 @@ export function Gastos() {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-full">
                       {gasto.categoria}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-full">
+                      {paymentLabels[(gasto.metodoPago ?? 'efectivo') as PaymentMethod]}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" style={{ color: COLORS.accent }}>

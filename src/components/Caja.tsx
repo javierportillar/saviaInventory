@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MenuItem, CartItem, Order, ModuleType, Customer } from '../types';
+import { MenuItem, CartItem, Order, ModuleType, Customer, PaymentMethod } from '../types';
 import { Plus, Minus, Trash2, Search, ShoppingCart, Edit2 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, generateOrderNumber } from '../utils/format';
@@ -16,7 +16,7 @@ export function Caja({ onModuleChange }: CajaProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [showPayment, setShowPayment] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('efectivo');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
   const [customerName, setCustomerName] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
 
@@ -85,10 +85,11 @@ export function Caja({ onModuleChange }: CajaProps) {
 
     let customer = selectedCustomer;
     let customerId: string | undefined;
+    const trimmedCustomerName = customerName.trim();
 
-    if (!customer && customerName.trim()) {
+    if (!customer && trimmedCustomerName) {
       const existing = customers.find(
-        c => c.nombre.toLowerCase() === customerName.trim().toLowerCase()
+        c => c.nombre.toLowerCase() === trimmedCustomerName.toLowerCase()
       );
       if (existing) {
         customer = existing;
@@ -101,8 +102,8 @@ export function Caja({ onModuleChange }: CajaProps) {
         }
 
         const newCustomer: Customer = {
-          id: `cust-${Date.now()}`,
-          nombre: customerName.trim(),
+          id: crypto.randomUUID(),
+          nombre: trimmedCustomerName,
           telefono: telefono.trim(),
         };
 
@@ -115,14 +116,17 @@ export function Caja({ onModuleChange }: CajaProps) {
       customerId = customer.id;
     }
 
+    const orderCustomerName = customer?.nombre ?? (trimmedCustomerName || undefined);
+
     const order: Order = {
-      id: `order-${Date.now()}`,
+      id: crypto.randomUUID(),
       numero: generateOrderNumber(),
       items: cart,
       total,
       estado: 'pendiente',
       timestamp: new Date(),
       cliente_id: customerId,
+      cliente: orderCustomerName,
       metodoPago: paymentMethod,
     };
 
@@ -334,7 +338,7 @@ export function Caja({ onModuleChange }: CajaProps) {
               <div>
                 <label className="block text-sm font-medium mb-2">Método de pago</label>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['efectivo', 'tarjeta', 'transferencia'] as const).map((method) => (
+                  {(['efectivo', 'tarjeta', 'nequi'] as PaymentMethod[]).map((method) => (
                     <button
                       key={method}
                       onClick={() => setPaymentMethod(method)}

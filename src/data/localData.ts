@@ -1,4 +1,25 @@
 import { MenuItem, Order, Customer, Empleado, Gasto } from '../types';
+import { slugify } from '../utils/strings';
+
+type MenuItemSeed = Omit<MenuItem, 'codigo'> & { codigo?: string };
+
+const ensureMenuItemCodigo = (seed: MenuItemSeed, prefix?: string): string => {
+  if (seed.codigo && seed.codigo.trim()) {
+    return seed.codigo.trim();
+  }
+
+  const prefixPart = prefix ? slugify(prefix) : '';
+  const namePart = slugify(seed.nombre);
+  const idPart = slugify(seed.id);
+
+  const combined = [prefixPart, namePart].filter(Boolean).join('-');
+  return combined || idPart || 'item';
+};
+
+const buildMenuItem = (seed: MenuItemSeed, prefix?: string): MenuItem => ({
+  ...seed,
+  codigo: ensureMenuItemCodigo(seed, prefix),
+});
 
 // Datos del menú organizados por secciones
 const LEFT_SECTIONS = [
@@ -204,18 +225,23 @@ const RIGHT_SECTIONS = [
 ];
 
 // Convertir datos del menú a productos (NO INVENTARIABLES)
-const MENU_ITEMS: MenuItem[] = [...LEFT_SECTIONS, ...RIGHT_SECTIONS].flatMap(section =>
-  section.items.map((item, index) => ({
-    id: `${section.id}-${index}`,
-    ...item,
-    categoria: section.titulo,
-    stock: Math.floor(Math.random() * 50) + 10, // Stock inicial aleatorio
-    inventarioCategoria: 'No inventariables' as const,
-  }))
+const MENU_ITEMS: MenuItem[] = [...LEFT_SECTIONS, ...RIGHT_SECTIONS].flatMap((section) =>
+  section.items.map((item, index) =>
+    buildMenuItem(
+      {
+        id: `${section.id}-${index}`,
+        ...item,
+        categoria: section.titulo,
+        stock: Math.floor(Math.random() * 50) + 10,
+        inventarioCategoria: 'No inventariables',
+      },
+      section.id
+    )
+  )
 );
 
 // Ingredientes inventariables
-const INVENTARIABLE_ITEMS: MenuItem[] = [
+const INVENTARIABLE_SEED: MenuItemSeed[] = [
   // Frutas
   { id: 'inv-mango', nombre: 'Mango', precio: 0, categoria: 'Frutas', stock: 5000, inventarioCategoria: 'Inventariables', inventarioTipo: 'gramos', unidadMedida: 'g' },
   { id: 'inv-pina', nombre: 'Piña', precio: 0, categoria: 'Frutas', stock: 3000, inventarioCategoria: 'Inventariables', inventarioTipo: 'gramos', unidadMedida: 'g' },
@@ -226,13 +252,13 @@ const INVENTARIABLE_ITEMS: MenuItem[] = [
   { id: 'inv-arandanos', nombre: 'Arándanos', precio: 0, categoria: 'Frutas', stock: 500, inventarioCategoria: 'Inventariables', inventarioTipo: 'gramos', unidadMedida: 'g' },
   { id: 'inv-acai', nombre: 'Açaí', precio: 0, categoria: 'Frutas', stock: 300, inventarioCategoria: 'Inventariables', inventarioTipo: 'gramos', unidadMedida: 'g' },
   { id: 'inv-pitaya', nombre: 'Pitaya', precio: 0, categoria: 'Frutas', stock: 400, inventarioCategoria: 'Inventariables', inventarioTipo: 'gramos', unidadMedida: 'g' },
-  
+
   // Lácteos
   { id: 'inv-yogurt', nombre: 'Yogurt natural', precio: 0, categoria: 'Lácteos', stock: 2000, inventarioCategoria: 'Inventariables', inventarioTipo: 'gramos', unidadMedida: 'g' },
   { id: 'inv-leche', nombre: 'Leche', precio: 0, categoria: 'Lácteos', stock: 3000, inventarioCategoria: 'Inventariables', inventarioTipo: 'gramos', unidadMedida: 'ml' },
   { id: 'inv-queso-feta', nombre: 'Queso feta', precio: 0, categoria: 'Lácteos', stock: 500, inventarioCategoria: 'Inventariables', inventarioTipo: 'gramos', unidadMedida: 'g' },
   { id: 'inv-queso-crema', nombre: 'Queso doble crema', precio: 0, categoria: 'Lácteos', stock: 800, inventarioCategoria: 'Inventariables', inventarioTipo: 'gramos', unidadMedida: 'g' },
-  
+
   // Proteínas
   { id: 'inv-jamon-cerdo', nombre: 'Jamón de cerdo', precio: 0, categoria: 'Proteínas', stock: 1000, inventarioCategoria: 'Inventariables', inventarioTipo: 'gramos', unidadMedida: 'g' },
   { id: 'inv-jamon-pollo', nombre: 'Jamón de pollo', precio: 0, categoria: 'Proteínas', stock: 1200, inventarioCategoria: 'Inventariables', inventarioTipo: 'gramos', unidadMedida: 'g' },
@@ -268,6 +294,10 @@ const INVENTARIABLE_ITEMS: MenuItem[] = [
   { id: 'inv-proteina', nombre: 'Proteína whey', precio: 0, categoria: 'Bebidas', stock: 500, inventarioCategoria: 'Inventariables', inventarioTipo: 'gramos', unidadMedida: 'g' },
 ];
 
+const INVENTARIABLE_ITEMS: MenuItem[] = INVENTARIABLE_SEED.map((seed) =>
+  buildMenuItem(seed, 'inv')
+);
+
 // Combinar todos los items
 export const ALL_MENU_ITEMS: MenuItem[] = [...MENU_ITEMS, ...INVENTARIABLE_ITEMS];
 
@@ -299,21 +329,60 @@ export const setLocalData = <T>(key: string, value: T): void => {
   }
 };
 
-// Inicializar datos si no existen
+type SeedStatus = 'missing' | 'invalid' | 'ok';
+
+const readLocalEntry = (key: string): { status: SeedStatus; value: unknown } => {
+  try {
+    const item = localStorage.getItem(key);
+    if (item === null) {
+      return { status: 'missing', value: undefined };
+    }
+    return { status: 'ok', value: JSON.parse(item) };
+  } catch (error) {
+    console.warn(`[localData] Error parsing localStorage key "${key}".`, error);
+    return { status: 'invalid', value: undefined };
+  }
+};
+
+const isArray = (value: unknown): value is unknown[] => Array.isArray(value);
+const isNonEmptyArray = (value: unknown): value is unknown[] => Array.isArray(value) && value.length > 0;
+
+const ensureSeeded = <T>(
+  key: string,
+  fallback: T,
+  validator: (value: unknown) => boolean,
+  description: string
+): void => {
+  const { status, value } = readLocalEntry(key);
+
+  if (status !== 'ok') {
+    const reason =
+      status === 'missing'
+        ? 'no se encontraron datos previos.'
+        : 'los datos existentes están corruptos.';
+    console.info(`[localData] ${description}: ${reason} Se inicializan los valores predeterminados.`);
+    setLocalData(key, fallback);
+    return;
+  }
+
+  if (!validator(value)) {
+    console.info(`[localData] ${description}: la estructura encontrada es inválida. Se restauran los valores iniciales.`);
+    setLocalData(key, fallback);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    console.info(`[localData] ${description}: se encontraron ${value.length} registros en localStorage.`);
+  } else {
+    console.info(`[localData] ${description}: datos válidos detectados en localStorage.`);
+  }
+};
+
+// Inicializar datos garantizando datos base consistentes
 export const initializeLocalData = (): void => {
-  if (!localStorage.getItem('savia-menuItems')) {
-    setLocalData('savia-menuItems', INITIAL_DATA.menuItems);
-  }
-  if (!localStorage.getItem('savia-orders')) {
-    setLocalData('savia-orders', INITIAL_DATA.orders);
-  }
-  if (!localStorage.getItem('savia-customers')) {
-    setLocalData('savia-customers', INITIAL_DATA.customers);
-  }
-  if (!localStorage.getItem('savia-empleados')) {
-    setLocalData('savia-empleados', INITIAL_DATA.empleados);
-  }
-  if (!localStorage.getItem('savia-gastos')) {
-    setLocalData('savia-gastos', INITIAL_DATA.gastos);
-  }
+  ensureSeeded('savia-menuItems', INITIAL_DATA.menuItems, isNonEmptyArray, 'Productos del menú');
+  ensureSeeded('savia-orders', INITIAL_DATA.orders, isArray, 'Órdenes');
+  ensureSeeded('savia-customers', INITIAL_DATA.customers, isArray, 'Clientes');
+  ensureSeeded('savia-empleados', INITIAL_DATA.empleados, isArray, 'Empleados');
+  ensureSeeded('savia-gastos', INITIAL_DATA.gastos, isArray, 'Gastos');
 };

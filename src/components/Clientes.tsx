@@ -22,7 +22,7 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
     if (editingId) {
       onUpdateCustomer({ id: editingId, nombre: trimmedName, telefono: trimmedPhone });
     } else {
-      onAddCustomer({ id: `cust-${Date.now()}`, nombre: trimmedName, telefono: trimmedPhone });
+      onAddCustomer({ id: crypto.randomUUID(), nombre: trimmedName, telefono: trimmedPhone });
     }
     setName('');
     setPhone('');

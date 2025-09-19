@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Dashboard } from './components/Dashboard';
+import { Balance } from './components/Balance';
 import { Caja } from './components/Caja';
 import { Comandas } from './components/Comandas';
 import { Inventario } from './components/Inventario';
@@ -71,9 +72,9 @@ function App() {
   };
 
   const handleUpdateMenuItem = async (updatedItem: MenuItem) => {
-    await dataService.updateMenuItem(updatedItem);
+    const savedItem = await dataService.updateMenuItem(updatedItem);
     setMenuItems(
-      menuItems.map(item => (item.id === updatedItem.id ? updatedItem : item))
+      menuItems.map(item => (item.id === savedItem.id ? savedItem : item))
     );
   };
 
@@ -134,6 +135,7 @@ function App() {
             onModuleChange={handleModuleChange}
           />
         )}
+        {module === 'balance' && <Balance />}
         {module === 'caja' && (
           <Caja
             onModuleChange={handleModuleChange}

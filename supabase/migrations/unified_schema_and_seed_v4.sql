@@ -250,3 +250,113 @@ INSERT INTO menu_items (codigo, nombre, precio, descripcion, keywords, categoria
 ('sand-jamon-artesano', 'Jamón artesano', 18500, 'Salsa verde, queso doble crema...', 'jamón artesano...', 'Sandwiches', 50, 'No inventariables', 'cantidad', 'kg');
 
 COMMIT;
+
+-- unified_schema_and_seed.sql (v5)
+-- Basado en v4, se agregan relaciones explícitas en caja_movimientos hacia orders y gastos
+
+BEGIN;
+
+-- =============
+-- Caja Movimientos (ajustada con relaciones)
+-- =============
+DROP TABLE IF EXISTS caja_movimientos CASCADE;
+CREATE TABLE caja_movimientos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  fecha date DEFAULT CURRENT_DATE,
+  tipo text CHECK (tipo IN ('INGRESO','EGRESO')) NOT NULL,
+  concepto text NOT NULL,
+  monto numeric NOT NULL,
+  metodoPago text NOT NULL DEFAULT 'efectivo' CHECK (metodoPago IN ('efectivo','tarjeta','nequi')),
+  order_id uuid REFERENCES orders(id) ON DELETE SET NULL,
+  gasto_id uuid REFERENCES gastos(id) ON DELETE SET NULL
+);
+
+ALTER TABLE caja_movimientos ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'caja_movimientos' AND policyname = 'Usuarios autenticados pueden gestionar caja'
+  ) THEN
+    CREATE POLICY "Usuarios autenticados pueden gestionar caja"
+      ON caja_movimientos FOR ALL TO authenticated
+      USING (true) WITH CHECK (true);
+  END IF;
+END $$;
+
+-- =============
+-- Trigger para ingresos (orders → caja_movimientos)
+-- =============
+CREATE OR REPLACE FUNCTION insertar_ingreso_desde_order()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO caja_movimientos (tipo, concepto, monto, fecha, metodoPago, order_id)
+  VALUES ('INGRESO', 'Venta #' || NEW.numero, NEW.total, NEW.timestamp::date, NEW.metodoPago, NEW.id);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_order_to_caja ON orders;
+CREATE TRIGGER trg_order_to_caja
+AFTER INSERT ON orders
+FOR EACH ROW
+EXECUTE FUNCTION insertar_ingreso_desde_order();
+
+-- =============
+-- Trigger para egresos (gastos → caja_movimientos)
+-- =============
+CREATE OR REPLACE FUNCTION insertar_egreso_desde_gasto()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO caja_movimientos (tipo, concepto, monto, fecha, metodoPago, gasto_id)
+  VALUES ('EGRESO', NEW.categoria || ': ' || NEW.descripcion, NEW.monto, NEW.fecha, NEW.metodoPago, NEW.id);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_gasto_to_caja ON gastos;
+CREATE TRIGGER trg_gasto_to_caja
+AFTER INSERT ON gastos
+FOR EACH ROW
+EXECUTE FUNCTION insertar_egreso_desde_gasto();
+
+-- =============
+-- Vista balance_caja (igual a v4, pero ahora datos vienen enlazados)
+-- =============
+CREATE OR REPLACE VIEW balance_caja AS
+WITH resumen AS (
+  SELECT
+    fecha,
+    SUM(CASE WHEN tipo = 'INGRESO' THEN monto ELSE 0 END) AS ingresos_totales,
+    SUM(CASE WHEN tipo = 'EGRESO' THEN monto ELSE 0 END) AS egresos_totales,
+    SUM(CASE WHEN tipo = 'INGRESO' AND metodoPago = 'efectivo' THEN monto ELSE 0 END) AS ingresos_efectivo,
+    SUM(CASE WHEN tipo = 'EGRESO' AND metodoPago = 'efectivo' THEN monto ELSE 0 END) AS egresos_efectivo,
+    SUM(CASE WHEN tipo = 'INGRESO' AND metodoPago = 'nequi' THEN monto ELSE 0 END) AS ingresos_nequi,
+    SUM(CASE WHEN tipo = 'EGRESO' AND metodoPago = 'nequi' THEN monto ELSE 0 END) AS egresos_nequi,
+    SUM(CASE WHEN tipo = 'INGRESO' AND metodoPago = 'tarjeta' THEN monto ELSE 0 END) AS ingresos_tarjeta,
+    SUM(CASE WHEN tipo = 'EGRESO' AND metodoPago = 'tarjeta' THEN monto ELSE 0 END) AS egresos_tarjeta
+  FROM caja_movimientos
+  GROUP BY fecha
+)
+SELECT
+  fecha,
+  ingresos_totales,
+  egresos_totales,
+  ingresos_totales - egresos_totales AS balance_diario,
+  ingresos_efectivo,
+  egresos_efectivo,
+  ingresos_nequi,
+  egresos_nequi,
+  ingresos_tarjeta,
+  egresos_tarjeta,
+  ingresos_efectivo - egresos_efectivo AS saldo_efectivo_dia,
+  ingresos_nequi - egresos_nequi AS saldo_nequi_dia,
+  ingresos_tarjeta - egresos_tarjeta AS saldo_tarjeta_dia,
+  SUM(ingresos_totales - egresos_totales) OVER (ORDER BY fecha) AS saldo_total_acumulado,
+  SUM(ingresos_efectivo - egresos_efectivo) OVER (ORDER BY fecha) AS saldo_efectivo_acumulado,
+  SUM(ingresos_nequi - egresos_nequi) OVER (ORDER BY fecha) AS saldo_nequi_acumulado,
+  SUM(ingresos_tarjeta - egresos_tarjeta) OVER (ORDER BY fecha) AS saldo_tarjeta_acumulado
+FROM resumen
+ORDER BY fecha DESC;
+
+COMMIT;
+

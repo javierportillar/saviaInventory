@@ -1,5 +1,6 @@
 export interface MenuItem {
   id: string;
+  codigo: string;
   nombre: string;
   precio: number;
   descripcion?: string;
@@ -8,8 +9,10 @@ export interface MenuItem {
   stock: number;
   inventarioCategoria: 'Inventariables' | 'No inventariables';
   inventarioTipo?: 'cantidad' | 'gramos';
-  unidadMedida?: 'kg' | 'g' | 'mg';
+  unidadMedida?: 'kg' | 'g' | 'mg' | 'ml';
 }
+
+export type PaymentMethod = 'efectivo' | 'tarjeta' | 'nequi';
 
 export interface CartItem {
   item: MenuItem;
@@ -25,7 +28,8 @@ export interface Order {
   estado: 'pendiente' | 'preparando' | 'listo' | 'entregado';
   timestamp: Date;
   cliente_id?: string;
-  metodoPago?: 'efectivo' | 'tarjeta' | 'transferencia';
+  cliente?: string;
+  metodoPago?: PaymentMethod;
 }
 
 export interface InventoryAlert {
@@ -60,9 +64,39 @@ export interface Gasto {
   categoria: string;
   fecha: Date;
   created_at?: Date;
+  metodoPago?: PaymentMethod;
 }
 
-export type ModuleType = 'dashboard' | 'caja' | 'comandas' | 'inventario' | 'cocina' | 'clientes' | 'empleados' | 'gastos';
+export interface BalanceResumen {
+  fecha: string;
+  ingresosTotales: number;
+  egresosTotales: number;
+  balanceDiario: number;
+  ingresosEfectivo: number;
+  egresosEfectivo: number;
+  ingresosNequi: number;
+  egresosNequi: number;
+  ingresosTarjeta: number;
+  egresosTarjeta: number;
+  saldoEfectivoDia: number;
+  saldoNequiDia: number;
+  saldoTarjetaDia: number;
+  saldoTotalAcumulado: number;
+  saldoEfectivoAcumulado: number;
+  saldoNequiAcumulado: number;
+  saldoTarjetaAcumulado: number;
+}
+
+export type ModuleType =
+  | 'dashboard'
+  | 'balance'
+  | 'caja'
+  | 'comandas'
+  | 'inventario'
+  | 'cocina'
+  | 'clientes'
+  | 'empleados'
+  | 'gastos';
 
 export type UserRole = 'admin' | 'employee';
 

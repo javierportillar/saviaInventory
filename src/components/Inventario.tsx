@@ -3,6 +3,7 @@ import { MenuItem } from '../types';
 import { Package, AlertTriangle, Plus, Minus, Search, Edit3, Trash, Filter } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
+import { generateMenuItemCode } from '../utils/strings';
 
 interface InventarioProps {
   menuItems: MenuItem[];
@@ -22,7 +23,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
     categoria: string;
     inventarioCategoria: 'Inventariables' | 'No inventariables';
     inventarioTipo: 'cantidad' | 'gramos';
-    unidadMedida: 'kg' | 'g' | 'mg';
+    unidadMedida: 'kg' | 'g' | 'mg' | 'ml';
     stock: number | null;
     descripcion?: string;
   } | null>(null);
@@ -65,16 +66,21 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
 
   const handleSaveNew = () => {
     if (newItem) {
+      const codigo = generateMenuItemCode(newItem.nombre, newItem.categoria);
       onCreateMenuItem({
         id: crypto.randomUUID(),
+        codigo,
         nombre: newItem.nombre,
         precio: newItem.precio ?? 0,
         categoria: newItem.categoria,
         stock: newItem.stock ?? 0,
         descripcion: newItem.descripcion,
         inventarioCategoria: newItem.inventarioCategoria,
-        inventarioTipo: newItem.inventarioTipo,
-        unidadMedida: newItem.unidadMedida,
+        inventarioTipo: newItem.inventarioCategoria === 'Inventariables' ? newItem.inventarioTipo : undefined,
+        unidadMedida:
+          newItem.inventarioCategoria === 'Inventariables' && newItem.inventarioTipo === 'gramos'
+            ? newItem.unidadMedida
+            : undefined,
       });
       setNewItem(null);
     }
@@ -150,13 +156,14 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
                     onChange={e =>
                       setEditingItem({
                         ...editingItem,
-                        unidadMedida: e.target.value as 'kg' | 'g' | 'mg',
+                        unidadMedida: e.target.value as 'kg' | 'g' | 'mg' | 'ml',
                       })
                     }
                   >
                     <option value="kg">kg</option>
                     <option value="g">g</option>
                     <option value="mg">mg</option>
+                    <option value="ml">ml</option>
                   </select>
                 )}
                 <input
@@ -450,13 +457,14 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
                     onChange={e =>
                       setNewItem({
                         ...newItem,
-                        unidadMedida: e.target.value as 'kg' | 'g' | 'mg',
+                        unidadMedida: e.target.value as 'kg' | 'g' | 'mg' | 'ml',
                       })
                     }
                   >
                     <option value="kg">kg</option>
                     <option value="g">g</option>
                     <option value="mg">mg</option>
+                    <option value="ml">ml</option>
                   </select>
                 )}
                 <input
@@ -517,7 +525,6 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
                 </div>
               );
             })}
-            </div>
           </div>
         )}
         
