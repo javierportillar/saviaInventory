@@ -91,21 +91,22 @@ export function Empleados() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-6 space-y-6">
+    <div className="max-w-7xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Users size={24} style={{ color: COLORS.dark }} />
-          <h2 className="text-2xl font-bold" style={{ color: COLORS.dark }}>
+          <h2 className="text-xl sm:text-2xl font-bold" style={{ color: COLORS.dark }}>
             Gestión de Empleados
           </h2>
         </div>
         <button
           onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105"
+          className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
           style={{ backgroundColor: COLORS.dark }}
         >
           <Plus size={16} />
-          Agregar Empleado
+          <span className="hidden sm:inline">Agregar Empleado</span>
+          <span className="sm:hidden">Agregar</span>
         </button>
       </div>
 

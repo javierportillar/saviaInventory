@@ -60,12 +60,12 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
   ];
 
   return (
-    <div className="max-w-7xl mx-auto p-6 space-y-8">
+    <div className="max-w-7xl mx-auto p-3 sm:p-6 space-y-6 sm:space-y-8">
       <div className="text-center">
-        <h2 className="text-3xl font-bold mb-2" style={{ color: COLORS.dark }}>
+        <h2 className="text-2xl sm:text-3xl font-bold mb-2" style={{ color: COLORS.dark }}>
           Dashboard SAVIA
         </h2>
-        <p className="text-gray-600">
+        <p className="text-sm sm:text-base text-gray-600">
           Resumen de operaciones del {today.toLocaleDateString('es-CO')}
         </p>
       </div>
@@ -77,20 +77,20 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
             <button
               key={stat.label}
               onClick={stat.onClick}
-              className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200 hover:scale-105 text-left"
+              className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200 hover:scale-105 text-left"
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">{stat.label}</p>
-                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.dark }}>
+                  <p className="text-xs sm:text-sm font-medium text-gray-600">{stat.label}</p>
+                  <p className="text-lg sm:text-2xl font-bold mt-1" style={{ color: COLORS.dark }}>
                     {stat.value}
                   </p>
                 </div>
                 <div 
-                  className="w-12 h-12 rounded-lg flex items-center justify-center"
+                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg flex items-center justify-center"
                   style={{ backgroundColor: `${COLORS.accent}20` }}
                 >
-                  <Icon size={24} style={{ color: COLORS.dark }} />
+                  <Icon size={20} className="sm:w-6 sm:h-6" style={{ color: COLORS.dark }} />
                 </div>
               </div>
             </button>
@@ -100,16 +100,16 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Últimos pedidos */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold mb-4" style={{ color: COLORS.dark }}>
+        <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100">
+          <h3 className="text-base sm:text-lg font-semibold mb-4" style={{ color: COLORS.dark }}>
             Últimos pedidos
           </h3>
           <div className="space-y-3">
             {orders.slice(-5).reverse().map((order) => (
-              <div key={order.id} className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
+              <div key={order.id} className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-2 border-b border-gray-50 last:border-0 space-y-1 sm:space-y-0">
                 <div>
-                  <span className="font-medium">#{order.numero}</span>
-                  <span className={`ml-2 px-2 py-1 rounded-full text-xs ${
+                  <span className="font-medium text-sm">#{order.numero}</span>
+                  <span className={`ml-0 sm:ml-2 px-2 py-1 rounded-full text-xs ${
                     order.estado === 'entregado' ? 'bg-green-100 text-green-800' :
                     order.estado === 'listo' ? 'bg-blue-100 text-blue-800' :
                     order.estado === 'preparando' ? 'bg-yellow-100 text-yellow-800' :
@@ -118,25 +118,25 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
                     {order.estado}
                   </span>
                 </div>
-                <span className="font-semibold">{formatCOP(order.total)}</span>
+                <span className="font-semibold text-sm">{formatCOP(order.total)}</span>
               </div>
             ))}
             {orders.length === 0 && (
-              <p className="text-gray-500 text-center py-4">No hay pedidos registrados</p>
+              <p className="text-gray-500 text-center py-4 text-sm">No hay pedidos registrados</p>
             )}
           </div>
         </div>
 
         {/* Productos con stock bajo */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold mb-4" style={{ color: COLORS.dark }}>
+        <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100">
+          <h3 className="text-base sm:text-lg font-semibold mb-4" style={{ color: COLORS.dark }}>
             Alertas de inventario
           </h3>
           <div className="space-y-3">
             {lowStockItems.slice(0, 5).map((item) => (
-              <div key={item.id} className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
+              <div key={item.id} className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-2 border-b border-gray-50 last:border-0 space-y-1 sm:space-y-0">
                 <div>
-                  <span className="font-medium">{item.nombre}</span>
+                  <span className="font-medium text-sm">{item.nombre}</span>
                   <span className="text-sm text-gray-500 block">{item.categoria}</span>
                 </div>
                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -147,7 +147,7 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
               </div>
             ))}
             {lowStockItems.length === 0 && (
-              <p className="text-gray-500 text-center py-4">Stock en niveles normales</p>
+              <p className="text-gray-500 text-center py-4 text-sm">Stock en niveles normales</p>
             )}
           </div>
         </div>

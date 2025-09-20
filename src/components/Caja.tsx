@@ -141,12 +141,12 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
+    <div className="max-w-7xl mx-auto p-3 sm:p-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Panel de productos */}
         <div className="lg:col-span-2 space-y-6">
           <div>
-            <h2 className="text-2xl font-bold mb-4" style={{ color: COLORS.dark }}>
+            <h2 className="text-xl sm:text-2xl font-bold mb-4" style={{ color: COLORS.dark }}>
               Punto de Venta
             </h2>
             
@@ -159,14 +159,14 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
                   placeholder="Buscar productos..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
                   style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
                 />
               </div>
               <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+                className="px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
                 style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
               >
                 <option value="">Todas las categorías</option>
@@ -182,13 +182,13 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
             {filteredItems.map((item) => (
               <div
                 key={item.id}
-                className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200"
+                className="bg-white rounded-xl p-3 sm:p-4 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200"
               >
                 <div className="flex justify-between items-start mb-2">
-                  <h3 className="font-semibold text-lg" style={{ color: COLORS.dark }}>
+                  <h3 className="font-semibold text-sm sm:text-lg" style={{ color: COLORS.dark }}>
                     {item.nombre}
                   </h3>
-                  <span className="font-bold" style={{ color: COLORS.accent }}>
+                  <span className="font-bold text-sm sm:text-base" style={{ color: COLORS.accent }}>
                     {formatCOP(item.precio)}
                   </span>
                 </div>
@@ -201,7 +201,7 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
                   <button
                     onClick={() => addToCart(item)}
                     disabled={item.stock === 0}
-                    className="px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-3 sm:px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                     style={{ backgroundColor: COLORS.dark }}
                   >
                     <Plus size={16} />
@@ -214,19 +214,19 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
 
         {/* Panel del carrito */}
         <div className="space-y-6">
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 sticky top-24">
+          <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100 sticky top-20 sm:top-24">
             <div className="flex items-center gap-2 mb-4">
               <ShoppingCart size={24} style={{ color: COLORS.dark }} />
-              <h3 className="text-xl font-bold" style={{ color: COLORS.dark }}>
+              <h3 className="text-lg sm:text-xl font-bold" style={{ color: COLORS.dark }}>
                 Carrito
               </h3>
             </div>
 
             {cart.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">Carrito vacío</p>
+              <p className="text-gray-500 text-center py-6 sm:py-8 text-sm">Carrito vacío</p>
             ) : (
               <>
-                <div className="space-y-3 mb-6 max-h-96 overflow-y-auto">
+                <div className="space-y-3 mb-4 sm:mb-6 max-h-80 sm:max-h-96 overflow-y-auto">
                   {cart.map((cartItem) => (
                     <div key={cartItem.item.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
                       <div className="flex-1">
@@ -261,15 +261,15 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
 
                 <div className="border-t pt-4">
                   <div className="flex justify-between items-center mb-4">
-                    <span className="text-lg font-bold">Total:</span>
-                    <span className="text-2xl font-bold" style={{ color: COLORS.accent }}>
+                    <span className="text-base sm:text-lg font-bold">Total:</span>
+                    <span className="text-lg sm:text-2xl font-bold" style={{ color: COLORS.accent }}>
                       {formatCOP(total)}
                     </span>
                   </div>
                   
                   <button
                     onClick={() => setShowPayment(true)}
-                    className="w-full py-3 rounded-lg text-white font-semibold transition-all duration-200 hover:scale-105"
+                    className="w-full py-2 sm:py-3 rounded-lg text-white font-semibold transition-all duration-200 hover:scale-105 text-sm sm:text-base"
                     style={{ backgroundColor: COLORS.dark }}
                   >
                     Procesar Pago
@@ -284,14 +284,14 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
       {/* Modal de pago */}
       {showPayment && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md">
-            <h3 className="text-xl font-bold mb-4" style={{ color: COLORS.dark }}>
+          <div className="bg-white rounded-xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg sm:text-xl font-bold mb-4" style={{ color: COLORS.dark }}>
               Procesar Pago
             </h3>
             
               <div className="space-y-4">
                 <div className="relative">
-                  <label className="block text-sm font-medium mb-2">Cliente (opcional)</label>
+                  <label className="block text-xs sm:text-sm font-medium mb-2">Cliente (opcional)</label>
                   <input
                     type="text"
                     value={customerName}
@@ -300,7 +300,7 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
                       setSelectedCustomer(null);
                     }}
                     placeholder="Nombre del cliente"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent pr-10"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent pr-10 text-sm"
                     readOnly={!!selectedCustomer}
                   />
                   {selectedCustomer && (
@@ -314,7 +314,7 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
                   )}
                   {customerName && !selectedCustomer && (
                     <div
-                      className="absolute z-10 bg-white border border-gray-200 rounded-lg mt-1 w-full max-h-40 overflow-y-auto"
+                      className="absolute z-10 bg-white border border-gray-200 rounded-lg mt-1 w-full max-h-32 sm:max-h-40 overflow-y-auto"
                     >
                       {customers
                         .filter(c =>
@@ -327,7 +327,7 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
                               setCustomerName(c.nombre);
                               setSelectedCustomer(c);
                             }}
-                            className="w-full text-left px-3 py-2 hover:bg-gray-100"
+                            className="w-full text-left px-3 py-2 hover:bg-gray-100 text-sm"
                           >
                             {c.nombre}
                           </button>
@@ -337,13 +337,13 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
                 </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Método de pago</label>
+                <label className="block text-xs sm:text-sm font-medium mb-2">Método de pago</label>
                 <div className="grid grid-cols-3 gap-2">
                   {(['efectivo', 'tarjeta', 'nequi'] as PaymentMethod[]).map((method) => (
                     <button
                       key={method}
                       onClick={() => setPaymentMethod(method)}
-                      className={`py-2 px-3 rounded-lg border text-sm font-medium transition-colors ${
+                      className={`py-2 px-2 sm:px-3 rounded-lg border text-xs sm:text-sm font-medium transition-colors ${
                         paymentMethod === method
                           ? 'border-transparent text-white'
                           : 'border-gray-300 text-gray-700 hover:bg-gray-50'
@@ -360,8 +360,8 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
 
               <div className="pt-4 border-t">
                 <div className="flex justify-between items-center mb-4">
-                  <span className="text-lg font-bold">Total a pagar:</span>
-                  <span className="text-2xl font-bold" style={{ color: COLORS.accent }}>
+                  <span className="text-base sm:text-lg font-bold">Total a pagar:</span>
+                  <span className="text-lg sm:text-2xl font-bold" style={{ color: COLORS.accent }}>
                     {formatCOP(total)}
                   </span>
                 </div>
@@ -369,13 +369,13 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
                 <div className="flex gap-3">
                   <button
                     onClick={() => setShowPayment(false)}
-                    className="flex-1 py-3 border border-gray-300 rounded-lg font-medium hover:bg-gray-50"
+                    className="flex-1 py-2 sm:py-3 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm"
                   >
                     Cancelar
                   </button>
                   <button
                     onClick={processPayment}
-                    className="flex-1 py-3 rounded-lg text-white font-semibold transition-all duration-200 hover:scale-105"
+                    className="flex-1 py-2 sm:py-3 rounded-lg text-white font-semibold transition-all duration-200 hover:scale-105 text-sm"
                     style={{ backgroundColor: COLORS.dark }}
                   >
                     Confirmar

@@ -42,10 +42,10 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-6">
+    <div className="max-w-4xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
       <div className="flex items-center gap-2">
         <Users size={24} style={{ color: COLORS.dark }} />
-        <h2 className="text-2xl font-bold" style={{ color: COLORS.dark }}>
+        <h2 className="text-xl sm:text-2xl font-bold" style={{ color: COLORS.dark }}>
           Clientes
         </h2>
       </div>
@@ -57,7 +57,7 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
             placeholder="Nombre"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+            className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
             style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
           />
         </div>
@@ -67,13 +67,13 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
             placeholder="Teléfono"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+            className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
             style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
           />
         </div>
         <button
           onClick={handleSubmit}
-          className="px-4 py-2 rounded-lg text-white font-medium"
+          className="px-3 sm:px-4 py-2 rounded-lg text-white font-medium text-sm"
           style={{ backgroundColor: COLORS.dark }}
         >
           {editingId ? 'Actualizar' : 'Agregar'}
@@ -81,7 +81,7 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
         {editingId && (
           <button
             onClick={cancelEdit}
-            className="px-4 py-2 rounded-lg border border-gray-300"
+            className="px-3 sm:px-4 py-2 rounded-lg border border-gray-300 text-sm"
           >
             Cancelar
           </button>
@@ -92,17 +92,17 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
         <table className="min-w-full bg-white border border-gray-200 rounded-lg">
           <thead>
             <tr className="bg-gray-50">
-              <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Nombre</th>
-              <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Teléfono</th>
-              <th className="px-4 py-2"></th>
+              <th className="px-3 sm:px-4 py-2 text-left text-xs sm:text-sm font-semibold text-gray-700">Nombre</th>
+              <th className="px-3 sm:px-4 py-2 text-left text-xs sm:text-sm font-semibold text-gray-700">Teléfono</th>
+              <th className="px-3 sm:px-4 py-2"></th>
             </tr>
           </thead>
           <tbody>
             {customers.map((c) => (
               <tr key={c.id} className="border-t">
-                <td className="px-4 py-2 text-sm">{c.nombre}</td>
-                <td className="px-4 py-2 text-sm">{c.telefono}</td>
-                <td className="px-4 py-2 flex gap-2">
+                <td className="px-3 sm:px-4 py-2 text-xs sm:text-sm">{c.nombre}</td>
+                <td className="px-3 sm:px-4 py-2 text-xs sm:text-sm">{c.telefono}</td>
+                <td className="px-3 sm:px-4 py-2 flex gap-2">
                   <button
                     onClick={() => startEdit(c)}
                     className="p-1 rounded hover:bg-gray-100"
@@ -120,7 +120,7 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
             ))}
             {customers.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-4 py-4 text-center text-gray-500 text-sm">
+                <td colSpan={3} className="px-3 sm:px-4 py-4 text-center text-gray-500 text-xs sm:text-sm">
                   No hay clientes registrados
                 </td>
               </tr>

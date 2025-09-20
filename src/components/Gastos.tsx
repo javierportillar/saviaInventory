@@ -154,38 +154,39 @@ export function Gastos() {
   }, {} as Record<string, number>);
 
   return (
-    <div className="max-w-7xl mx-auto p-6 space-y-6">
+    <div className="max-w-7xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Receipt size={24} style={{ color: COLORS.dark }} />
-          <h2 className="text-2xl font-bold" style={{ color: COLORS.dark }}>
+          <h2 className="text-xl sm:text-2xl font-bold" style={{ color: COLORS.dark }}>
             Control de Gastos
           </h2>
         </div>
         <button
           onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105"
+          className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
           style={{ backgroundColor: COLORS.dark }}
         >
           <Plus size={16} />
-          Agregar Gasto
+          <span className="hidden sm:inline">Agregar Gasto</span>
+          <span className="sm:hidden">Agregar</span>
         </button>
       </div>
 
       {/* Filtros y vista */}
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+      <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100">
         <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <Filter size={16} className="text-gray-500" />
-              <span className="text-sm font-medium">Vista:</span>
+              <span className="text-xs sm:text-sm font-medium">Vista:</span>
             </div>
             <div className="flex rounded-lg border border-gray-300 overflow-hidden">
               {(['diario', 'semanal', 'mensual'] as const).map((mode) => (
                 <button
                   key={mode}
                   onClick={() => setViewMode(mode)}
-                  className={`px-4 py-2 text-sm font-medium transition-colors ${
+                  className={`px-2 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors ${
                     viewMode === mode
                       ? 'text-white'
                       : 'text-gray-700 hover:bg-gray-50'
@@ -206,7 +207,7 @@ export function Gastos() {
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+              className="px-2 sm:px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-xs sm:text-sm"
               style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
             />
           </div>
@@ -215,9 +216,9 @@ export function Gastos() {
         <div className="mt-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <TrendingDown size={20} style={{ color: COLORS.accent }} />
-            <span className="text-lg font-semibold">Total {viewMode}:</span>
+            <span className="text-base sm:text-lg font-semibold">Total {viewMode}:</span>
           </div>
-          <span className="text-2xl font-bold" style={{ color: COLORS.accent }}>
+          <span className="text-lg sm:text-2xl font-bold" style={{ color: COLORS.accent }}>
             {formatCOP(totalGastos)}
           </span>
         </div>

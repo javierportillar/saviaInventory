@@ -119,13 +119,13 @@ export function Balance() {
       : 'Sin registros disponibles';
 
   return (
-    <div className="max-w-7xl mx-auto p-6 space-y-6">
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="max-w-7xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
+      <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-bold" style={{ color: COLORS.dark }}>
+          <h2 className="text-2xl sm:text-3xl font-bold" style={{ color: COLORS.dark }}>
             Balance de Caja
           </h2>
-          <p className="text-gray-600">
+          <p className="text-sm sm:text-base text-gray-600">
             Ventas, gastos y saldo final por método de pago
           </p>
         </div>
@@ -134,7 +134,7 @@ export function Balance() {
           <select
             value={range}
             onChange={(event) => setRange(event.target.value as RangeValue)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+            className="px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
             style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
           >
             {rangeOptions.map((option) => (
@@ -147,13 +147,13 @@ export function Balance() {
       </div>
 
       {loading && (
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 text-center text-gray-500">
+        <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100 text-center text-gray-500 text-sm">
           Cargando balance...
         </div>
       )}
 
       {!loading && !hasAnyData && (
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 text-center text-gray-500">
+        <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100 text-center text-gray-500 text-sm">
           Aún no hay movimientos registrados en la caja.
         </div>
       )}
@@ -161,40 +161,40 @@ export function Balance() {
       {!loading && hasAnyData && (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+            <div className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium text-gray-600">Ventas en el período</p>
+                <p className="text-xs sm:text-sm font-medium text-gray-600">Ventas en el período</p>
                 <TrendingUp className="text-green-600" size={20} />
               </div>
-              <p className="text-2xl font-bold" style={{ color: COLORS.dark }}>
+              <p className="text-lg sm:text-2xl font-bold" style={{ color: COLORS.dark }}>
                 {formatCOP(totals.ventas)}
               </p>
             </div>
-            <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+            <div className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium text-gray-600">Gastos en el período</p>
+                <p className="text-xs sm:text-sm font-medium text-gray-600">Gastos en el período</p>
                 <TrendingDown className="text-red-600" size={20} />
               </div>
-              <p className="text-2xl font-bold text-red-600">
+              <p className="text-lg sm:text-2xl font-bold text-red-600">
                 {formatCOP(totals.gastos)}
               </p>
             </div>
-            <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+            <div className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium text-gray-600">Balance neto</p>
+                <p className="text-xs sm:text-sm font-medium text-gray-600">Balance neto</p>
                 <Wallet className={valueColor(totals.balance)} size={20} />
               </div>
-              <p className={`text-2xl font-bold ${valueColor(totals.balance)}`}>
+              <p className={`text-lg sm:text-2xl font-bold ${valueColor(totals.balance)}`}>
                 {formatCOP(totals.balance)}
               </p>
             </div>
-            <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+            <div className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-1">
-                <p className="text-sm font-medium text-gray-600">Saldo acumulado</p>
+                <p className="text-xs sm:text-sm font-medium text-gray-600">Saldo acumulado</p>
                 <PiggyBank className="text-indigo-600" size={20} />
               </div>
               <p className="text-xs text-gray-500 mb-1">{closingLabel}</p>
-              <p className="text-2xl font-bold" style={{ color: COLORS.dark }}>
+              <p className="text-lg sm:text-2xl font-bold" style={{ color: COLORS.dark }}>
                 {formatCOP(latest?.saldoTotalAcumulado ?? 0)}
               </p>
             </div>
@@ -203,14 +203,14 @@ export function Balance() {
           {latest && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {methodBreakdown.map((method) => (
-                <div key={method.id} className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-                  <p className="text-sm font-medium text-gray-600 mb-1">{method.label}</p>
+                <div key={method.id} className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100">
+                  <p className="text-xs sm:text-sm font-medium text-gray-600 mb-1">{method.label}</p>
                   <p className="text-xs text-gray-500">{dailyLabel}</p>
-                  <p className={`text-xl font-semibold ${valueColor(method.daily)}`}>
+                  <p className={`text-lg sm:text-xl font-semibold ${valueColor(method.daily)}`}>
                     {formatCOP(method.daily)}
                   </p>
                   <p className="text-xs text-gray-500 mt-3">{cumulativeLabel}</p>
-                  <p className="text-lg font-semibold" style={{ color: COLORS.dark }}>
+                  <p className="text-base sm:text-lg font-semibold" style={{ color: COLORS.dark }}>
                     {formatCOP(method.total)}
                   </p>
                 </div>
@@ -223,28 +223,28 @@ export function Balance() {
               <table className="min-w-full">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Fecha
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Ventas
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Gastos
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Balance diario
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Efectivo
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Nequi
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Tarjeta
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Acumulado
                     </th>
                   </tr>
@@ -252,7 +252,7 @@ export function Balance() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {!hasFilteredData && (
                     <tr>
-                      <td colSpan={8} className="px-6 py-8 text-center text-sm text-gray-500">
+                      <td colSpan={8} className="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500">
                         No hay movimientos en el rango seleccionado.
                       </td>
                     </tr>
@@ -260,19 +260,19 @@ export function Balance() {
 
                   {filteredData.map((entry) => (
                     <tr key={entry.fecha} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
                         {formatDateLabel(entry.fecha)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" style={{ color: COLORS.dark }}>
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium" style={{ color: COLORS.dark }}>
                         {formatCOP(entry.ingresosTotales)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-red-600">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-red-600">
                         {formatCOP(entry.egresosTotales)}
                       </td>
-                      <td className={`px-6 py-4 whitespace-nowrap text-sm font-semibold ${valueColor(entry.balanceDiario)}`}>
+                      <td className={`px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-semibold ${valueColor(entry.balanceDiario)}`}>
                         {formatCOP(entry.balanceDiario)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
                         <div className="flex flex-col">
                           <span className={`font-medium ${valueColor(entry.saldoEfectivoDia)}`}>
                             {formatCOP(entry.saldoEfectivoDia)}
@@ -282,7 +282,7 @@ export function Balance() {
                           </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
                         <div className="flex flex-col">
                           <span className={`font-medium ${valueColor(entry.saldoNequiDia)}`}>
                             {formatCOP(entry.saldoNequiDia)}
@@ -292,7 +292,7 @@ export function Balance() {
                           </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
                         <div className="flex flex-col">
                           <span className={`font-medium ${valueColor(entry.saldoTarjetaDia)}`}>
                             {formatCOP(entry.saldoTarjetaDia)}
@@ -302,7 +302,7 @@ export function Balance() {
                           </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold" style={{ color: COLORS.dark }}>
+                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-semibold" style={{ color: COLORS.dark }}>
                         {formatCOP(entry.saldoTotalAcumulado)}
                       </td>
                     </tr>

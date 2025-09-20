@@ -32,12 +32,12 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-6 space-y-6">
+    <div className="max-w-7xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
       <div className="text-center">
-        <h2 className="text-3xl font-bold mb-2" style={{ color: COLORS.dark }}>
+        <h2 className="text-2xl sm:text-3xl font-bold mb-2" style={{ color: COLORS.dark }}>
           Módulo de Cocina
         </h2>
-        <p className="text-gray-600">
+        <p className="text-sm sm:text-base text-gray-600">
           Vista de preparación y seguimiento de pedidos
         </p>
       </div>
@@ -45,19 +45,19 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
         {/* Pedidos pendientes */}
         <div className="xl:col-span-2 space-y-6">
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100">
             <div className="flex items-center gap-2 mb-4">
               <ChefHat size={24} style={{ color: COLORS.dark }} />
-              <h3 className="text-xl font-bold" style={{ color: COLORS.dark }}>
+              <h3 className="text-lg sm:text-xl font-bold" style={{ color: COLORS.dark }}>
                 En preparación ({activeOrders.length})
               </h3>
             </div>
 
             {activeOrders.length === 0 ? (
-              <div className="text-center py-12">
+              <div className="text-center py-8 sm:py-12">
                 <ChefHat size={48} className="mx-auto text-gray-400 mb-4" />
-                <h4 className="text-lg font-semibold text-gray-600 mb-2">No hay pedidos pendientes</h4>
-                <p className="text-gray-500">Los nuevos pedidos aparecerán aquí</p>
+                <h4 className="text-base sm:text-lg font-semibold text-gray-600 mb-2">No hay pedidos pendientes</h4>
+                <p className="text-sm sm:text-base text-gray-500">Los nuevos pedidos aparecerán aquí</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -66,7 +66,7 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
                   return (
                     <div
                       key={order.id}
-                      className={`border rounded-xl p-4 transition-all duration-200 ${
+                      className={`border rounded-xl p-3 sm:p-4 transition-all duration-200 ${
                         urgency === 'urgent' ? 'border-red-300 bg-red-50' :
                         urgency === 'warning' ? 'border-yellow-300 bg-yellow-50' :
                         'border-gray-200 bg-white'
@@ -74,7 +74,7 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
                     >
                       <div className="flex justify-between items-start mb-3">
                         <div>
-                          <h4 className="text-lg font-bold" style={{ color: COLORS.dark }}>
+                          <h4 className="text-base sm:text-lg font-bold" style={{ color: COLORS.dark }}>
                             #{order.numero}
                           </h4>
                           <div className="flex items-center gap-1 text-sm text-gray-600">
@@ -112,7 +112,7 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
                         {order.estado === 'pendiente' && (
                           <button
                             onClick={() => onUpdateOrderStatus(order.id, 'preparando')}
-                            className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105"
+                            className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
                             style={{ backgroundColor: COLORS.dark }}
                           >
                             Iniciar preparación
@@ -121,7 +121,7 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
                         {order.estado === 'preparando' && (
                           <button
                             onClick={() => onUpdateOrderStatus(order.id, 'listo')}
-                            className="w-full py-2 rounded-lg font-medium transition-all duration-200 hover:scale-105"
+                            className="w-full py-2 rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm"
                             style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
                           >
                             Marcar como listo
@@ -138,25 +138,25 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
 
         {/* Pedidos listos */}
         <div className="space-y-6">
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100">
             <div className="flex items-center gap-2 mb-4">
               <CheckCircle size={24} className="text-green-600" />
-              <h3 className="text-xl font-bold" style={{ color: COLORS.dark }}>
+              <h3 className="text-lg sm:text-xl font-bold" style={{ color: COLORS.dark }}>
                 Listos ({readyOrders.length})
               </h3>
             </div>
 
             {readyOrders.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">No hay pedidos listos</p>
+              <p className="text-gray-500 text-center py-6 sm:py-8 text-sm">No hay pedidos listos</p>
             ) : (
               <div className="space-y-3">
                 {readyOrders.map((order) => (
                   <div
                     key={order.id}
-                    className="bg-green-50 border border-green-200 rounded-lg p-4"
+                    className="bg-green-50 border border-green-200 rounded-lg p-3 sm:p-4"
                   >
                     <div className="flex justify-between items-start mb-2">
-                      <h4 className="font-bold text-green-800">#{order.numero}</h4>
+                      <h4 className="font-bold text-green-800 text-sm sm:text-base">#{order.numero}</h4>
                       <span className="text-xs text-green-600">
                         {formatDateTime(order.timestamp)}
                       </span>

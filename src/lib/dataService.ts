@@ -588,6 +588,60 @@ export const updateOrderStatus = async (orderId: string, status: Order['estado']
   setLocalData('savia-orders', updatedOrders);
 };
 
+export const updateOrder = async (orderId: string, updates: { items?: CartItem[]; total?: number }): Promise<void> => {
+  if (isSupabaseAvailable()) {
+    try {
+      // Actualizar la orden principal
+      if (updates.total !== undefined) {
+        const { error } = await supabase
+          .from('orders')
+          .update({ total: updates.total })
+          .eq('id', orderId);
+        if (error) throw error;
+      }
+
+      // Si hay items para actualizar, primero eliminar los existentes y luego insertar los nuevos
+      if (updates.items) {
+        // Eliminar items existentes
+        const { error: deleteError } = await supabase
+          .from('order_items')
+          .delete()
+          .eq('order_id', orderId);
+        if (deleteError) throw deleteError;
+
+        // Insertar nuevos items
+        if (updates.items.length > 0) {
+          const orderItemsPayload = updates.items.map((cartItem) => ({
+            order_id: orderId,
+            menu_item_id: cartItem.item.id,
+            cantidad: cartItem.cantidad,
+            notas: cartItem.notas ?? null,
+          }));
+          const { error: insertError } = await supabase.from('order_items').insert(orderItemsPayload);
+          if (insertError) throw insertError;
+        }
+      }
+      return;
+    } catch (error) {
+      console.warn('Supabase not available, using local data:', error);
+    }
+  }
+
+  // Local storage fallback
+  const orders = getLocalData<Order[]>('savia-orders', []).map(mapOrderRecord);
+  const updatedOrders = orders.map(order => {
+    if (order.id === orderId) {
+      return {
+        ...order,
+        ...(updates.items && { items: updates.items }),
+        ...(updates.total !== undefined && { total: updates.total })
+      };
+    }
+    return order;
+  });
+  setLocalData('savia-orders', updatedOrders);
+};
+
 // CUSTOMERS
 export const fetchCustomers = async (): Promise<Customer[]> => {
   if (isSupabaseAvailable()) {
@@ -851,6 +905,7 @@ export const dataService = {
   deleteMenuItem,
   fetchOrders,
   createOrder,
+  updateOrder,
   updateOrderStatus,
   fetchCustomers,
   createCustomer,
