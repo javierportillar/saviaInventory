@@ -9,6 +9,7 @@ const rangeOptions = [
   { label: 'Últimos 7 días', value: '7' },
   { label: 'Últimos 30 días', value: '30' },
   { label: 'Todo el histórico', value: 'all' },
+  { label: 'Rango personalizado', value: 'custom' },
 ] as const;
 
 type RangeValue = (typeof rangeOptions)[number]['value'];
@@ -35,10 +36,24 @@ const formatDateLabel = (value: string) => {
   });
 };
 
+const parseDateOnly = (value: string) => {
+  if (!value) {
+    return null;
+  }
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+};
+
 export function Balance() {
   const [balanceData, setBalanceData] = useState<BalanceResumen[]>([]);
   const [range, setRange] = useState<RangeValue>('7');
   const [loading, setLoading] = useState(true);
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
 
   useEffect(() => {
     const loadData = async () => {
@@ -51,20 +66,51 @@ export function Balance() {
     loadData();
   }, []);
 
-  const filteredData = useMemo(() => {
+  const { filteredData, customRangeError } = useMemo(() => {
     if (range === 'all') {
-      return balanceData;
+      return { filteredData: balanceData, customRangeError: '' };
     }
+
+    if (range === 'custom') {
+      const startDateValue = parseDateOnly(customStartDate);
+      const endDateValue = parseDateOnly(customEndDate);
+
+      if (startDateValue && endDateValue && startDateValue > endDateValue) {
+        return {
+          filteredData: [] as BalanceResumen[],
+          customRangeError: 'La fecha inicial no puede ser posterior a la final.'
+        };
+      }
+
+      const data = balanceData.filter((entry) => {
+        const entryDate = parseDateOnly(entry.fecha);
+        if (!entryDate) {
+          return false;
+        }
+        if (startDateValue && entryDate < startDateValue) {
+          return false;
+        }
+        if (endDateValue && entryDate > endDateValue) {
+          return false;
+        }
+        return true;
+      });
+
+      return { filteredData: data, customRangeError: '' };
+    }
+
     const days = parseInt(range, 10);
     const cutoff = new Date();
     cutoff.setHours(0, 0, 0, 0);
     cutoff.setDate(cutoff.getDate() - (days - 1));
 
-    return balanceData.filter((entry) => {
-      const entryDate = new Date(`${entry.fecha}T00:00:00`);
-      return entryDate >= cutoff;
+    const data = balanceData.filter((entry) => {
+      const entryDate = parseDateOnly(entry.fecha);
+      return entryDate ? entryDate >= cutoff : false;
     });
-  }, [balanceData, range]);
+
+    return { filteredData: data, customRangeError: '' };
+  }, [balanceData, range, customStartDate, customEndDate]);
 
   const totals = useMemo(() => {
     return filteredData.reduce(
@@ -79,7 +125,11 @@ export function Balance() {
 
   const hasAnyData = balanceData.length > 0;
   const hasFilteredData = filteredData.length > 0;
-  const latest = hasFilteredData ? filteredData[0] : balanceData[0];
+  const latest = customRangeError
+    ? undefined
+    : hasFilteredData
+      ? filteredData[0]
+      : balanceData[0];
 
   const methodBreakdown: MethodSummary[] = useMemo(() => {
     if (!latest) {
@@ -110,39 +160,111 @@ export function Balance() {
 
   const dailyLabel = hasFilteredData ? 'Saldo del día' : 'Último movimiento';
   const cumulativeLabel = hasFilteredData ? 'Saldo acumulado' : 'Saldo acumulado total';
-  const closingLabel = latest
-    ? hasFilteredData
-      ? `Cierre del ${formatDateLabel(latest.fecha)}`
-      : `Último cierre registrado (${formatDateLabel(latest.fecha)})`
-    : hasFilteredData
-      ? 'Sin registros en el rango'
-      : 'Sin registros disponibles';
+  const closingLabel = customRangeError
+    ? 'Ajusta las fechas seleccionadas para ver el saldo.'
+    : latest
+      ? hasFilteredData
+        ? `Cierre del ${formatDateLabel(latest.fecha)}`
+        : `Último cierre registrado (${formatDateLabel(latest.fecha)})`
+      : hasFilteredData
+        ? 'Sin registros en el rango'
+        : 'Sin registros disponibles';
+
+  const rangeSummary = useMemo(() => {
+    if (range === 'all') {
+      return 'Mostrando todo el histórico disponible.';
+    }
+
+    if (range === 'custom') {
+      if (customStartDate && customEndDate) {
+        return `Del ${formatDateLabel(customStartDate)} al ${formatDateLabel(customEndDate)}.`;
+      }
+      if (customStartDate) {
+        return `Desde el ${formatDateLabel(customStartDate)}.`;
+      }
+      if (customEndDate) {
+        return `Hasta el ${formatDateLabel(customEndDate)}.`;
+      }
+      return 'Selecciona un rango personalizado para filtrar el balance.';
+    }
+
+    const days = parseInt(range, 10);
+    return `Mostrando los últimos ${days} días.`;
+  }, [range, customStartDate, customEndDate]);
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+        <div className="space-y-1">
           <h2 className="text-3xl font-bold" style={{ color: COLORS.dark }}>
             Balance de Caja
           </h2>
           <p className="text-gray-600">
             Ventas, gastos y saldo final por método de pago
           </p>
+          <p className="text-xs text-gray-400">{rangeSummary}</p>
         </div>
-        <div className="flex items-center gap-3">
-          <CalendarDays className="text-gray-500" size={18} />
-          <select
-            value={range}
-            onChange={(event) => setRange(event.target.value as RangeValue)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
-            style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
-          >
-            {rangeOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+        <div className="flex flex-col gap-3 w-full xl:w-auto">
+          <div className="flex items-center gap-3">
+            <CalendarDays className="text-gray-500" size={18} />
+            <select
+              value={range}
+              onChange={(event) => setRange(event.target.value as RangeValue)}
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent w-full sm:w-auto"
+              style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+            >
+              {rangeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {range === 'custom' && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="flex flex-col">
+                  <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Desde</span>
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    max={customEndDate || undefined}
+                    onChange={(event) => setCustomStartDate(event.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+                    style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+                  />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Hasta</span>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    min={customStartDate || undefined}
+                    onChange={(event) => setCustomEndDate(event.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+                    style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                {(customStartDate || customEndDate) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomStartDate('');
+                      setCustomEndDate('');
+                    }}
+                    className="text-sm text-indigo-600 hover:text-indigo-700"
+                  >
+                    Limpiar fechas
+                  </button>
+                )}
+                {customRangeError && (
+                  <p className="text-sm text-red-600">{customRangeError}</p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -250,15 +372,15 @@ export function Balance() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {!hasFilteredData && (
+                  {(!hasFilteredData || customRangeError) && (
                     <tr>
                       <td colSpan={8} className="px-6 py-8 text-center text-sm text-gray-500">
-                        No hay movimientos en el rango seleccionado.
+                        {customRangeError || 'No hay movimientos en el rango seleccionado.'}
                       </td>
                     </tr>
                   )}
 
-                  {filteredData.map((entry) => (
+                  {hasFilteredData && !customRangeError && filteredData.map((entry) => (
                     <tr key={entry.fecha} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {formatDateLabel(entry.fecha)}

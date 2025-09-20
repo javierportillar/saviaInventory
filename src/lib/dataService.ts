@@ -17,6 +17,18 @@ const normalizePaymentMethod = (method?: string | null): PaymentMethod => {
   return 'efectivo';
 };
 
+const toLocalDateKey = (input: Date | string): string => {
+  const date = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const ensureMenuItemCode = (
   record: Partial<MenuItem> & { nombre?: string; codigo?: string; id?: string },
   prefix?: string
@@ -225,7 +237,8 @@ const computeLocalBalance = (orders: Order[], gastos: Gasto[]): BalanceResumen[]
   orders.forEach((order) => {
     const date = new Date(order.timestamp);
     if (Number.isNaN(date.getTime())) return;
-    const key = date.toISOString().split('T')[0];
+    const key = toLocalDateKey(date);
+    if (!key) return;
     const entry = getAccumulator(key);
     const method = normalizePaymentMethod(order.metodoPago);
     entry.ingresosTotales += order.total;
@@ -235,7 +248,8 @@ const computeLocalBalance = (orders: Order[], gastos: Gasto[]): BalanceResumen[]
   gastos.forEach((gasto) => {
     const date = new Date(gasto.fecha);
     if (Number.isNaN(date.getTime())) return;
-    const key = date.toISOString().split('T')[0];
+    const key = toLocalDateKey(date);
+    if (!key) return;
     const entry = getAccumulator(key);
     const method = normalizePaymentMethod(gasto.metodoPago);
     entry.egresosTotales += gasto.monto;
@@ -290,7 +304,7 @@ const computeLocalBalance = (orders: Order[], gastos: Gasto[]): BalanceResumen[]
 };
 
 const mapBalanceRow = (row: any): BalanceResumen => ({
-  fecha: row.fecha,
+  fecha: toLocalDateKey(row?.fecha) || String(row?.fecha ?? ''),
   ingresosTotales: Number(row.ingresos_totales ?? 0),
   egresosTotales: Number(row.egresos_totales ?? 0),
   balanceDiario: Number(row.balance_diario ?? 0),
