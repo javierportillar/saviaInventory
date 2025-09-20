@@ -12,10 +12,15 @@ import { Login } from './components/Login';
 import { Navigation } from './components/Navigation';
 import { ModuleType, User, MenuItem, Order, Customer } from './types';
 import { initializeLocalData } from './data/localData';
-import * as dataService from './lib/dataService';
+import dataService from './lib/dataService';
 
 const SESSION_STORAGE_KEY = 'savia-user-session';
 const SESSION_DURATION_MS = 4 * 60 * 60 * 1000; // 4 horas
+
+interface StoredSession {
+  user: User;
+  timestamp: number;
+}
 
 interface StoredSession {
   user: User;
@@ -169,7 +174,7 @@ function App() {
 
   const handleCreateOrder = async (newOrder: Order) => {
     const data = await dataService.createOrder(newOrder);
-    setOrders([...orders, data]);
+    setOrders((prev) => [...prev, data]);
   };
 
   const handleUpdateOrderStatus = async (orderId: string, status: Order['estado']) => {
@@ -223,6 +228,7 @@ function App() {
         {module === 'caja' && (
           <Caja
             onModuleChange={handleModuleChange}
+            onCreateOrder={handleCreateOrder}
           />
         )}
         {module === 'comandas' && (

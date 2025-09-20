@@ -3,7 +3,7 @@ import { Gasto, PaymentMethod } from '../types';
 import { Receipt, Plus, Edit3, Trash2, Calendar, TrendingDown, Filter } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
-import * as dataService from '../lib/dataService';
+import dataService from '../lib/dataService';
 
 export function Gastos() {
   const [gastos, setGastos] = useState<Gasto[]>([]);

@@ -17,6 +17,17 @@ const normalizePaymentMethod = (method?: string | null): PaymentMethod => {
   return 'efectivo';
 };
 
+const toLocalDateKey = (input: Date | string): string => {
+  const date = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const ensureMenuItemCode = (
   record: Partial<MenuItem> & { nombre?: string; codigo?: string; id?: string },
   prefix?: string
@@ -121,6 +132,20 @@ const mapMenuItemRecord = (record: any): MenuItem => {
   return ensureMenuItemShape(menuItem);
 };
 
+const parseUnitPrice = (value: unknown, fallback: number): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return fallback;
+};
+
+
 const mapCartItemsFromRecord = (record: any): CartItem[] => {
   if (Array.isArray(record?.order_items)) {
     return record.order_items
@@ -130,10 +155,19 @@ const mapCartItemsFromRecord = (record: any): CartItem[] => {
           return null;
         }
         const menuItem = mapMenuItemRecord(menuRecord);
+        const rawQuantity = typeof item?.cantidad === 'number'
+          ? item.cantidad
+          : Number(item?.cantidad ?? 0);
+        const cantidad = Number.isFinite(rawQuantity) ? Math.max(0, rawQuantity) : 0;
+        const unitPrice = parseUnitPrice(
+          item?.precio_unitario ?? item?.precioUnitario ?? item?.unitPrice ?? item?.unit_price,
+          menuItem.precio
+        );
         return {
           item: menuItem,
-          cantidad: typeof item?.cantidad === 'number' ? item.cantidad : Number(item?.cantidad ?? 0),
+          cantidad: cantidad,
           notas: item?.notas ?? undefined,
+          precioUnitario: unitPrice,
         };
       })
       .filter((entry): entry is CartItem => entry !== null);
@@ -225,7 +259,8 @@ const computeLocalBalance = (orders: Order[], gastos: Gasto[]): BalanceResumen[]
   orders.forEach((order) => {
     const date = new Date(order.timestamp);
     if (Number.isNaN(date.getTime())) return;
-    const key = date.toISOString().split('T')[0];
+    const key = toLocalDateKey(date);
+    if (!key) return;
     const entry = getAccumulator(key);
     const method = normalizePaymentMethod(order.metodoPago);
     entry.ingresosTotales += order.total;
@@ -235,7 +270,8 @@ const computeLocalBalance = (orders: Order[], gastos: Gasto[]): BalanceResumen[]
   gastos.forEach((gasto) => {
     const date = new Date(gasto.fecha);
     if (Number.isNaN(date.getTime())) return;
-    const key = date.toISOString().split('T')[0];
+    const key = toLocalDateKey(date);
+    if (!key) return;
     const entry = getAccumulator(key);
     const method = normalizePaymentMethod(gasto.metodoPago);
     entry.egresosTotales += gasto.monto;
@@ -290,7 +326,7 @@ const computeLocalBalance = (orders: Order[], gastos: Gasto[]): BalanceResumen[]
 };
 
 const mapBalanceRow = (row: any): BalanceResumen => ({
-  fecha: row.fecha,
+  fecha: toLocalDateKey(row?.fecha) || String(row?.fecha ?? ''),
   ingresosTotales: Number(row.ingresos_totales ?? 0),
   egresosTotales: Number(row.egresos_totales ?? 0),
   balanceDiario: Number(row.balance_diario ?? 0),
@@ -314,7 +350,7 @@ const loadMenuItemsFromLocalCache = (reason?: string): MenuItem[] => {
     console.warn(`[dataService] Usando datos locales porque: ${reason}.`);
   }
 
-  const localItems = getLocalData('savia-menuItems', []);
+  const localItems = getLocalData<MenuItem[]>('savia-menuItems', []);
   const mappedLocal = localItems.map(mapMenuItemRecord);
   console.info(`[dataService] Loaded ${mappedLocal.length} menu items from local cache.`);
 
@@ -372,9 +408,7 @@ export const createMenuItem = async (item: MenuItem): Promise<MenuItem> => {
   }
 
   // Local storage fallback
-  // const items = getLocalData('savia-menuItems', []).map(mapMenuItemRecord);
   const items = getLocalData<MenuItem[]>('savia-menuItems', []).map(mapMenuItemRecord);
-
   const newItems = [...items, sanitized];
   setLocalData('savia-menuItems', newItems);
   return sanitized;
@@ -398,7 +432,6 @@ export const updateMenuItem = async (item: MenuItem): Promise<MenuItem> => {
   }
 
   // Local storage fallback
-  // const items = getLocalData('savia-menuItems', []).map(mapMenuItemRecord);
   const items = getLocalData<MenuItem[]>('savia-menuItems', []).map(mapMenuItemRecord);
   const updatedItems = items.map(i => i.id === sanitized.id ? sanitized : i);
   setLocalData('savia-menuItems', updatedItems);
@@ -420,7 +453,7 @@ export const deleteMenuItem = async (id: string): Promise<void> => {
   }
 
   // Local storage fallback
-  const items = getLocalData('savia-menuItems', []).map(mapMenuItemRecord);
+  const items = getLocalData<MenuItem[]>('savia-menuItems', []).map(mapMenuItemRecord);
   const filteredItems = items.filter(item => item.id !== id);
   setLocalData('savia-menuItems', filteredItems);
 };
@@ -527,7 +560,7 @@ export const createOrder = async (order: Order): Promise<Order> => {
   }
 
   // Local storage fallback
-  const orders = getLocalData('savia-orders', []).map(mapOrderRecord);
+  const orders = getLocalData<Order[]>('savia-orders', []).map(mapOrderRecord);
   const newOrders = [...orders, sanitizedOrder];
   setLocalData('savia-orders', newOrders);
   return sanitizedOrder;
@@ -548,7 +581,7 @@ export const updateOrderStatus = async (orderId: string, status: Order['estado']
   }
 
   // Local storage fallback
-  const orders = getLocalData('savia-orders', []).map(mapOrderRecord);
+  const orders = getLocalData<Order[]>('savia-orders', []).map(mapOrderRecord);
   const updatedOrders = orders.map(order =>
     order.id === orderId ? { ...order, estado: status } : order
   );
@@ -651,7 +684,7 @@ export const createEmpleado = async (empleado: Empleado): Promise<Empleado> => {
   }
 
   // Local storage fallback
-  const empleados = getLocalData('savia-empleados', []);
+  const empleados = getLocalData<Empleado[]>('savia-empleados', []);
   const newEmpleados = [...empleados, empleado];
   setLocalData('savia-empleados', newEmpleados);
   return empleado;
@@ -709,7 +742,7 @@ export const fetchGastos = async (): Promise<Gasto[]> => {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  const gastos = getLocalData('savia-gastos', []);
+  const gastos = getLocalData<Gasto[]>('savia-gastos', []);
   return gastos.map(normalizeGastoRecord);
 };
 
@@ -740,7 +773,7 @@ export const createGasto = async (gasto: Gasto): Promise<Gasto> => {
   }
 
   // Local storage fallback
-  const gastos = getLocalData('savia-gastos', []).map(normalizeGastoRecord);
+  const gastos = getLocalData<Gasto[]>('savia-gastos', []).map(normalizeGastoRecord);
   const newGastos = [...gastos, sanitized];
   setLocalData('savia-gastos', newGastos);
   return sanitized;
@@ -768,7 +801,7 @@ export const updateGasto = async (gasto: Gasto): Promise<Gasto> => {
   }
 
   // Local storage fallback
-  const gastos = getLocalData('savia-gastos', []).map(normalizeGastoRecord);
+  const gastos = getLocalData<Gasto[]>('savia-gastos', []).map(normalizeGastoRecord);
   const updatedGastos = gastos.map(g => g.id === sanitized.id ? sanitized : g);
   setLocalData('savia-gastos', updatedGastos);
   return sanitized;
@@ -786,7 +819,7 @@ export const deleteGasto = async (id: string): Promise<void> => {
   }
 
   // Local storage fallback
-  const gastos = getLocalData('savia-gastos', []).map(normalizeGastoRecord);
+  const gastos = getLocalData<Gasto[]>('savia-gastos', []).map(normalizeGastoRecord);
   const filteredGastos = gastos.filter(gasto => gasto.id !== id);
   setLocalData('savia-gastos', filteredGastos);
 };
@@ -806,7 +839,32 @@ export const fetchBalanceResumen = async (): Promise<BalanceResumen[]> => {
     }
   }
 
-  const localOrders = getLocalData('savia-orders', []).map(mapOrderRecord);
-  const localGastos = getLocalData('savia-gastos', []).map(normalizeGastoRecord);
+  const localOrders = getLocalData<Order[]>('savia-orders', []).map(mapOrderRecord);
+  const localGastos = getLocalData<Gasto[]>('savia-gastos', []).map(normalizeGastoRecord);
   return computeLocalBalance(localOrders, localGastos);
 };
+
+export const dataService = {
+  fetchMenuItems,
+  createMenuItem,
+  updateMenuItem,
+  deleteMenuItem,
+  fetchOrders,
+  createOrder,
+  updateOrderStatus,
+  fetchCustomers,
+  createCustomer,
+  updateCustomer,
+  deleteCustomer,
+  fetchEmpleados,
+  createEmpleado,
+  updateEmpleado,
+  deleteEmpleado,
+  fetchGastos,
+  createGasto,
+  updateGasto,
+  deleteGasto,
+  fetchBalanceResumen,
+} as const;
+
+export default dataService;

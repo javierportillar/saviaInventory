@@ -3,13 +3,14 @@ import { MenuItem, CartItem, Order, ModuleType, Customer, PaymentMethod } from '
 import { Plus, Minus, Trash2, Search, ShoppingCart, Edit2 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, generateOrderNumber } from '../utils/format';
-import * as dataService from '../lib/dataService';
+import dataService from '../lib/dataService';
 
 interface CajaProps {
   onModuleChange: (module: ModuleType) => void;
+  onCreateOrder: (order: Order) => Promise<void>;
 }
 
-export function Caja({ onModuleChange }: CajaProps) {
+export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -130,7 +131,7 @@ export function Caja({ onModuleChange }: CajaProps) {
       metodoPago: paymentMethod,
     };
 
-    await dataService.createOrder(order);
+    await onCreateOrder(order);
 
     setCart([]);
     setShowPayment(false);

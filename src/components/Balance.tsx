@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BalanceResumen } from '../types';
-import * as dataService from '../lib/dataService';
+import dataService from '../lib/dataService';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
 import { Wallet, TrendingUp, TrendingDown, CalendarDays, PiggyBank } from 'lucide-react';

@@ -3,7 +3,7 @@ import { Empleado } from '../types';
 import { Users, Edit3, Trash2, Plus, Clock, DollarSign } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
-import * as dataService from '../lib/dataService';
+import dataService from '../lib/dataService';
 
 export function Empleados() {
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
