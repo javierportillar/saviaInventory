@@ -360,3 +360,116 @@ ORDER BY fecha DESC;
 
 COMMIT;
 
+-- ======================
+-- PRODUCTOS NO INVENTARIABLES (MENÚ)
+-- ======================
+
+-- Sandwiches
+INSERT INTO menu_items
+(codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida) VALUES
+('sand-jamon-artesano', 'Jamón artesano', 18500, 'Salsa verde, queso doble crema, jamón de cerdo, rúgula, tomates horneados, parmesano.', 'jamón artesano, jamón de cerdo, miel de uvilla, cebolla, tomate horneado, rúgula, queso tajado, queso parmesano, salsa verde', 'Sandwiches', 0, 'No inventariables', 'unidad', 'unidad'),
+('sand-del-huerto', 'Del huerto', 15500, 'Mayonesa de rostizados, queso feta, rúgula, tomates horneados, champiñones, parmesano, mix de semillas, chips de arracacha.', 'del huerto, champiñones, mayonesa rostizada, queso feta, crocantes de arracacha, tomate horneado, semillas de calabaza, queso tajado', 'Sandwiches', 0, 'No inventariables', 'unidad', 'unidad'),
+('sand-pollo-green', 'Pollo Green', 16500, 'Mayonesa de rostizados y verde, jamón de pollo, guacamole, tomate horneado, semillas de girasol, lechuga, tocineta.', 'pollo green, jamón de pollo, rúgula, champiñones, parmesano, guacamole, salsa verde, salsa rostizada, lechuga, tomate horneado, semillas', 'Sandwiches', 0, 'No inventariables', 'unidad', 'unidad'),
+('sand-pollo-toscano', 'Pollo Toscano', 18500, 'Salsa verde, jamón de pollo, lechuga, rúgula, champiñones, tomates horneados, parmesano, queso doble crema, tocineta, miel de uvilla.', 'pollo toscano, jamón de pollo, lechuga, rúgula, champiñones, tomate horneado, queso tajado, queso parmesano, tocineta', 'Sandwiches', 0, 'No inventariables', 'unidad', 'unidad'),
+('sand-mexicano', 'Mexicano', 19000, 'Frijol refrito, pollo desmechado, pico de gallo, queso crema tajado, guacamole, sour cream, salsa brava.', 'mexicano, pollo desmechado, guacamole, pico de gallo, frijol refrito, salsa brava, sour cream, queso tajado', 'Sandwiches', 0, 'No inventariables', 'unidad', 'unidad');
+
+-- Bowls Salados
+INSERT INTO menu_items
+(codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida) VALUES
+('bowl-salado', 'Bowl Salado', 15000, 'Personaliza tu bowl con 2 bases, 4 toppings y 1 proteína. Incluye bebida.', 'bowl salado, arroz, pasta, quinua, pollo, cerdo, carne, toppings', 'Bowls Salados', 0, 'No inventariables', 'unidad', 'unidad');
+
+-- Bowls Frutales
+INSERT INTO menu_items
+(codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida) VALUES
+('bowl-acai-supremo', 'Açaí Supremo', 14500, 'Base de açaí, fresa, banano, yogurt y toppings variados.', 'açaí supremo, fresa, banano, yogurt, kiwi, coco, arándanos, semillas, crema de maní', 'Bowls Frutales', 0, 'No inventariables', 'unidad', 'unidad'),
+('bowl-tropical', 'Tropical', 12000, 'Mango, piña, banano, yogurt natural y toppings.', 'tropical, mango, piña, banano, yogurt, granola, coco, semillas', 'Bowls Frutales', 0, 'No inventariables', 'unidad', 'unidad'),
+('bowl-vital', 'Vital', 12000, 'Mango, banano, piña, espinaca, yogurt, leche y toppings.', 'vital, mango, banano, piña, espinaca, yogurt, granola, chía, coco', 'Bowls Frutales', 0, 'No inventariables', 'unidad', 'unidad');
+
+-- Bebidas calientes
+INSERT INTO menu_items
+(codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida) VALUES
+('beb-capuccino', 'Capuccino', 6000, NULL, 'capuccino', 'Bebidas Calientes', 0, 'No inventariables', 'unidad', 'taza'),
+('beb-latte', 'Latte', 5500, NULL, 'latte', 'Bebidas Calientes', 0, 'No inventariables', 'unidad', 'taza'),
+('beb-americano', 'Americano', 5500, NULL, 'americano', 'Bebidas Calientes', 0, 'No inventariables', 'unidad', 'taza'),
+('beb-cocoa', 'Cocoa', 6000, NULL, 'cocoa', 'Bebidas Calientes', 0, 'No inventariables', 'unidad', 'taza'),
+('beb-pitaya-latte', 'Pitaya Latte', 8500, NULL, 'pitaya latte', 'Bebidas Calientes', 0, 'No inventariables', 'unidad', 'taza'),
+('beb-infusion-frutos', 'Infusión de frutos rojos', 6000, NULL, 'infusión frutos rojos', 'Bebidas Calientes', 0, 'No inventariables', 'unidad', 'taza');
+
+-- Acompañamientos
+INSERT INTO menu_items
+(codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida) VALUES
+('acomp-torta-dia', 'Torta del día', 8000, NULL, 'torta, zanahoria, arándanos, naranja, coco, yogurt griego', 'Acompañamientos', 0, 'No inventariables', 'unidad', 'unidad'),
+('acomp-galleta-avena', 'Galletas de avena', 4000, NULL, 'galletas avena', 'Acompañamientos', 0, 'No inventariables', 'unidad', 'unidad'),
+('acomp-muffin-queso', 'Muffin de queso', 4500, NULL, 'muffin queso', 'Acompañamientos', 0, 'No inventariables', 'unidad', 'unidad'),
+('acomp-tapitas', 'Tapitas', 10000, 'Pan con queso feta, tomate al horno y albahaca.', 'tapitas, pan, queso feta, tomate al horno, albahaca', 'Acompañamientos', 0, 'No inventariables', 'unidad', 'unidad');
+
+
+
+-- ======================
+-- PRODUCTOS INVENTARIABLES (INSUMOS)
+-- ======================
+
+-- Frutas
+INSERT INTO menu_items
+(codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida) VALUES
+('inv-mango', 'Mango', 0, NULL, 'mango fruta fresca', 'Frutas', 5000, 'Inventariables', 'peso', 'g'),
+('inv-pina', 'Piña', 0, NULL, 'piña fruta fresca', 'Frutas', 3000, 'Inventariables', 'peso', 'g'),
+('inv-banano', 'Banano', 0, NULL, 'banano fruta fresca', 'Frutas', 2000, 'Inventariables', 'peso', 'g'),
+('inv-fresa', 'Fresa', 0, NULL, 'fresa fruta fresca', 'Frutas', 1500, 'Inventariables', 'peso', 'g'),
+('inv-kiwi', 'Kiwi', 0, NULL, 'kiwi fruta fresca', 'Frutas', 800, 'Inventariables', 'peso', 'g'),
+('inv-sandia', 'Sandía', 0, NULL, 'sandía fruta fresca', 'Frutas', 4000, 'Inventariables', 'peso', 'g'),
+('inv-arandanos', 'Arándanos', 0, NULL, 'arándanos fruta fresca', 'Frutas', 500, 'Inventariables', 'peso', 'g'),
+('inv-acai', 'Açaí', 0, NULL, 'açaí fruta fresca', 'Frutas', 300, 'Inventariables', 'peso', 'g'),
+('inv-pitaya', 'Pitaya', 0, NULL, 'pitaya fruta fresca', 'Frutas', 400, 'Inventariables', 'peso', 'g');
+
+-- Lácteos
+INSERT INTO menu_items
+(codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida) VALUES
+('inv-yogurt', 'Yogurt natural', 0, NULL, 'yogurt natural', 'Lácteos', 2000, 'Inventariables', 'peso', 'g'),
+('inv-leche', 'Leche', 0, NULL, 'leche líquida', 'Lácteos', 3000, 'Inventariables', 'volumen', 'ml'),
+('inv-queso-feta', 'Queso feta', 0, NULL, 'queso feta', 'Lácteos', 500, 'Inventariables', 'peso', 'g'),
+('inv-queso-crema', 'Queso doble crema', 0, NULL, 'queso crema', 'Lácteos', 800, 'Inventariables', 'peso', 'g');
+
+-- Proteínas
+INSERT INTO menu_items
+(codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida) VALUES
+('inv-jamon-cerdo', 'Jamón de cerdo', 0, NULL, 'jamón cerdo', 'Proteínas', 1000, 'Inventariables', 'peso', 'g'),
+('inv-jamon-pollo', 'Jamón de pollo', 0, NULL, 'jamón pollo', 'Proteínas', 1200, 'Inventariables', 'peso', 'g'),
+('inv-pollo-desmechado', 'Pollo desmechado', 0, NULL, 'pollo desmechado', 'Proteínas', 800, 'Inventariables', 'peso', 'g'),
+('inv-tocineta', 'Tocineta', 0, NULL, 'tocineta', 'Proteínas', 400, 'Inventariables', 'peso', 'g');
+
+-- Vegetales
+INSERT INTO menu_items
+(codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida) VALUES
+('inv-rugula', 'Rúgula', 0, NULL, 'rúgula', 'Vegetales', 300, 'Inventariables', 'peso', 'g'),
+('inv-lechuga', 'Lechuga', 0, NULL, 'lechuga', 'Vegetales', 500, 'Inventariables', 'peso', 'g'),
+('inv-champinones', 'Champiñones', 0, NULL, 'champiñones', 'Vegetales', 600, 'Inventariables', 'peso', 'g'),
+('inv-tomate', 'Tomate', 0, NULL, 'tomate', 'Vegetales', 1000, 'Inventariables', 'peso', 'g'),
+('inv-espinaca', 'Espinaca', 0, NULL, 'espinaca', 'Vegetales', 400, 'Inventariables', 'peso', 'g'),
+('inv-apio', 'Apio', 0, NULL, 'apio', 'Vegetales', 300, 'Inventariables', 'peso', 'g'),
+('inv-pepino', 'Pepino', 0, NULL, 'pepino', 'Vegetales', 800, 'Inventariables', 'peso', 'g');
+
+-- Semillas y frutos secos
+INSERT INTO menu_items
+(codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida) VALUES
+('inv-chia', 'Semillas de chía', 0, NULL, 'chía', 'Semillas', 200, 'Inventariables', 'peso', 'g'),
+('inv-granola', 'Granola', 0, NULL, 'granola', 'Semillas', 500, 'Inventariables', 'peso', 'g'),
+('inv-avena', 'Avena', 0, NULL, 'avena', 'Semillas', 1000, 'Inventariables', 'peso', 'g'),
+('inv-coco', 'Coco rallado', 0, NULL, 'coco', 'Semillas', 300, 'Inventariables', 'peso', 'g'),
+('inv-crema-mani', 'Crema de maní', 0, NULL, 'crema maní', 'Semillas', 400, 'Inventariables', 'peso', 'g');
+
+-- Especias y condimentos
+INSERT INTO menu_items
+(codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida) VALUES
+('inv-curcuma', 'Cúrcuma', 0, NULL, 'cúrcuma', 'Especias', 100, 'Inventariables', 'peso', 'g'),
+('inv-jengibre', 'Jengibre', 0, NULL, 'jengibre', 'Especias', 200, 'Inventariables', 'peso', 'g'),
+('inv-maca', 'Maca', 0, NULL, 'maca', 'Especias', 150, 'Inventariables', 'peso', 'g'),
+('inv-miel', 'Miel', 0, NULL, 'miel', 'Especias', 500, 'Inventariables', 'peso', 'g');
+
+-- Bebidas base
+INSERT INTO menu_items
+(codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida) VALUES
+('inv-cafe', 'Café', 0, NULL, 'café', 'Bebidas', 1000, 'Inventariables', 'peso', 'g'),
+('inv-te-matcha', 'Té matcha', 0, NULL, 'té matcha', 'Bebidas', 200, 'Inventariables', 'peso', 'g'),
+('inv-cacao', 'Cacao puro', 0, NULL, 'cacao puro', 'Bebidas', 300, 'Inventariables', 'peso', 'g'),
+('inv-proteina', 'Proteína whey', 0, NULL, 'proteína whey', 'Bebidas', 500, 'Inventariables', 'peso', 'g');

@@ -17,6 +17,21 @@ const normalizePaymentMethod = (method?: string | null): PaymentMethod => {
   return 'efectivo';
 };
 
+const extractPaymentMethodValue = (record: any): string | null => {
+  if (!record || typeof record !== 'object') {
+    return null;
+  }
+  if (typeof record.metodoPago === 'string') {
+    return record.metodoPago;
+  }
+  if (typeof record.metodopago === 'string') {
+    return record.metodopago;
+  }
+  return null;
+};
+
+const SUPABASE_PAYMENT_COLUMN = 'metodopago';
+
 const toLocalDateKey = (input: Date | string): string => {
   const date = input instanceof Date ? input : new Date(input);
   if (Number.isNaN(date.getTime())) {
@@ -210,7 +225,7 @@ const mapOrderRecord = (record: any): Order => {
     timestamp,
     cliente_id: record?.cliente_id ?? record?.clienteId ?? undefined,
     cliente: record?.customer?.nombre ?? record?.cliente ?? undefined,
-    metodoPago: normalizePaymentMethod(record?.metodoPago),
+    metodoPago: normalizePaymentMethod(extractPaymentMethodValue(record)),
   };
 };
 
@@ -269,7 +284,7 @@ const normalizeGastoRecord = (gasto: any): Gasto => ({
   categoria: gasto?.categoria ?? '',
   fecha: gasto?.fecha ? new Date(gasto.fecha) : new Date(),
   created_at: gasto?.created_at ? new Date(gasto.created_at) : undefined,
-  metodoPago: normalizePaymentMethod(gasto?.metodoPago),
+  metodoPago: normalizePaymentMethod(extractPaymentMethodValue(gasto)),
 });
 
 type MethodTotals = Record<PaymentMethod, number>;
@@ -574,7 +589,7 @@ export const createOrder = async (order: Order): Promise<Order> => {
         id: data.id,
         timestamp: new Date(data.timestamp),
         cliente_id: data.cliente_id ?? undefined,
-        metodoPago: normalizePaymentMethod(data.metodoPago),
+        metodoPago: normalizePaymentMethod(extractPaymentMethodValue(data)),
       };
       upsertLocalOrder(createdOrder);
       return createdOrder;
@@ -864,8 +879,10 @@ export const createGasto = async (gasto: Gasto): Promise<Gasto> => {
             monto: sanitized.monto,
             categoria: sanitized.categoria,
             fecha: sanitized.fecha instanceof Date ? sanitized.fecha.toISOString().split('T')[0] : sanitized.fecha,
-            created_at: sanitized.created_at ?? new Date().toISOString(),
-            metodoPago: sanitized.metodoPago,
+            created_at: sanitized.created_at instanceof Date
+              ? sanitized.created_at.toISOString()
+              : sanitized.created_at ?? new Date().toISOString(),
+            [SUPABASE_PAYMENT_COLUMN]: sanitized.metodoPago,
           },
         ])
         .select('*')
@@ -895,7 +912,7 @@ export const updateGasto = async (gasto: Gasto): Promise<Gasto> => {
           monto: sanitized.monto,
           categoria: sanitized.categoria,
           fecha: sanitized.fecha instanceof Date ? sanitized.fecha.toISOString().split('T')[0] : sanitized.fecha,
-          metodoPago: sanitized.metodoPago,
+          [SUPABASE_PAYMENT_COLUMN]: sanitized.metodoPago,
         })
         .eq('id', sanitized.id);
       if (error) throw error;
