@@ -7,7 +7,7 @@ import dataService from '../lib/dataService';
 
 interface ComandasProps {
   orders: Order[];
-  onUpdateOrderStatus: (orderId: string, status: Order['estado']) => void;
+  onUpdateOrderStatus: (order: Order, status: Order['estado']) => void;
 }
 
 interface EditingOrder {
@@ -365,7 +365,7 @@ export function Comandas({ orders, onUpdateOrderStatus }: ComandasProps) {
                     <div className="space-y-2">
                       {order.estado === 'pendiente' && (
                         <button
-                          onClick={() => onUpdateOrderStatus(order.id, 'preparando')}
+                          onClick={() => onUpdateOrderStatus(order, 'preparando')}
                           className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
                           style={{ backgroundColor: COLORS.dark }}
                         >
@@ -374,7 +374,7 @@ export function Comandas({ orders, onUpdateOrderStatus }: ComandasProps) {
                       )}
                       {order.estado === 'preparando' && (
                         <button
-                          onClick={() => onUpdateOrderStatus(order.id, 'listo')}
+                          onClick={() => onUpdateOrderStatus(order, 'listo')}
                           className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
                           style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
                         >
@@ -391,7 +391,7 @@ export function Comandas({ orders, onUpdateOrderStatus }: ComandasProps) {
                             Modificar pedido
                           </button>
                           <button
-                            onClick={() => onUpdateOrderStatus(order.id, 'entregado')}
+                            onClick={() => onUpdateOrderStatus(order, 'entregado')}
                             className="w-full py-2 bg-green-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm"
                           >
                             Entregar pedido
