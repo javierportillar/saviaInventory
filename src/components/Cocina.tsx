@@ -6,7 +6,7 @@ import { formatDateTime } from '../utils/format';
 
 interface CocinaProps {
   orders: Order[];
-  onUpdateOrderStatus: (orderId: string, status: Order['estado']) => void;
+  onUpdateOrderStatus: (order: Order, status: Order['estado']) => void;
 }
 
 export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
@@ -111,7 +111,7 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
                       <div className="space-y-2">
                         {order.estado === 'pendiente' && (
                           <button
-                            onClick={() => onUpdateOrderStatus(order.id, 'preparando')}
+                            onClick={() => onUpdateOrderStatus(order, 'preparando')}
                             className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
                             style={{ backgroundColor: COLORS.dark }}
                           >
@@ -120,7 +120,7 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
                         )}
                         {order.estado === 'preparando' && (
                           <button
-                            onClick={() => onUpdateOrderStatus(order.id, 'listo')}
+                            onClick={() => onUpdateOrderStatus(order, 'listo')}
                             className="w-full py-2 rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm"
                             style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
                           >

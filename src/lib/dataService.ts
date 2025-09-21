@@ -214,6 +214,54 @@ const mapOrderRecord = (record: any): Order => {
   };
 };
 
+const ORDER_SELECT_COLUMNS = `
+  id,
+  numero,
+  total,
+  estado,
+  timestamp,
+  cliente_id,
+  metodoPago,
+  customer:customers ( id, nombre ),
+  order_items (
+    id,
+    cantidad,
+    notas,
+    menu_item:menu_items (
+      id,
+      codigo,
+      nombre,
+      precio,
+      descripcion,
+      keywords,
+      categoria,
+      stock,
+      inventarioCategoria,
+      inventarioTipo,
+      unidadMedida
+    )
+  )
+`;
+
+const loadLocalOrders = (): Order[] => {
+  return getLocalData<Order[]>('savia-orders', []).map(mapOrderRecord);
+};
+
+const persistLocalOrders = (orders: Order[]): void => {
+  setLocalData('savia-orders', orders);
+};
+
+const upsertLocalOrder = (order: Order): void => {
+  const orders = loadLocalOrders();
+  const index = orders.findIndex((entry) => entry.id === order.id);
+  if (index >= 0) {
+    orders[index] = order;
+  } else {
+    orders.push(order);
+  }
+  persistLocalOrders(orders);
+};
+
 const normalizeGastoRecord = (gasto: any): Gasto => ({
   id: typeof gasto?.id === 'string' ? gasto.id : `gasto-${Math.random().toString(36).slice(2, 10)}`,
   descripcion: gasto?.descripcion ?? '',
@@ -464,43 +512,17 @@ export const fetchOrders = async (): Promise<Order[]> => {
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select(`
-          id,
-          numero,
-          total,
-          estado,
-          timestamp,
-          cliente_id,
-          metodoPago,
-          customer:customers ( id, nombre ),
-          order_items (
-            id,
-            cantidad,
-            notas,
-            menu_item:menu_items (
-              id,
-              codigo,
-              nombre,
-              precio,
-              descripcion,
-              keywords,
-              categoria,
-              stock,
-              inventarioCategoria,
-              inventarioTipo,
-              unidadMedida
-            )
-          )
-        `)
+        .select(ORDER_SELECT_COLUMNS)
         .order('timestamp', { ascending: false });
       if (error) throw error;
-      return (data || []).map(mapOrderRecord);
+      const mapped = (data || []).map(mapOrderRecord);
+      persistLocalOrders(mapped);
+      return mapped;
     } catch (error) {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  const localOrders = getLocalData<Order[]>('savia-orders', []);
-  return localOrders.map(mapOrderRecord);
+  return loadLocalOrders();
 };
 
 export const createOrder = async (order: Order): Promise<Order> => {
@@ -547,45 +569,74 @@ export const createOrder = async (order: Order): Promise<Order> => {
         }
       }
 
-      return {
+      const createdOrder: Order = {
         ...sanitizedOrder,
         id: data.id,
         timestamp: new Date(data.timestamp),
         cliente_id: data.cliente_id ?? undefined,
         metodoPago: normalizePaymentMethod(data.metodoPago),
       };
+      upsertLocalOrder(createdOrder);
+      return createdOrder;
     } catch (error) {
       console.warn('Supabase not available, using local data:', error);
     }
   }
 
   // Local storage fallback
-  const orders = getLocalData<Order[]>('savia-orders', []).map(mapOrderRecord);
+  const orders = loadLocalOrders();
   const newOrders = [...orders, sanitizedOrder];
-  setLocalData('savia-orders', newOrders);
+  persistLocalOrders(newOrders);
   return sanitizedOrder;
 };
 
-export const updateOrderStatus = async (orderId: string, status: Order['estado']): Promise<void> => {
+export const updateOrderStatus = async (order: Order, status: Order['estado']): Promise<Order> => {
+  const localOrders = loadLocalOrders();
+
   if (isSupabaseAvailable()) {
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('orders')
         .update({ estado: status })
-        .eq('id', orderId);
+        .eq('id', order.id)
+        .select(ORDER_SELECT_COLUMNS)
+        .maybeSingle();
       if (error) throw error;
-      return;
+
+      let supabaseOrder = data;
+
+      if (!supabaseOrder && typeof order.numero === 'number') {
+        const { data: numeroData, error: numeroError } = await supabase
+          .from('orders')
+          .update({ estado: status })
+          .eq('numero', order.numero)
+          .select(ORDER_SELECT_COLUMNS)
+          .maybeSingle();
+        if (numeroError) throw numeroError;
+        supabaseOrder = numeroData ?? undefined;
+      }
+
+      if (supabaseOrder) {
+        const updatedOrder = mapOrderRecord(supabaseOrder);
+        upsertLocalOrder(updatedOrder);
+        return updatedOrder;
+      }
+
+      console.warn(`[dataService] No se encontró la orden ${order.id} en Supabase. Se usará la caché local.`);
     } catch (error) {
       console.warn('Supabase not available, using local data:', error);
     }
   }
 
-  // Local storage fallback
-  const orders = getLocalData<Order[]>('savia-orders', []).map(mapOrderRecord);
-  const updatedOrders = orders.map(order =>
-    order.id === orderId ? { ...order, estado: status } : order
-  );
-  setLocalData('savia-orders', updatedOrders);
+  const index = localOrders.findIndex((entry) => entry.id === order.id);
+  if (index === -1) {
+    throw new Error(`No se encontró la orden con id ${order.id} para actualizar su estado.`);
+  }
+
+  const updatedOrder = { ...localOrders[index], estado: status };
+  localOrders[index] = updatedOrder;
+  persistLocalOrders(localOrders);
+  return updatedOrder;
 };
 
 export const updateOrder = async (orderId: string, updates: { items?: CartItem[]; total?: number }): Promise<void> => {

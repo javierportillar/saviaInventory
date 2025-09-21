@@ -177,11 +177,22 @@ function App() {
     setOrders((prev) => [...prev, data]);
   };
 
-  const handleUpdateOrderStatus = async (orderId: string, status: Order['estado']) => {
-    await dataService.updateOrderStatus(orderId, status);
-    setOrders(
-      orders.map(order => (order.id === orderId ? { ...order, estado: status } : order))
-    );
+  const handleUpdateOrderStatus = async (targetOrder: Order, status: Order['estado']) => {
+    try {
+      const updatedOrder = await dataService.updateOrderStatus(targetOrder, status);
+      setOrders((prevOrders) => {
+        const index = prevOrders.findIndex(order => order.id === updatedOrder.id);
+        if (index === -1) {
+          return prevOrders;
+        }
+        const next = [...prevOrders];
+        next[index] = updatedOrder;
+        return next;
+      });
+    } catch (error) {
+      console.error('Error actualizando el estado del pedido:', error);
+      alert('No se pudo actualizar el estado del pedido. Inténtalo nuevamente.');
+    }
   };
 
   const handleAddCustomer = async (newCustomer: Customer) => {
