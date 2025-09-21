@@ -1,11 +1,19 @@
 import { MenuItem, Order, Customer, Empleado, Gasto, BalanceResumen, PaymentMethod, CartItem } from '../types';
-import { supabase } from './supabaseClient';
+import { supabase, ensureSupabaseSession } from './supabaseClient';
 import { getLocalData, setLocalData } from '../data/localData';
 import { slugify, generateMenuItemCode } from '../utils/strings';
 
 // Verificar si Supabase está disponible
 const isSupabaseAvailable = () => {
   return !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+};
+
+const ensureSupabaseReady = async (): Promise<boolean> => {
+  if (!isSupabaseAvailable()) {
+    return false;
+  }
+  const session = await ensureSupabaseSession();
+  return !!session;
 };
 
 const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi'];
@@ -236,7 +244,7 @@ const ORDER_SELECT_COLUMNS = `
   estado,
   timestamp,
   cliente_id,
-  metodoPago,
+  ${SUPABASE_PAYMENT_COLUMN},
   customer:customers ( id, nombre ),
   order_items (
     id,
@@ -428,7 +436,7 @@ const loadMenuItemsFromLocalCache = (reason?: string): MenuItem[] => {
 export const fetchMenuItems = async (): Promise<MenuItem[]> => {
   console.info('[dataService] Fetching menu items…');
 
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase.from('menu_items').select('*').order('nombre');
       if (error) throw error;
@@ -446,17 +454,15 @@ export const fetchMenuItems = async (): Promise<MenuItem[]> => {
       console.error('[dataService] Supabase menu fetch failed. Falling back to local cache.', error);
       return loadMenuItemsFromLocalCache('hubo un error consultando Supabase');
     }
-  } else {
-    console.warn('[dataService] Supabase credentials are not configured. Using local cache.');
   }
 
-  console.warn('[dataService] Supabase credentials are not configured. Using local cache.');
+  console.warn('[dataService] Supabase no está disponible. Usando datos locales.');
   return loadMenuItemsFromLocalCache();
 };
 
 export const createMenuItem = async (item: MenuItem): Promise<MenuItem> => {
   const sanitized = ensureMenuItemShape(item);
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase
         .from('menu_items')
@@ -479,7 +485,7 @@ export const createMenuItem = async (item: MenuItem): Promise<MenuItem> => {
 
 export const updateMenuItem = async (item: MenuItem): Promise<MenuItem> => {
   const sanitized = ensureMenuItemShape(item);
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase
         .from('menu_items')
@@ -502,7 +508,7 @@ export const updateMenuItem = async (item: MenuItem): Promise<MenuItem> => {
 };
 
 export const deleteMenuItem = async (id: string): Promise<void> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { error } = await supabase
         .from('menu_items')
@@ -523,7 +529,7 @@ export const deleteMenuItem = async (id: string): Promise<void> => {
 
 // ORDERS
 export const fetchOrders = async (): Promise<Order[]> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase
         .from('orders')
@@ -551,7 +557,7 @@ export const createOrder = async (order: Order): Promise<Order> => {
     metodoPago: normalizePaymentMethod(order.metodoPago),
   };
 
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase
         .from('orders')
@@ -563,7 +569,7 @@ export const createOrder = async (order: Order): Promise<Order> => {
             estado: sanitizedOrder.estado,
             timestamp: sanitizedOrder.timestamp.toISOString(),
             cliente_id: sanitizedOrder.cliente_id ?? null,
-            metodoPago: sanitizedOrder.metodoPago,
+            [SUPABASE_PAYMENT_COLUMN]: sanitizedOrder.metodoPago,
           },
         ])
         .select('*')
@@ -608,7 +614,7 @@ export const createOrder = async (order: Order): Promise<Order> => {
 export const updateOrderStatus = async (order: Order, status: Order['estado']): Promise<Order> => {
   const localOrders = loadLocalOrders();
 
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase
         .from('orders')
@@ -655,7 +661,7 @@ export const updateOrderStatus = async (order: Order, status: Order['estado']): 
 };
 
 export const updateOrder = async (orderId: string, updates: { items?: CartItem[]; total?: number }): Promise<void> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       // Actualizar la orden principal
       if (updates.total !== undefined) {
@@ -710,7 +716,7 @@ export const updateOrder = async (orderId: string, updates: { items?: CartItem[]
 
 // CUSTOMERS
 export const fetchCustomers = async (): Promise<Customer[]> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase.from('customers').select('*');
       if (error) throw error;
@@ -723,7 +729,7 @@ export const fetchCustomers = async (): Promise<Customer[]> => {
 };
 
 export const createCustomer = async (customer: Customer): Promise<Customer> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase.from('customers').insert([customer]).select().single();
       if (error) throw error;
@@ -741,7 +747,7 @@ export const createCustomer = async (customer: Customer): Promise<Customer> => {
 };
 
 export const updateCustomer = async (customer: Customer): Promise<Customer> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { error } = await supabase
         .from('customers')
@@ -762,7 +768,7 @@ export const updateCustomer = async (customer: Customer): Promise<Customer> => {
 };
 
 export const deleteCustomer = async (id: string): Promise<void> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { error } = await supabase.from('customers').delete().eq('id', id);
       if (error) throw error;
@@ -780,7 +786,7 @@ export const deleteCustomer = async (id: string): Promise<void> => {
 
 // EMPLEADOS
 export const fetchEmpleados = async (): Promise<Empleado[]> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase.from('empleados').select('*').order('nombre');
       if (error) throw error;
@@ -793,7 +799,7 @@ export const fetchEmpleados = async (): Promise<Empleado[]> => {
 };
 
 export const createEmpleado = async (empleado: Empleado): Promise<Empleado> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase.from('empleados').insert([empleado]).select().single();
       if (error) throw error;
@@ -811,7 +817,7 @@ export const createEmpleado = async (empleado: Empleado): Promise<Empleado> => {
 };
 
 export const updateEmpleado = async (empleado: Empleado): Promise<Empleado> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { error } = await supabase
         .from('empleados')
@@ -832,7 +838,7 @@ export const updateEmpleado = async (empleado: Empleado): Promise<Empleado> => {
 };
 
 export const deleteEmpleado = async (id: string): Promise<void> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { error } = await supabase.from('empleados').delete().eq('id', id);
       if (error) throw error;
@@ -850,7 +856,7 @@ export const deleteEmpleado = async (id: string): Promise<void> => {
 
 // GASTOS
 export const fetchGastos = async (): Promise<Gasto[]> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase
         .from('gastos')
@@ -868,7 +874,7 @@ export const fetchGastos = async (): Promise<Gasto[]> => {
 
 export const createGasto = async (gasto: Gasto): Promise<Gasto> => {
   const sanitized = normalizeGastoRecord(gasto);
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase
         .from('gastos')
@@ -903,7 +909,7 @@ export const createGasto = async (gasto: Gasto): Promise<Gasto> => {
 
 export const updateGasto = async (gasto: Gasto): Promise<Gasto> => {
   const sanitized = normalizeGastoRecord(gasto);
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { error } = await supabase
         .from('gastos')
@@ -930,7 +936,7 @@ export const updateGasto = async (gasto: Gasto): Promise<Gasto> => {
 };
 
 export const deleteGasto = async (id: string): Promise<void> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { error } = await supabase.from('gastos').delete().eq('id', id);
       if (error) throw error;
@@ -948,7 +954,7 @@ export const deleteGasto = async (id: string): Promise<void> => {
 
 // BALANCE
 export const fetchBalanceResumen = async (): Promise<BalanceResumen[]> => {
-  if (isSupabaseAvailable()) {
+  if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase
         .from('balance_caja')
