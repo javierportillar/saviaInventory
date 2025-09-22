@@ -56,7 +56,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
   const [selectedBowlBases, setSelectedBowlBases] = useState<string[]>([]);
   const [selectedBowlToppings, setSelectedBowlToppings] = useState<string[]>([]);
   const [selectedBowlProtein, setSelectedBowlProtein] = useState<string | null>(null);
-  const [selectedDateKey, setSelectedDateKey] = useState<string>('');
+  const [selectedDateKey, setSelectedDateKey] = useState<string>(() => getDateKey(new Date()));
   const [currentPage, setCurrentPage] = useState(1);
 
   const sortedOrders = useMemo(
@@ -75,15 +75,16 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
     }, {} as Record<string, Order[]>);
   }, [sortedOrders]);
 
-  const dayKeys = useMemo(
-    () =>
-      Object.keys(ordersByDate).sort(
-        (a, b) => parseDateKey(b).getTime() - parseDateKey(a).getTime()
-      ),
-    [ordersByDate]
-  );
+  const selectedDate = useMemo(() => {
+    if (!selectedDateKey) {
+      return null;
+    }
 
-  const selectedDateOrders = selectedDateKey
+    const parsedDate = parseDateKey(selectedDateKey);
+    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+  }, [selectedDateKey]);
+
+  const selectedDateOrders = selectedDate
     ? ordersByDate[selectedDateKey] ?? []
     : sortedOrders;
 
@@ -100,17 +101,9 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
   const pageEnd = Math.min(currentPage * ITEMS_PER_PAGE, selectedDateOrders.length);
 
   const hasPagination = selectedDateOrders.length > ITEMS_PER_PAGE;
-  const dateHeading = selectedDateKey
-    ? formatDate(parseDateKey(selectedDateKey))
+  const dateHeading = selectedDate
+    ? formatDate(selectedDate)
     : 'Todas las comandas';
-
-  const formatDateButtonLabel = (dateKey: string): string => {
-    return parseDateKey(dateKey).toLocaleDateString('es-CO', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-  };
 
   const resetBowlSelections = () => {
     setSelectedBowlBases([]);
@@ -142,21 +135,6 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
   useEffect(() => {
     fetchMenuItems();
   }, []);
-
-  useEffect(() => {
-    if (dayKeys.length === 0) {
-      if (selectedDateKey !== '') {
-        setSelectedDateKey('');
-        setCurrentPage(1);
-      }
-      return;
-    }
-
-    if (!selectedDateKey || !dayKeys.includes(selectedDateKey)) {
-      setSelectedDateKey(dayKeys[0]);
-      setCurrentPage(1);
-    }
-  }, [dayKeys, selectedDateKey]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -424,8 +402,9 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
     setSearchQuery('');
   };
 
-  const handleSelectDate = (dateKey: string) => {
-    setSelectedDateKey(dateKey);
+  const handleDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    setSelectedDateKey(value || getDateKey(new Date()));
     setCurrentPage(1);
   };
 
@@ -473,7 +452,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
             <div>
               <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
-                {selectedDateKey ? `Comandas del ${dateHeading}` : dateHeading}
+                {selectedDate ? `Comandas del ${dateHeading}` : dateHeading}
               </h3>
               <p className="text-sm text-gray-500">
                 {selectedDateOrders.length === 1
@@ -484,29 +463,21 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
                 )}
               </p>
             </div>
-            <div className="flex items-center gap-2 overflow-x-auto pb-1" role="tablist">
-              {dayKeys.map((dateKey) => {
-                const isActive = dateKey === selectedDateKey;
-                return (
-                  <button
-                    key={dateKey}
-                    type="button"
-                    onClick={() => handleSelectDate(dateKey)}
-                    className={`flex-shrink-0 px-3 py-1.5 rounded-full border text-sm font-medium transition-colors ${
-                      isActive
-                        ? 'shadow-sm'
-                        : 'bg-white hover:border-gray-300'
-                    }`}
-                    style={isActive ? { backgroundColor: COLORS.accent, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
-                    aria-pressed={isActive}
-                  >
-                    <span>{formatDateButtonLabel(dateKey)}</span>
-                    <span className="ml-2 text-xs opacity-75">
-                      {ordersByDate[dateKey]?.length ?? 0}
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2">
+              <label
+                htmlFor="comandas-date-picker"
+                className="text-sm font-medium text-gray-600"
+              >
+                Selecciona el día
+              </label>
+              <input
+                id="comandas-date-picker"
+                type="date"
+                value={selectedDateKey}
+                onChange={handleDateChange}
+                max={getDateKey(new Date())}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-yellow-400"
+              />
             </div>
           </div>
 
