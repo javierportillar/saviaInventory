@@ -200,7 +200,7 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
                   <span className="text-sm text-gray-500">Stock: {item.stock}</span>
                   <button
                     onClick={() => addToCart(item)}
-                    disabled={item.stock === 0}
+                    disabled={item.inventarioCategoria === 'Inventariables' && item.stock === 0}
                     className="px-3 sm:px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                     style={{ backgroundColor: COLORS.dark }}
                   >
