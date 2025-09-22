@@ -26,7 +26,9 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
     order.estado === 'pendiente' || order.estado === 'preparando'
   ).length;
   
-  const lowStockItems = menuItems.filter(item => item.stock < 10);
+  const lowStockItems = menuItems.filter(
+    item => item.inventarioCategoria === 'Inventariables' && item.stock < 10
+  );
 
   const stats = [
     {
