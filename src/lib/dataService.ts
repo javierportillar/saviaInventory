@@ -1,5 +1,5 @@
 import { MenuItem, Order, Customer, Empleado, Gasto, BalanceResumen, PaymentMethod, CartItem } from '../types';
-import { supabase, ensureSupabaseSession } from './supabaseClient';
+import { supabase } from './supabaseClient';
 import { getLocalData, setLocalData } from '../data/localData';
 import { slugify, generateMenuItemCode } from '../utils/strings';
 
@@ -12,8 +12,7 @@ const ensureSupabaseReady = async (): Promise<boolean> => {
   if (!isSupabaseAvailable()) {
     return false;
   }
-  const session = await ensureSupabaseSession();
-  return !!session;
+  return true;
 };
 
 const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi'];
