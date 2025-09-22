@@ -3,6 +3,14 @@ import { Order, MenuItem, CartItem } from '../types';
 import { Clock, Check, CheckCircle, User, CreditCard, Edit3, Plus, Minus, Trash2, Save, X } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, formatDateTime } from '../utils/format';
+import {
+  calculateCartTotal,
+  getCartItemBaseUnitPrice,
+  getCartItemEffectiveUnitPrice,
+  getCartItemSubtotal,
+  isSandwichItem,
+  STUDENT_DISCOUNT_NOTE,
+} from '../utils/cart';
 import dataService from '../lib/dataService';
 import {
   BOWL_BASE_LIMIT,
@@ -92,7 +100,13 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
       if (existingIndex >= 0) {
         updatedItems = prev.items.map((cartItem, index) =>
           index === existingIndex
-            ? { ...cartItem, cantidad: cartItem.cantidad + 1 }
+            ? {
+                ...cartItem,
+                cantidad: cartItem.cantidad + 1,
+                precioUnitario: typeof cartItem.precioUnitario === 'number'
+                  ? cartItem.precioUnitario
+                  : menuItem.precio,
+              }
             : cartItem
         );
       } else {
@@ -104,14 +118,13 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
             notas: options?.notas,
             customKey: options?.customKey,
             bowlCustomization: options?.bowlCustomization,
+            precioUnitario: menuItem.precio,
+            studentDiscount: false,
           },
         ];
       }
 
-      const newTotal = updatedItems.reduce(
-        (sum, cartItem) => sum + cartItem.item.precio * cartItem.cantidad,
-        0
-      );
+      const newTotal = calculateCartTotal(updatedItems);
 
       return {
         ...prev,
@@ -149,26 +162,31 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
   const startEditingOrder = (order: Order) => {
     setEditingOrder({
       orderId: order.id,
-      items: [...order.items],
-      total: order.total
+      items: order.items.map((cartItem) => ({
+        ...cartItem,
+        precioUnitario: typeof cartItem.precioUnitario === 'number'
+          ? cartItem.precioUnitario
+          : cartItem.item.precio,
+        studentDiscount: !!cartItem.studentDiscount,
+      })),
+      total: calculateCartTotal(order.items)
     });
   };
 
   const updateItemPrice = (itemIndex: number, newPrice: number) => {
     if (!editingOrder) return;
-    
+
     const updatedItems = [...editingOrder.items];
     updatedItems[itemIndex] = {
       ...updatedItems[itemIndex],
       item: {
         ...updatedItems[itemIndex].item,
         precio: newPrice
-      }
+      },
+      precioUnitario: newPrice,
     };
-    
-    const newTotal = updatedItems.reduce((sum, cartItem) => 
-      sum + (cartItem.item.precio * cartItem.cantidad), 0
-    );
+
+    const newTotal = calculateCartTotal(updatedItems);
     
     setEditingOrder({
       ...editingOrder,
@@ -190,10 +208,8 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
       ...updatedItems[itemIndex],
       cantidad: newQuantity
     };
-    
-    const newTotal = updatedItems.reduce((sum, cartItem) => 
-      sum + (cartItem.item.precio * cartItem.cantidad), 0
-    );
+
+    const newTotal = calculateCartTotal(updatedItems);
     
     setEditingOrder({
       ...editingOrder,
@@ -204,16 +220,32 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
 
   const removeItem = (itemIndex: number) => {
     if (!editingOrder) return;
-    
+
     const updatedItems = editingOrder.items.filter((_, index) => index !== itemIndex);
-    const newTotal = updatedItems.reduce((sum, cartItem) => 
-      sum + (cartItem.item.precio * cartItem.cantidad), 0
-    );
-    
+    const newTotal = calculateCartTotal(updatedItems);
+
     setEditingOrder({
       ...editingOrder,
       items: updatedItems,
       total: newTotal
+    });
+  };
+
+  const toggleEditingItemDiscount = (itemIndex: number) => {
+    if (!editingOrder) return;
+
+    const updatedItems = [...editingOrder.items];
+    updatedItems[itemIndex] = {
+      ...updatedItems[itemIndex],
+      studentDiscount: !updatedItems[itemIndex].studentDiscount,
+    };
+
+    const newTotal = calculateCartTotal(updatedItems);
+
+    setEditingOrder({
+      ...editingOrder,
+      items: updatedItems,
+      total: newTotal,
     });
   };
 
@@ -381,6 +413,28 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
                           </button>
                         </div>
 
+                        {cartItem.studentDiscount && (
+                          <span className="inline-flex items-center text-[11px] font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full w-fit">
+                            {STUDENT_DISCOUNT_NOTE}
+                          </span>
+                        )}
+
+                        <div className="text-xs text-gray-600">
+                          Precio unidad:{' '}
+                          {cartItem.studentDiscount ? (
+                            <>
+                              <span className="line-through text-gray-400 mr-2">
+                                {formatCOP(getCartItemBaseUnitPrice(cartItem))}
+                              </span>
+                              <span className="font-semibold text-green-600">
+                                {formatCOP(getCartItemEffectiveUnitPrice(cartItem))}
+                              </span>
+                            </>
+                          ) : (
+                            <span>{formatCOP(getCartItemBaseUnitPrice(cartItem))}</span>
+                          )}
+                        </div>
+
                         {cartItem.notas && (
                           <p className="text-xs text-gray-500 whitespace-pre-line">
                             {cartItem.notas}
@@ -406,21 +460,34 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
                               </button>
                             </div>
                           </div>
-                          
+
                           <div className="flex items-center gap-2 flex-1">
                             <span className="text-xs text-gray-600">Precio:</span>
                             <input
                               type="number"
-                              value={cartItem.item.precio}
+                              value={getCartItemBaseUnitPrice(cartItem)}
                               onChange={(e) => updateItemPrice(index, Number(e.target.value))}
                               className="w-20 px-2 py-1 text-xs border border-gray-300 rounded"
                             />
                           </div>
                         </div>
-                        
+
+                        {isSandwichItem(cartItem.item) && (
+                          <button
+                            onClick={() => toggleEditingItemDiscount(index)}
+                            className={`self-start inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                              cartItem.studentDiscount
+                                ? 'bg-green-600 text-white hover:bg-green-700'
+                                : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
+                            }`}
+                          >
+                            {cartItem.studentDiscount ? 'Quitar descuento' : 'Aplicar descuento estudiante'}
+                          </button>
+                        )}
+
                         <div className="text-right">
                           <span className="text-sm font-medium">
-                            Subtotal: {formatCOP(cartItem.item.precio * cartItem.cantidad)}
+                            Subtotal: {formatCOP(getCartItemSubtotal(cartItem))}
                           </span>
                         </div>
                       </div>
@@ -469,8 +536,28 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
                     <div key={index} className="space-y-1">
                       <div className="flex justify-between items-center text-xs lg:text-sm">
                         <span>{cartItem.cantidad}x {cartItem.item.nombre}</span>
-                        <span className="font-medium">{formatCOP(cartItem.item.precio * cartItem.cantidad)}</span>
+                        <span className="font-medium">{formatCOP(getCartItemSubtotal(cartItem))}</span>
                       </div>
+                      <div className="text-[11px] lg:text-xs text-gray-600">
+                        Precio unidad:{' '}
+                        {cartItem.studentDiscount ? (
+                          <>
+                            <span className="line-through text-gray-400 mr-1">
+                              {formatCOP(getCartItemBaseUnitPrice(cartItem))}
+                            </span>
+                            <span className="font-semibold text-green-600">
+                              {formatCOP(getCartItemEffectiveUnitPrice(cartItem))}
+                            </span>
+                          </>
+                        ) : (
+                          <span>{formatCOP(getCartItemBaseUnitPrice(cartItem))}</span>
+                        )}
+                      </div>
+                      {cartItem.studentDiscount && (
+                        <span className="inline-flex items-center text-[11px] font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                          {STUDENT_DISCOUNT_NOTE}
+                        </span>
+                      )}
                       {cartItem.notas && (
                         <p className="text-xs text-gray-500 whitespace-pre-line">
                           {cartItem.notas}

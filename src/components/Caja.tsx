@@ -3,6 +3,14 @@ import { MenuItem, CartItem, Order, ModuleType, Customer, PaymentMethod, BowlSal
 import { Plus, Minus, Trash2, Search, ShoppingCart, Edit2, Check } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, generateOrderNumber } from '../utils/format';
+import {
+  calculateCartTotal,
+  getCartItemBaseUnitPrice,
+  getCartItemEffectiveUnitPrice,
+  getCartItemSubtotal,
+  isSandwichItem,
+  STUDENT_DISCOUNT_NOTE,
+} from '../utils/cart';
 import dataService from '../lib/dataService';
 import {
   BOWL_BASE_LIMIT,
@@ -174,6 +182,8 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
           notas: options?.notas,
           customKey: options?.customKey,
           bowlCustomization: options?.bowlCustomization,
+          precioUnitario: item.precio,
+          studentDiscount: false,
         },
       ];
     });
@@ -211,6 +221,16 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
     );
   };
 
+  const toggleStudentDiscount = (itemId: string, customKey: string | undefined) => {
+    setCart(prev =>
+      prev.map(cartItem =>
+        cartItem.item.id === itemId && cartItem.customKey === customKey
+          ? { ...cartItem, studentDiscount: !cartItem.studentDiscount }
+          : cartItem
+      )
+    );
+  };
+
   const baseLimitReached = selectedBowlBases.length >= BOWL_BASE_LIMIT;
   const toppingLimitReached = selectedBowlToppings.length >= BOWL_TOPPING_LIMIT;
   const isBowlSelectionValid =
@@ -218,7 +238,7 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
     selectedBowlToppings.length === BOWL_TOPPING_LIMIT &&
     !!selectedBowlProtein;
 
-  const total = cart.reduce((sum, cartItem) => sum + (cartItem.item.precio * cartItem.cantidad), 0);
+  const total = calculateCartTotal(cart);
 
   const processPayment = async () => {
     if (cart.length === 0) return;
@@ -384,37 +404,78 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
               <>
                 <div className="space-y-3 mb-4 lg:mb-6 max-h-80 lg:max-h-96 overflow-y-auto">
                   {cart.map((cartItem) => (
-                    <div key={`${cartItem.item.id}-${cartItem.customKey ?? 'default'}`} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                      <div className="flex-1">
-                        <h4 className="font-medium text-sm">{cartItem.item.nombre}</h4>
-                        <p className="text-xs text-gray-600">{formatCOP(cartItem.item.precio)}</p>
-                        {cartItem.notas && (
-                          <p className="mt-1 text-xs text-gray-500 whitespace-pre-line">
-                            {cartItem.notas}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => updateQuantity(cartItem.item.id, cartItem.customKey, cartItem.cantidad - 1)}
-                          className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center hover:bg-gray-300"
-                        >
-                          <Minus size={12} />
-                        </button>
-                        <span className="w-8 text-center font-medium">{cartItem.cantidad}</span>
-                        <button
-                          onClick={() => updateQuantity(cartItem.item.id, cartItem.customKey, cartItem.cantidad + 1)}
-                          className="w-6 h-6 rounded-full flex items-center justify-center text-white hover:opacity-90"
-                          style={{ backgroundColor: COLORS.dark }}
-                        >
-                          <Plus size={12} />
-                        </button>
-                        <button
-                          onClick={() => removeFromCart(cartItem.item.id, cartItem.customKey)}
-                          className="w-6 h-6 rounded-full bg-red-100 text-red-600 flex items-center justify-center hover:bg-red-200 ml-2"
-                        >
-                          <Trash2 size={12} />
-                        </button>
+                    <div
+                      key={`${cartItem.item.id}-${cartItem.customKey ?? 'default'}`}
+                      className="bg-gray-50 rounded-lg p-3 space-y-2"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                        <div className="flex-1 space-y-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <h4 className="font-medium text-sm">{cartItem.item.nombre}</h4>
+                            <span className="text-xs font-semibold text-gray-700">
+                              Subtotal: {formatCOP(getCartItemSubtotal(cartItem))}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-600">
+                            Precio unidad:{' '}
+                            {cartItem.studentDiscount ? (
+                              <>
+                                <span className="line-through text-gray-400 mr-2">
+                                  {formatCOP(getCartItemBaseUnitPrice(cartItem))}
+                                </span>
+                                <span className="font-semibold text-green-600">
+                                  {formatCOP(getCartItemEffectiveUnitPrice(cartItem))}
+                                </span>
+                              </>
+                            ) : (
+                              <span>{formatCOP(getCartItemBaseUnitPrice(cartItem))}</span>
+                            )}
+                          </div>
+                          {cartItem.studentDiscount && (
+                            <span className="inline-flex items-center text-[11px] font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                              {STUDENT_DISCOUNT_NOTE}
+                            </span>
+                          )}
+                          {cartItem.notas && (
+                            <p className="text-xs text-gray-500 whitespace-pre-line">
+                              {cartItem.notas}
+                            </p>
+                          )}
+                          {isSandwichItem(cartItem.item) && (
+                            <button
+                              onClick={() => toggleStudentDiscount(cartItem.item.id, cartItem.customKey)}
+                              className={`mt-1 inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                                cartItem.studentDiscount
+                                  ? 'bg-green-600 text-white hover:bg-green-700'
+                                  : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
+                              }`}
+                            >
+                              {cartItem.studentDiscount ? 'Quitar descuento' : 'Aplicar descuento estudiante'}
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 self-start">
+                          <button
+                            onClick={() => updateQuantity(cartItem.item.id, cartItem.customKey, cartItem.cantidad - 1)}
+                            className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center hover:bg-gray-300"
+                          >
+                            <Minus size={12} />
+                          </button>
+                          <span className="w-8 text-center font-medium">{cartItem.cantidad}</span>
+                          <button
+                            onClick={() => updateQuantity(cartItem.item.id, cartItem.customKey, cartItem.cantidad + 1)}
+                            className="w-6 h-6 rounded-full flex items-center justify-center text-white hover:opacity-90"
+                            style={{ backgroundColor: COLORS.dark }}
+                          >
+                            <Plus size={12} />
+                          </button>
+                          <button
+                            onClick={() => removeFromCart(cartItem.item.id, cartItem.customKey)}
+                            className="w-6 h-6 rounded-full bg-red-100 text-red-600 flex items-center justify-center hover:bg-red-200"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}

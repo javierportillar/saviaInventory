@@ -26,6 +26,8 @@ export interface CartItem {
   notas?: string;
   customKey?: string;
   bowlCustomization?: BowlSaladoCustomization;
+  precioUnitario?: number;
+  studentDiscount?: boolean;
 }
 
 export interface Order {

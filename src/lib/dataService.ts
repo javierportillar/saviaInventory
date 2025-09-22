@@ -2,6 +2,10 @@ import { MenuItem, Order, Customer, Empleado, Gasto, BalanceResumen, PaymentMeth
 import { supabase } from './supabaseClient';
 import { getLocalData, setLocalData } from '../data/localData';
 import { slugify, generateMenuItemCode } from '../utils/strings';
+import {
+  buildNotesWithStudentDiscount,
+  extractStudentDiscountFromNotes,
+} from '../utils/cart';
 
 // Verificar si Supabase está disponible
 const isSupabaseAvailable = () => {
@@ -191,11 +195,14 @@ const mapCartItemsFromRecord = (record: any): CartItem[] => {
           item?.precio_unitario ?? item?.precioUnitario ?? item?.unitPrice ?? item?.unit_price,
           menuItem.precio
         );
+        const rawNotes = typeof item?.notas === 'string' ? item.notas : undefined;
+        const { studentDiscount, cleanedNotes } = extractStudentDiscountFromNotes(rawNotes);
         return {
           item: menuItem,
           cantidad: cantidad,
-          notas: item?.notas ?? undefined,
+          notas: cleanedNotes,
           precioUnitario: unitPrice,
+          studentDiscount,
         };
       })
       .filter((entry): entry is CartItem => entry !== null);
@@ -209,10 +216,14 @@ const mapCartItemsFromRecord = (record: any): CartItem[] => {
           return null;
         }
         const menuItem = mapMenuItemRecord(menuRecord);
+        const rawNotes = typeof item?.notas === 'string' ? item.notas : undefined;
+        const { studentDiscount, cleanedNotes } = extractStudentDiscountFromNotes(rawNotes);
         return {
           item: menuItem,
           cantidad: typeof item?.cantidad === 'number' ? item.cantidad : Number(item?.cantidad ?? 0),
-          notas: item?.notas ?? undefined,
+          notas: cleanedNotes,
+          precioUnitario: typeof item?.precioUnitario === 'number' ? item.precioUnitario : undefined,
+          studentDiscount: typeof item?.studentDiscount === 'boolean' ? item.studentDiscount : studentDiscount,
         };
       })
       .filter((entry): entry is CartItem => entry !== null);
@@ -555,6 +566,9 @@ export const createOrder = async (order: Order): Promise<Order> => {
   const sanitizedItems = order.items.map((cartItem) => ({
     ...cartItem,
     item: ensureMenuItemShape(cartItem.item),
+    precioUnitario: typeof cartItem.precioUnitario === 'number'
+      ? cartItem.precioUnitario
+      : cartItem.item.precio,
   }));
   const sanitizedOrder: Order = {
     ...order,
@@ -586,7 +600,10 @@ export const createOrder = async (order: Order): Promise<Order> => {
           order_id: data.id,
           menu_item_id: cartItem.item.id,
           cantidad: cartItem.cantidad,
-          notas: cartItem.notas ?? null,
+          notas: buildNotesWithStudentDiscount(
+            cartItem.notas,
+            cartItem.studentDiscount ?? false
+          ) ?? null,
         }));
         const { error: itemsError } = await supabase.from('order_items').insert(orderItemsPayload);
         if (itemsError) {
@@ -692,7 +709,10 @@ export const updateOrder = async (orderId: string, updates: { items?: CartItem[]
             order_id: orderId,
             menu_item_id: cartItem.item.id,
             cantidad: cartItem.cantidad,
-            notas: cartItem.notas ?? null,
+            notas: buildNotesWithStudentDiscount(
+              cartItem.notas,
+              cartItem.studentDiscount ?? false
+            ) ?? null,
           }));
           const { error: insertError } = await supabase.from('order_items').insert(orderItemsPayload);
           if (insertError) throw insertError;
