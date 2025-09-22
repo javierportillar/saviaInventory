@@ -47,6 +47,11 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
     return matchesSearch && matchesCategory && isNonInventariable;
   });
 
+  const getCartQuantity = (itemId: string) => {
+    const cartItem = cart.find(({ item }) => item.id === itemId);
+    return cartItem?.cantidad ?? 0;
+  };
+
   const addToCart = (item: MenuItem) => {
     setCart(prev => {
       const existing = prev.find(cartItem => cartItem.item.id === item.id);
@@ -144,7 +149,7 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
     <div className="w-full max-w-7xl mx-auto p-4 lg:p-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
         {/* Panel de productos */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="order-2 lg:order-1 lg:col-span-2 space-y-6">
           <div>
             <h2 className="text-xl lg:text-2xl font-bold mb-4" style={{ color: COLORS.dark }}>
               Punto de Venta
@@ -179,41 +184,58 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
 
           {/* Grid de productos */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:gap-4">
-            {filteredItems.map((item) => (
-              <div
-                key={item.id}
-                className="bg-white rounded-lg lg:rounded-xl p-3 lg:p-4 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200"
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <h3 className="font-semibold text-sm lg:text-base" style={{ color: COLORS.dark }}>
-                    {item.nombre}
-                  </h3>
-                  <span className="font-bold text-sm lg:text-base" style={{ color: COLORS.accent }}>
-                    {formatCOP(item.precio)}
-                  </span>
+            {filteredItems.map((item) => {
+              const quantity = getCartQuantity(item.id);
+              const isSelected = quantity > 0;
+
+              return (
+                <div
+                  key={item.id}
+                  className={`relative rounded-lg lg:rounded-xl p-3 lg:p-4 shadow-sm hover:shadow-md transition-all duration-200 border ${
+                    isSelected ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'
+                  }`}
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-semibold text-sm lg:text-base" style={{ color: COLORS.dark }}>
+                      {item.nombre}
+                    </h3>
+                    <span className="font-bold text-sm lg:text-base" style={{ color: COLORS.accent }}>
+                      {formatCOP(item.precio)}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-600 mb-1">{item.categoria}</p>
+                  {item.descripcion && (
+                    <p className="text-sm text-gray-500 mb-3 line-clamp-2">{item.descripcion}</p>
+                  )}
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500">Stock: {item.stock}</span>
+                    <div className="flex items-center gap-2">
+                      {isSelected && (
+                        <span
+                          className="inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full px-2 text-xs font-semibold text-white shadow-sm"
+                          style={{ backgroundColor: COLORS.accent }}
+                        >
+                          {quantity}
+                        </span>
+                      )}
+                      <button
+                        onClick={() => addToCart(item)}
+                        disabled={item.inventarioCategoria === 'Inventariables' && item.stock === 0}
+                        className="px-3 lg:px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                        style={{ backgroundColor: COLORS.dark }}
+                      >
+                        <Plus size={16} />
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-sm text-gray-600 mb-1">{item.categoria}</p>
-                {item.descripcion && (
-                  <p className="text-sm text-gray-500 mb-3 line-clamp-2">{item.descripcion}</p>
-                )}
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-500">Stock: {item.stock}</span>
-                  <button
-                    onClick={() => addToCart(item)}
-                    disabled={item.inventarioCategoria === 'Inventariables' && item.stock === 0}
-                    className="px-3 lg:px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                    style={{ backgroundColor: COLORS.dark }}
-                  >
-                    <Plus size={16} />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
         {/* Panel del carrito */}
-        <div className="space-y-6">
+        <div className="order-1 lg:order-2 space-y-6">
           <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 lg:sticky lg:top-24">
             <div className="flex items-center gap-2 mb-4">
               <ShoppingCart size={24} style={{ color: COLORS.dark }} />
