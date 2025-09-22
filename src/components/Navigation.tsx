@@ -41,7 +41,11 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout }: Nav
   const allowedModules =
     user.role === 'admin'
       ? modules
+<<<<<<< HEAD
       : modules.filter(m => ['caja', 'comandas', 'cocina', 'clientes','inventario','gastos'].includes(m.id));
+=======
+      : modules.filter(m => ['caja', 'comandas', 'cocina', 'clientes', 'gastos','inventario'].includes(m.id));
+>>>>>>> dev
 
   const handleModuleClick = (moduleId: ModuleType) => {
     onModuleChange(moduleId);
