@@ -14,10 +14,18 @@ export interface MenuItem {
 
 export type PaymentMethod = 'efectivo' | 'tarjeta' | 'nequi';
 
+export interface BowlSaladoCustomization {
+  bases: string[];
+  toppings: string[];
+  proteina: string;
+}
+
 export interface CartItem {
   item: MenuItem;
   cantidad: number;
   notas?: string;
+  customKey?: string;
+  bowlCustomization?: BowlSaladoCustomization;
 }
 
 export interface Order {

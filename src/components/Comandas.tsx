@@ -1,9 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Order, MenuItem, CartItem } from '../types';
-import { Clock, CheckCircle, User, CreditCard, Edit3, Plus, Minus, Trash2, Save, X } from 'lucide-react';
+import { Clock, Check, CheckCircle, User, CreditCard, Edit3, Plus, Minus, Trash2, Save, X } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, formatDateTime } from '../utils/format';
 import dataService from '../lib/dataService';
+import {
+  BOWL_BASE_LIMIT,
+  BOWL_BASE_OPTIONS,
+  BOWL_PROTEIN_OPTIONS,
+  BOWL_TOPPING_LIMIT,
+  BOWL_TOPPING_OPTIONS,
+  isBowlSalado,
+} from '../constants/bowl';
 
 interface ComandasProps {
   orders: Order[];
@@ -22,6 +30,37 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
   const [editingOrder, setEditingOrder] = useState<EditingOrder | null>(null);
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [bowlModalItem, setBowlModalItem] = useState<MenuItem | null>(null);
+  const [selectedBowlBases, setSelectedBowlBases] = useState<string[]>([]);
+  const [selectedBowlToppings, setSelectedBowlToppings] = useState<string[]>([]);
+  const [selectedBowlProtein, setSelectedBowlProtein] = useState<string | null>(null);
+
+  const resetBowlSelections = () => {
+    setSelectedBowlBases([]);
+    setSelectedBowlToppings([]);
+    setSelectedBowlProtein(null);
+  };
+
+  const toggleBowlOption = (
+    option: string,
+    selected: string[],
+    setSelected: React.Dispatch<React.SetStateAction<string[]>>,
+    limit: number
+  ) => {
+    setSelected(prev => {
+      if (prev.includes(option)) {
+        return prev.filter(value => value !== option);
+      }
+      if (prev.length >= limit) {
+        return prev;
+      }
+      return [...prev, option];
+    });
+  };
+
+  const handleProteinSelection = (protein: string) => {
+    setSelectedBowlProtein(prev => (prev === protein ? null : protein));
+  };
 
   useEffect(() => {
     fetchMenuItems();
@@ -30,6 +69,59 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
   const fetchMenuItems = async () => {
     const data = await dataService.fetchMenuItems();
     setMenuItems(data);
+  };
+
+  const addMenuItemToEditingOrder = (
+    menuItem: MenuItem,
+    options?: {
+      notas?: string;
+      customKey?: string;
+      bowlCustomization?: CartItem['bowlCustomization'];
+    }
+  ) => {
+    setEditingOrder(prev => {
+      if (!prev) {
+        return prev;
+      }
+
+      const existingIndex = prev.items.findIndex(
+        item => item.item.id === menuItem.id && item.customKey === options?.customKey
+      );
+
+      let updatedItems: CartItem[];
+      if (existingIndex >= 0) {
+        updatedItems = prev.items.map((cartItem, index) =>
+          index === existingIndex
+            ? { ...cartItem, cantidad: cartItem.cantidad + 1 }
+            : cartItem
+        );
+      } else {
+        updatedItems = [
+          ...prev.items,
+          {
+            item: menuItem,
+            cantidad: 1,
+            notas: options?.notas,
+            customKey: options?.customKey,
+            bowlCustomization: options?.bowlCustomization,
+          },
+        ];
+      }
+
+      const newTotal = updatedItems.reduce(
+        (sum, cartItem) => sum + cartItem.item.precio * cartItem.cantidad,
+        0
+      );
+
+      return {
+        ...prev,
+        items: updatedItems,
+        total: newTotal,
+      };
+    });
+
+    setShowAddProduct(false);
+    setSearchQuery('');
   };
 
   const sortedOrders = [...orders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
@@ -127,38 +219,66 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
 
   const addProductToOrder = (menuItem: MenuItem) => {
     if (!editingOrder) return;
-    
-    const existingItemIndex = editingOrder.items.findIndex(
-      item => item.item.id === menuItem.id
-    );
-    
-    let updatedItems;
-    if (existingItemIndex >= 0) {
-      updatedItems = [...editingOrder.items];
-      updatedItems[existingItemIndex] = {
-        ...updatedItems[existingItemIndex],
-        cantidad: updatedItems[existingItemIndex].cantidad + 1
-      };
-    } else {
-      updatedItems = [...editingOrder.items, {
-        item: menuItem,
-        cantidad: 1
-      }];
+
+    if (isBowlSalado(menuItem)) {
+      resetBowlSelections();
+      setBowlModalItem(menuItem);
+      setShowAddProduct(false);
+      setSearchQuery('');
+      return;
     }
-    
-    const newTotal = updatedItems.reduce((sum, cartItem) => 
-      sum + (cartItem.item.precio * cartItem.cantidad), 0
-    );
-    
-    setEditingOrder({
-      ...editingOrder,
-      items: updatedItems,
-      total: newTotal
-    });
-    
-    setShowAddProduct(false);
-    setSearchQuery('');
+
+    addMenuItemToEditingOrder(menuItem);
   };
+
+  const confirmBowlSelection = () => {
+    if (!bowlModalItem || !selectedBowlProtein) return;
+
+    if (
+      selectedBowlBases.length !== BOWL_BASE_LIMIT ||
+      selectedBowlToppings.length !== BOWL_TOPPING_LIMIT
+    ) {
+      return;
+    }
+
+    const notas = [
+      `Bases: ${selectedBowlBases.join(', ')}`,
+      `Toppings: ${selectedBowlToppings.join(', ')}`,
+      `Proteína: ${selectedBowlProtein}`,
+    ].join('\n');
+
+    const customKey = [
+      bowlModalItem.id,
+      [...selectedBowlBases].sort().join('-'),
+      [...selectedBowlToppings].sort().join('-'),
+      selectedBowlProtein,
+    ].join('|');
+
+    addMenuItemToEditingOrder(bowlModalItem, {
+      notas,
+      customKey,
+      bowlCustomization: {
+        bases: selectedBowlBases,
+        toppings: selectedBowlToppings,
+        proteina: selectedBowlProtein,
+      },
+    });
+
+    setBowlModalItem(null);
+    resetBowlSelections();
+  };
+
+  const closeBowlModal = () => {
+    setBowlModalItem(null);
+    resetBowlSelections();
+  };
+
+  const baseLimitReached = selectedBowlBases.length >= BOWL_BASE_LIMIT;
+  const toppingLimitReached = selectedBowlToppings.length >= BOWL_TOPPING_LIMIT;
+  const isBowlSelectionValid =
+    selectedBowlBases.length === BOWL_BASE_LIMIT &&
+    selectedBowlToppings.length === BOWL_TOPPING_LIMIT &&
+    !!selectedBowlProtein;
 
   const saveOrderChanges = async () => {
     if (!editingOrder) return;
@@ -184,10 +304,15 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
     setSearchQuery('');
   };
 
-  const filteredMenuItems = menuItems.filter(item =>
-    item.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (item.keywords && item.keywords.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const filteredMenuItems = menuItems.filter(item => {
+    const query = searchQuery.toLowerCase();
+    const matchesSearch =
+      !query ||
+      item.nombre.toLowerCase().includes(query) ||
+      (item.keywords && item.keywords.toLowerCase().includes(query));
+    const isNonInventariable = item.inventarioCategoria !== 'Inventariables';
+    return matchesSearch && isNonInventariable;
+  });
 
   return (
     <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
@@ -255,7 +380,13 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
                             <Trash2 size={14} />
                           </button>
                         </div>
-                        
+
+                        {cartItem.notas && (
+                          <p className="text-xs text-gray-500 whitespace-pre-line">
+                            {cartItem.notas}
+                          </p>
+                        )}
+
                         <div className="flex flex-col lg:flex-row gap-2">
                           <div className="flex items-center gap-2 flex-1">
                             <span className="text-xs text-gray-600">Cant:</span>
@@ -335,9 +466,16 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
               ) : (
                 <div className="space-y-2 mb-4">
                   {order.items.map((cartItem, index) => (
-                    <div key={index} className="flex justify-between items-center text-xs lg:text-sm">
-                      <span>{cartItem.cantidad}x {cartItem.item.nombre}</span>
-                      <span className="font-medium">{formatCOP(cartItem.item.precio * cartItem.cantidad)}</span>
+                    <div key={index} className="space-y-1">
+                      <div className="flex justify-between items-center text-xs lg:text-sm">
+                        <span>{cartItem.cantidad}x {cartItem.item.nombre}</span>
+                        <span className="font-medium">{formatCOP(cartItem.item.precio * cartItem.cantidad)}</span>
+                      </div>
+                      {cartItem.notas && (
+                        <p className="text-xs text-gray-500 whitespace-pre-line">
+                          {cartItem.notas}
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -446,6 +584,153 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
             >
               Cancelar
             </button>
+          </div>
+        </div>
+      )}
+
+      {bowlModalItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg lg:text-xl font-bold mb-4" style={{ color: COLORS.dark }}>
+              Personaliza tu Bowl Salado
+            </h3>
+
+            <div className="space-y-6">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                    Elige tus bases
+                  </h4>
+                  <span className="text-xs text-gray-500">
+                    {selectedBowlBases.length}/{BOWL_BASE_LIMIT}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {BOWL_BASE_OPTIONS.map((base) => {
+                    const selected = selectedBowlBases.includes(base);
+                    const disabled = !selected && baseLimitReached;
+                    return (
+                      <button
+                        key={base}
+                        type="button"
+                        onClick={() => toggleBowlOption(base, selectedBowlBases, setSelectedBowlBases, BOWL_BASE_LIMIT)}
+                        disabled={disabled}
+                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
+                          selected
+                            ? 'border-transparent shadow-sm'
+                            : 'border-gray-200 hover:border-gray-300'
+                        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
+                      >
+                        <span>{base}</span>
+                        {selected && (
+                          <span
+                            className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"
+                            style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
+                          >
+                            <Check size={16} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                    Elige tus toppings
+                  </h4>
+                  <span className="text-xs text-gray-500">
+                    {selectedBowlToppings.length}/{BOWL_TOPPING_LIMIT}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {BOWL_TOPPING_OPTIONS.map((topping) => {
+                    const selected = selectedBowlToppings.includes(topping);
+                    const disabled = !selected && toppingLimitReached;
+                    return (
+                      <button
+                        key={topping}
+                        type="button"
+                        onClick={() => toggleBowlOption(topping, selectedBowlToppings, setSelectedBowlToppings, BOWL_TOPPING_LIMIT)}
+                        disabled={disabled}
+                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
+                          selected
+                            ? 'border-transparent shadow-sm'
+                            : 'border-gray-200 hover:border-gray-300'
+                        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
+                      >
+                        <span>{topping}</span>
+                        {selected && (
+                          <span
+                            className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"
+                            style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
+                          >
+                            <Check size={16} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                    Elige tu proteína
+                  </h4>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {BOWL_PROTEIN_OPTIONS.map((protein) => {
+                    const selected = selectedBowlProtein === protein;
+                    return (
+                      <button
+                        key={protein}
+                        type="button"
+                        onClick={() => handleProteinSelection(protein)}
+                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
+                          selected
+                            ? 'border-transparent shadow-sm'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                        style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
+                      >
+                        <span>{protein}</span>
+                        {selected && (
+                          <span
+                            className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"
+                            style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
+                          >
+                            <Check size={16} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col sm:flex-row gap-3 sm:justify-end border-t pt-4">
+              <button
+                onClick={closeBowlModal}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmBowlSelection}
+                disabled={!isBowlSelectionValid}
+                className="px-4 py-2 rounded-lg text-white font-semibold text-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: COLORS.dark }}
+              >
+                Agregar al pedido
+              </button>
+            </div>
           </div>
         </div>
       )}

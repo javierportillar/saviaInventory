@@ -1,9 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { MenuItem, CartItem, Order, ModuleType, Customer, PaymentMethod } from '../types';
-import { Plus, Minus, Trash2, Search, ShoppingCart, Edit2 } from 'lucide-react';
+import { MenuItem, CartItem, Order, ModuleType, Customer, PaymentMethod, BowlSaladoCustomization } from '../types';
+import { Plus, Minus, Trash2, Search, ShoppingCart, Edit2, Check } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, generateOrderNumber } from '../utils/format';
 import dataService from '../lib/dataService';
+import {
+  BOWL_BASE_LIMIT,
+  BOWL_BASE_OPTIONS,
+  BOWL_PROTEIN_OPTIONS,
+  BOWL_TOPPING_LIMIT,
+  BOWL_TOPPING_OPTIONS,
+  isBowlSalado,
+} from '../constants/bowl';
 
 interface CajaProps {
   onModuleChange: (module: ModuleType) => void;
@@ -20,6 +28,88 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
   const [customerName, setCustomerName] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [bowlModalItem, setBowlModalItem] = useState<MenuItem | null>(null);
+  const [selectedBowlBases, setSelectedBowlBases] = useState<string[]>([]);
+  const [selectedBowlToppings, setSelectedBowlToppings] = useState<string[]>([]);
+  const [selectedBowlProtein, setSelectedBowlProtein] = useState<string | null>(null);
+
+  const resetBowlSelections = () => {
+    setSelectedBowlBases([]);
+    setSelectedBowlToppings([]);
+    setSelectedBowlProtein(null);
+  };
+
+  const handleAddToCart = (item: MenuItem) => {
+    if (isBowlSalado(item)) {
+      resetBowlSelections();
+      setBowlModalItem(item);
+      return;
+    }
+    addToCart(item);
+  };
+
+  const toggleBowlOption = (
+    option: string,
+    selected: string[],
+    setSelected: React.Dispatch<React.SetStateAction<string[]>>,
+    limit: number
+  ) => {
+    setSelected(prev => {
+      if (prev.includes(option)) {
+        return prev.filter(value => value !== option);
+      }
+      if (prev.length >= limit) {
+        return prev;
+      }
+      return [...prev, option];
+    });
+  };
+
+  const confirmBowlSelection = () => {
+    if (!bowlModalItem || !selectedBowlProtein) return;
+
+    if (
+      selectedBowlBases.length !== BOWL_BASE_LIMIT ||
+      selectedBowlToppings.length !== BOWL_TOPPING_LIMIT
+    ) {
+      return;
+    }
+
+    const notas = [
+      `Bases: ${selectedBowlBases.join(', ')}`,
+      `Toppings: ${selectedBowlToppings.join(', ')}`,
+      `Proteína: ${selectedBowlProtein}`,
+    ].join('\n');
+
+    const customKey = [
+      bowlModalItem.id,
+      [...selectedBowlBases].sort().join('-'),
+      [...selectedBowlToppings].sort().join('-'),
+      selectedBowlProtein,
+    ].join('|');
+
+    addToCart(bowlModalItem, {
+      notas,
+      customKey,
+      bowlCustomization: {
+        bases: selectedBowlBases,
+        toppings: selectedBowlToppings,
+        proteina: selectedBowlProtein,
+      },
+    });
+
+    setBowlModalItem(null);
+    resetBowlSelections();
+  };
+
+  const closeBowlModal = () => {
+    setBowlModalItem(null);
+    resetBowlSelections();
+  };
+
+  const handleProteinSelection = (protein: string) => {
+    setSelectedBowlProtein(prev => (prev === protein ? null : protein));
+  };
 
   useEffect(() => {
     fetchMenuItems();
@@ -47,27 +137,64 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
     return matchesSearch && matchesCategory && isNonInventariable;
   });
 
-  const addToCart = (item: MenuItem) => {
+  const getCartQuantity = (itemId: string) => {
+    return cart
+      .filter(({ item }) => item.id === itemId)
+      .reduce((sum, cartItem) => sum + cartItem.cantidad, 0);
+  };
+
+  const addToCart = (
+    item: MenuItem,
+    options?: {
+      notas?: string;
+      customKey?: string;
+      bowlCustomization?: BowlSaladoCustomization;
+    }
+  ) => {
     setCart(prev => {
-      const existing = prev.find(cartItem => cartItem.item.id === item.id);
+      const existing = prev.find(
+        cartItem =>
+          cartItem.item.id === item.id &&
+          cartItem.customKey === options?.customKey
+      );
+
       if (existing) {
         return prev.map(cartItem =>
-          cartItem.item.id === item.id
+          cartItem.item.id === item.id && cartItem.customKey === options?.customKey
             ? { ...cartItem, cantidad: cartItem.cantidad + 1 }
             : cartItem
         );
       }
-      return [...prev, { item, cantidad: 1 }];
+
+      return [
+        ...prev,
+        {
+          item,
+          cantidad: 1,
+          notas: options?.notas,
+          customKey: options?.customKey,
+          bowlCustomization: options?.bowlCustomization,
+        },
+      ];
     });
   };
 
-  const updateQuantity = (itemId: string, cantidad: number) => {
+  const updateQuantity = (
+    itemId: string,
+    customKey: string | undefined,
+    cantidad: number
+  ) => {
     if (cantidad <= 0) {
-      setCart(prev => prev.filter(cartItem => cartItem.item.id !== itemId));
+      setCart(prev =>
+        prev.filter(
+          cartItem =>
+            !(cartItem.item.id === itemId && cartItem.customKey === customKey)
+        )
+      );
     } else {
       setCart(prev =>
         prev.map(cartItem =>
-          cartItem.item.id === itemId
+          cartItem.item.id === itemId && cartItem.customKey === customKey
             ? { ...cartItem, cantidad }
             : cartItem
         )
@@ -75,9 +202,21 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
     }
   };
 
-  const removeFromCart = (itemId: string) => {
-    setCart(prev => prev.filter(cartItem => cartItem.item.id !== itemId));
+  const removeFromCart = (itemId: string, customKey: string | undefined) => {
+    setCart(prev =>
+      prev.filter(
+        cartItem =>
+          !(cartItem.item.id === itemId && cartItem.customKey === customKey)
+      )
+    );
   };
+
+  const baseLimitReached = selectedBowlBases.length >= BOWL_BASE_LIMIT;
+  const toppingLimitReached = selectedBowlToppings.length >= BOWL_TOPPING_LIMIT;
+  const isBowlSelectionValid =
+    selectedBowlBases.length === BOWL_BASE_LIMIT &&
+    selectedBowlToppings.length === BOWL_TOPPING_LIMIT &&
+    !!selectedBowlProtein;
 
   const total = cart.reduce((sum, cartItem) => sum + (cartItem.item.precio * cartItem.cantidad), 0);
 
@@ -144,7 +283,7 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
     <div className="w-full max-w-7xl mx-auto p-4 lg:p-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
         {/* Panel de productos */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="order-2 lg:order-1 lg:col-span-2 space-y-6">
           <div>
             <h2 className="text-xl lg:text-2xl font-bold mb-4" style={{ color: COLORS.dark }}>
               Punto de Venta
@@ -179,41 +318,58 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
 
           {/* Grid de productos */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:gap-4">
-            {filteredItems.map((item) => (
-              <div
-                key={item.id}
-                className="bg-white rounded-lg lg:rounded-xl p-3 lg:p-4 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200"
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <h3 className="font-semibold text-sm lg:text-base" style={{ color: COLORS.dark }}>
-                    {item.nombre}
-                  </h3>
-                  <span className="font-bold text-sm lg:text-base" style={{ color: COLORS.accent }}>
-                    {formatCOP(item.precio)}
-                  </span>
+            {filteredItems.map((item) => {
+              const quantity = getCartQuantity(item.id);
+              const isSelected = quantity > 0;
+
+              return (
+                <div
+                  key={item.id}
+                  className={`relative rounded-lg lg:rounded-xl p-3 lg:p-4 shadow-sm hover:shadow-md transition-all duration-200 border ${
+                    isSelected ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'
+                  }`}
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-semibold text-sm lg:text-base" style={{ color: COLORS.dark }}>
+                      {item.nombre}
+                    </h3>
+                    <span className="font-bold text-sm lg:text-base" style={{ color: COLORS.accent }}>
+                      {formatCOP(item.precio)}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-600 mb-1">{item.categoria}</p>
+                  {item.descripcion && (
+                    <p className="text-sm text-gray-500 mb-3 line-clamp-2">{item.descripcion}</p>
+                  )}
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500">Stock: {item.stock}</span>
+                    <div className="flex items-center gap-2">
+                      {isSelected && (
+                        <span
+                          className="inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full px-2 text-xs font-semibold text-white shadow-sm"
+                          style={{ backgroundColor: COLORS.accent }}
+                        >
+                          {quantity}
+                        </span>
+                      )}
+                      <button
+                        onClick={() => handleAddToCart(item)}
+                        disabled={item.inventarioCategoria === 'Inventariables' && item.stock === 0}
+                        className="px-3 lg:px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                        style={{ backgroundColor: COLORS.dark }}
+                      >
+                        <Plus size={16} />
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-sm text-gray-600 mb-1">{item.categoria}</p>
-                {item.descripcion && (
-                  <p className="text-sm text-gray-500 mb-3 line-clamp-2">{item.descripcion}</p>
-                )}
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-500">Stock: {item.stock}</span>
-                  <button
-                    onClick={() => addToCart(item)}
-                    disabled={item.inventarioCategoria === 'Inventariables' && item.stock === 0}
-                    className="px-3 lg:px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                    style={{ backgroundColor: COLORS.dark }}
-                  >
-                    <Plus size={16} />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
         {/* Panel del carrito */}
-        <div className="space-y-6">
+        <div className="order-1 lg:order-2 space-y-6">
           <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 lg:sticky lg:top-24">
             <div className="flex items-center gap-2 mb-4">
               <ShoppingCart size={24} style={{ color: COLORS.dark }} />
@@ -228,28 +384,33 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
               <>
                 <div className="space-y-3 mb-4 lg:mb-6 max-h-80 lg:max-h-96 overflow-y-auto">
                   {cart.map((cartItem) => (
-                    <div key={cartItem.item.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <div key={`${cartItem.item.id}-${cartItem.customKey ?? 'default'}`} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
                       <div className="flex-1">
                         <h4 className="font-medium text-sm">{cartItem.item.nombre}</h4>
                         <p className="text-xs text-gray-600">{formatCOP(cartItem.item.precio)}</p>
+                        {cartItem.notas && (
+                          <p className="mt-1 text-xs text-gray-500 whitespace-pre-line">
+                            {cartItem.notas}
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => updateQuantity(cartItem.item.id, cartItem.cantidad - 1)}
+                          onClick={() => updateQuantity(cartItem.item.id, cartItem.customKey, cartItem.cantidad - 1)}
                           className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center hover:bg-gray-300"
                         >
                           <Minus size={12} />
                         </button>
                         <span className="w-8 text-center font-medium">{cartItem.cantidad}</span>
                         <button
-                          onClick={() => updateQuantity(cartItem.item.id, cartItem.cantidad + 1)}
+                          onClick={() => updateQuantity(cartItem.item.id, cartItem.customKey, cartItem.cantidad + 1)}
                           className="w-6 h-6 rounded-full flex items-center justify-center text-white hover:opacity-90"
                           style={{ backgroundColor: COLORS.dark }}
                         >
                           <Plus size={12} />
                         </button>
                         <button
-                          onClick={() => removeFromCart(cartItem.item.id)}
+                          onClick={() => removeFromCart(cartItem.item.id, cartItem.customKey)}
                           className="w-6 h-6 rounded-full bg-red-100 text-red-600 flex items-center justify-center hover:bg-red-200 ml-2"
                         >
                           <Trash2 size={12} />
@@ -280,6 +441,167 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
           </div>
         </div>
       </div>
+
+      {/* Modal personalización Bowl Salado */}
+      {bowlModalItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-lg lg:text-xl font-bold" style={{ color: COLORS.dark }}>
+                  Personaliza tu Bowl Salado
+                </h3>
+                <p className="text-sm text-gray-600">
+                  Selecciona {BOWL_BASE_LIMIT} bases, {BOWL_TOPPING_LIMIT} toppings y 1 proteína.
+                </p>
+              </div>
+              <button
+                onClick={closeBowlModal}
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                    Elige tu base
+                  </h4>
+                  <span className="text-xs text-gray-500">
+                    {selectedBowlBases.length}/{BOWL_BASE_LIMIT}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {BOWL_BASE_OPTIONS.map((base) => {
+                    const selected = selectedBowlBases.includes(base);
+                    const disabled = !selected && baseLimitReached;
+                    return (
+                      <button
+                        key={base}
+                        type="button"
+                        onClick={() => toggleBowlOption(base, selectedBowlBases, setSelectedBowlBases, BOWL_BASE_LIMIT)}
+                        disabled={disabled}
+                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
+                          selected
+                            ? 'border-transparent shadow-sm'
+                            : 'border-gray-200 hover:border-gray-300'
+                        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
+                      >
+                        <span>{base}</span>
+                        {selected && (
+                          <span
+                            className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"
+                            style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
+                          >
+                            <Check size={16} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                    Elige tus toppings
+                  </h4>
+                  <span className="text-xs text-gray-500">
+                    {selectedBowlToppings.length}/{BOWL_TOPPING_LIMIT}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {BOWL_TOPPING_OPTIONS.map((topping) => {
+                    const selected = selectedBowlToppings.includes(topping);
+                    const disabled = !selected && toppingLimitReached;
+                    return (
+                      <button
+                        key={topping}
+                        type="button"
+                        onClick={() => toggleBowlOption(topping, selectedBowlToppings, setSelectedBowlToppings, BOWL_TOPPING_LIMIT)}
+                        disabled={disabled}
+                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
+                          selected
+                            ? 'border-transparent shadow-sm'
+                            : 'border-gray-200 hover:border-gray-300'
+                        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
+                      >
+                        <span>{topping}</span>
+                        {selected && (
+                          <span
+                            className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"
+                            style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
+                          >
+                            <Check size={16} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                    Elige tu proteína
+                  </h4>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {BOWL_PROTEIN_OPTIONS.map((protein) => {
+                    const selected = selectedBowlProtein === protein;
+                    return (
+                      <button
+                        key={protein}
+                        type="button"
+                        onClick={() => handleProteinSelection(protein)}
+                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
+                          selected
+                            ? 'border-transparent shadow-sm'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                        style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
+                      >
+                        <span>{protein}</span>
+                        {selected && (
+                          <span
+                            className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"
+                            style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
+                          >
+                            <Check size={16} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col sm:flex-row gap-3 sm:justify-end border-t pt-4">
+              <button
+                onClick={closeBowlModal}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmBowlSelection}
+                disabled={!isBowlSelectionValid}
+                className="px-4 py-2 rounded-lg text-white font-semibold text-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: COLORS.dark }}
+              >
+                Agregar al carrito
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de pago */}
       {showPayment && (
