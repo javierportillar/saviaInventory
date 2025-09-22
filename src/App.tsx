@@ -10,7 +10,7 @@ import { Empleados } from './components/Empleados';
 import { Gastos } from './components/Gastos';
 import { Login } from './components/Login';
 import { Navigation } from './components/Navigation';
-import { ModuleType, User, MenuItem, Order, Customer } from './types';
+import { ModuleType, User, MenuItem, Order, Customer, CartItem } from './types';
 import { initializeLocalData } from './data/localData';
 import dataService from './lib/dataService';
 
@@ -195,6 +195,29 @@ function App() {
     }
   };
 
+  const handleSaveOrderChanges = async (
+    orderId: string,
+    updates: { items: CartItem[]; total: number }
+  ) => {
+    try {
+      await dataService.updateOrder(orderId, updates);
+      setOrders((prevOrders) =>
+        prevOrders.map((order) =>
+          order.id === orderId
+            ? {
+                ...order,
+                items: updates.items,
+                total: updates.total,
+              }
+            : order
+        )
+      );
+    } catch (error) {
+      console.error('Error actualizando la orden:', error);
+      throw error;
+    }
+  };
+
   const handleAddCustomer = async (newCustomer: Customer) => {
     const data = await dataService.createCustomer(newCustomer);
     setCustomers([...customers, data]);
@@ -246,6 +269,7 @@ function App() {
           <Comandas
             orders={orders}
             onUpdateOrderStatus={handleUpdateOrderStatus}
+            onSaveOrderChanges={handleSaveOrderChanges}
           />
         )}
         {module === 'inventario' && (

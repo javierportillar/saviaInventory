@@ -8,6 +8,7 @@ import dataService from '../lib/dataService';
 interface ComandasProps {
   orders: Order[];
   onUpdateOrderStatus: (order: Order, status: Order['estado']) => void;
+  onSaveOrderChanges: (orderId: string, updates: { items: CartItem[]; total: number }) => Promise<void>;
 }
 
 interface EditingOrder {
@@ -16,7 +17,7 @@ interface EditingOrder {
   total: number;
 }
 
-export function Comandas({ orders, onUpdateOrderStatus }: ComandasProps) {
+export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: ComandasProps) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [editingOrder, setEditingOrder] = useState<EditingOrder | null>(null);
   const [showAddProduct, setShowAddProduct] = useState(false);
@@ -163,22 +164,14 @@ export function Comandas({ orders, onUpdateOrderStatus }: ComandasProps) {
     if (!editingOrder) return;
     
     try {
-      // Actualizar la orden en la base de datos con los nuevos items y total
-      await dataService.updateOrder(editingOrder.orderId, {
+      await onSaveOrderChanges(editingOrder.orderId, {
         items: editingOrder.items,
         total: editingOrder.total
       });
-      
-      // Actualizar el estado local
-      const updatedOrders = orders.map(order => 
-        order.id === editingOrder.orderId 
-          ? { ...order, items: editingOrder.items, total: editingOrder.total }
-          : order
-      );
-      
+
       setEditingOrder(null);
-      // Aquí deberías llamar a una función para actualizar las órdenes en el componente padre
-      window.location.reload(); // Temporal - idealmente deberías usar un callback
+      setShowAddProduct(false);
+      setSearchQuery('');
     } catch (error) {
       console.error('Error updating order:', error);
       alert('Error al actualizar la orden');
