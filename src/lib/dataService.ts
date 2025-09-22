@@ -102,9 +102,9 @@ const toMenuItemPayload = (item: MenuItem) => {
     keywords: sanitized.keywords ?? null,
     categoria: sanitized.categoria,
     stock: sanitized.stock,
-    inventarioCategoria: sanitized.inventarioCategoria,
-    inventarioTipo: sanitized.inventarioTipo ?? null,
-    unidadMedida: sanitized.unidadMedida ?? null,
+    inventariocategoria: sanitized.inventarioCategoria,
+    inventariotipo: sanitized.inventarioTipo ?? null,
+    unidadmedida: sanitized.unidadMedida ?? null,
   };
 };
 
@@ -121,20 +121,26 @@ const mapMenuItemRecord = (record: any): MenuItem => {
       ? record.codigo
       : `menu-${Math.random().toString(36).slice(2, 10)}`;
 
-  const inventarioCategoria = record?.inventarioCategoria === 'Inventariables'
+  const rawInventarioCategoria = record?.inventarioCategoria ?? record?.inventariocategoria;
+
+  const inventarioCategoria = rawInventarioCategoria === 'Inventariables'
     ? 'Inventariables'
     : 'No inventariables';
 
+  const rawInventarioTipo = record?.inventarioTipo ?? record?.inventariotipo;
+
   const inventarioTipo = inventarioCategoria === 'Inventariables'
-    ? record?.inventarioTipo === 'gramos'
+    ? rawInventarioTipo === 'gramos'
       ? 'gramos'
-      : record?.inventarioTipo === 'cantidad'
+      : rawInventarioTipo === 'cantidad'
         ? 'cantidad'
         : undefined
     : undefined;
 
+  const rawUnidadMedida = record?.unidadMedida ?? record?.unidadmedida;
+
   const unidadMedida = inventarioTipo === 'gramos'
-    ? isValidUnidadMedida(record?.unidadMedida)
+    ? isValidUnidadMedida(rawUnidadMedida)
     : undefined;
 
   const menuItem: MenuItem = {
@@ -258,9 +264,9 @@ const ORDER_SELECT_COLUMNS = `
       keywords,
       categoria,
       stock,
-      inventarioCategoria,
-      inventarioTipo,
-      unidadMedida
+      inventariocategoria,
+      inventariotipo,
+      unidadmedida
     )
   )
 `;
