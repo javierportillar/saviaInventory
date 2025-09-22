@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BalanceResumen } from '../types';
+import { Gasto, Order, PaymentMethod } from '../types';
 import dataService from '../lib/dataService';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
@@ -14,109 +14,196 @@ const rangeOptions = [
 type RangeValue = (typeof rangeOptions)[number]['value'];
 
 type MethodSummary = {
-  id: 'efectivo' | 'nequi' | 'tarjeta';
+  id: PaymentMethod;
   label: string;
-  daily: number;
-  total: number;
+  ventas: number;
+  gastos: number;
+  balance: number;
+  balanceHistorico: number;
 };
+
+const methodLabels: Record<PaymentMethod, string> = {
+  efectivo: 'Efectivo',
+  nequi: 'Nequi',
+  tarjeta: 'Tarjeta',
+};
+
+const methodOrder: PaymentMethod[] = ['efectivo', 'nequi', 'tarjeta'];
 
 const valueColor = (value: number) => (value >= 0 ? 'text-green-600' : 'text-red-600');
 
-const formatDateLabel = (value: string) => {
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleDateString('es-CO', {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
+const normalizeDate = (value: Date) => {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const formatDateTime = (value: Date) => {
+  const date = new Date(value);
+  return date.toLocaleString('es-CO', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
   });
 };
 
+type MethodTotalsDetail = Record<PaymentMethod, { ingresos: number; egresos: number }>;
+
+const emptyMethodTotals = (): MethodTotalsDetail => ({
+  efectivo: { ingresos: 0, egresos: 0 },
+  nequi: { ingresos: 0, egresos: 0 },
+  tarjeta: { ingresos: 0, egresos: 0 },
+});
+
+const computeMethodTotals = (orders: Order[], gastos: Gasto[]): MethodTotalsDetail => {
+  const totals = emptyMethodTotals();
+
+  orders.forEach((order) => {
+    const method = order.metodoPago ?? 'efectivo';
+    totals[method].ingresos += order.total;
+  });
+
+  gastos.forEach((gasto) => {
+    const method = gasto.metodoPago ?? 'efectivo';
+    totals[method].egresos += gasto.monto;
+  });
+
+  return totals;
+};
+
+const filterAndSortByRange = <T,>(items: T[], range: RangeValue, getDate: (item: T) => Date) => {
+  const sorted = [...items].sort((a, b) => getDate(b).getTime() - getDate(a).getTime());
+
+  if (range === 'all') {
+    return sorted;
+  }
+
+  const days = parseInt(range, 10);
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - (days - 1));
+
+  return sorted.filter((item) => normalizeDate(getDate(item)) >= cutoff);
+};
+
 export function Balance() {
-  const [balanceData, setBalanceData] = useState<BalanceResumen[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [gastos, setGastos] = useState<Gasto[]>([]);
   const [range, setRange] = useState<RangeValue>('7');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
+
     const loadData = async () => {
       setLoading(true);
-      const resumen = await dataService.fetchBalanceResumen();
-      setBalanceData(resumen);
-      setLoading(false);
+      try {
+        const [ordersData, gastosData] = await Promise.all([
+          dataService.fetchOrders(),
+          dataService.fetchGastos(),
+        ]);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setOrders(ordersData);
+        setGastos(gastosData);
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
     };
 
     loadData();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  const filteredData = useMemo(() => {
-    if (range === 'all') {
-      return balanceData;
-    }
-    const days = parseInt(range, 10);
-    const cutoff = new Date();
-    cutoff.setHours(0, 0, 0, 0);
-    cutoff.setDate(cutoff.getDate() - (days - 1));
-
-    return balanceData.filter((entry) => {
-      const entryDate = new Date(`${entry.fecha}T00:00:00`);
-      return entryDate >= cutoff;
-    });
-  }, [balanceData, range]);
+  const filteredOrders = useMemo(
+    () => filterAndSortByRange(orders, range, (order) => order.timestamp),
+    [orders, range],
+  );
+  const filteredGastos = useMemo(
+    () => filterAndSortByRange(gastos, range, (gasto) => gasto.fecha),
+    [gastos, range],
+  );
 
   const totals = useMemo(() => {
-    return filteredData.reduce(
-      (acc, entry) => ({
-        ventas: acc.ventas + entry.ingresosTotales,
-        gastos: acc.gastos + entry.egresosTotales,
-        balance: acc.balance + entry.balanceDiario
-      }),
-      { ventas: 0, gastos: 0, balance: 0 }
-    );
-  }, [filteredData]);
+    const ventas = filteredOrders.reduce((acc, order) => acc + order.total, 0);
+    const gastosTotal = filteredGastos.reduce((acc, gasto) => acc + gasto.monto, 0);
 
-  const hasAnyData = balanceData.length > 0;
-  const hasFilteredData = filteredData.length > 0;
-  const latest = hasFilteredData ? filteredData[0] : balanceData[0];
+    return {
+      ventas,
+      gastos: gastosTotal,
+      balance: ventas - gastosTotal,
+    };
+  }, [filteredOrders, filteredGastos]);
 
-  const methodBreakdown: MethodSummary[] = useMemo(() => {
-    if (!latest) {
-      return [];
+  const overallTotals = useMemo(() => {
+    const ventas = orders.reduce((acc, order) => acc + order.total, 0);
+    const gastosTotal = gastos.reduce((acc, gasto) => acc + gasto.monto, 0);
+
+    return {
+      ventas,
+      gastos: gastosTotal,
+      balance: ventas - gastosTotal,
+    };
+  }, [orders, gastos]);
+
+  const hasAnyData = orders.length > 0 || gastos.length > 0;
+  const hasFilteredData = filteredOrders.length > 0 || filteredGastos.length > 0;
+
+  const lastMovementDate = useMemo(() => {
+    const latestOrder = filteredOrders[0]?.timestamp;
+    const latestExpense = filteredGastos[0]?.fecha;
+
+    if (latestOrder && latestExpense) {
+      return new Date(Math.max(latestOrder.getTime(), latestExpense.getTime()));
     }
+    if (latestOrder) {
+      return latestOrder;
+    }
+    if (latestExpense) {
+      return latestExpense;
+    }
+    return null;
+  }, [filteredOrders, filteredGastos]);
 
-    return [
-      {
-        id: 'efectivo',
-        label: 'Efectivo',
-        daily: latest.saldoEfectivoDia,
-        total: latest.saldoEfectivoAcumulado
-      },
-      {
-        id: 'nequi',
-        label: 'Nequi',
-        daily: latest.saldoNequiDia,
-        total: latest.saldoNequiAcumulado
-      },
-      {
-        id: 'tarjeta',
-        label: 'Tarjeta',
-        daily: latest.saldoTarjetaDia,
-        total: latest.saldoTarjetaAcumulado
-      }
-    ];
-  }, [latest]);
+  const periodSummaryLabel = hasFilteredData
+    ? `Movimientos en el período: ${filteredOrders.length + filteredGastos.length}`
+    : 'No hay movimientos en el período seleccionado.';
 
-  const dailyLabel = hasFilteredData ? 'Saldo del día' : 'Último movimiento';
-  const cumulativeLabel = hasFilteredData ? 'Saldo acumulado' : 'Saldo acumulado total';
-  const closingLabel = latest
-    ? hasFilteredData
-      ? `Cierre del ${formatDateLabel(latest.fecha)}`
-      : `Último cierre registrado (${formatDateLabel(latest.fecha)})`
-    : hasFilteredData
-      ? 'Sin registros en el rango'
-      : 'Sin registros disponibles';
+  const closingLabel = lastMovementDate
+    ? `Último movimiento: ${formatDateTime(lastMovementDate)}`
+    : hasAnyData
+      ? 'No hay movimientos en el rango.'
+      : 'Sin registros disponibles.';
+
+  const rangeMethodTotals = useMemo(
+    () => computeMethodTotals(filteredOrders, filteredGastos),
+    [filteredOrders, filteredGastos],
+  );
+  const overallMethodTotals = useMemo(
+    () => computeMethodTotals(orders, gastos),
+    [orders, gastos],
+  );
+
+  const methodBreakdown: MethodSummary[] = useMemo(
+    () =>
+      methodOrder.map((method) => ({
+        id: method,
+        label: methodLabels[method],
+        ventas: rangeMethodTotals[method].ingresos,
+        gastos: rangeMethodTotals[method].egresos,
+        balance: rangeMethodTotals[method].ingresos - rangeMethodTotals[method].egresos,
+        balanceHistorico:
+          overallMethodTotals[method].ingresos - overallMethodTotals[method].egresos,
+      })),
+    [overallMethodTotals, rangeMethodTotals],
+  );
 
   return (
     <div className="max-w-7xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
@@ -190,125 +277,171 @@ export function Balance() {
             </div>
             <div className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-1">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Saldo acumulado</p>
+                <p className="text-xs sm:text-sm font-medium text-gray-600">Balance histórico</p>
                 <PiggyBank className="text-indigo-600" size={20} />
               </div>
+              <p className="text-xs text-gray-500 mb-1">{periodSummaryLabel}</p>
               <p className="text-xs text-gray-500 mb-1">{closingLabel}</p>
               <p className="text-lg sm:text-2xl font-bold" style={{ color: COLORS.dark }}>
-                {formatCOP(latest?.saldoTotalAcumulado ?? 0)}
+                {formatCOP(overallTotals.balance)}
               </p>
             </div>
           </div>
 
-          {latest && (
+          {methodBreakdown.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {methodBreakdown.map((method) => (
                 <div key={method.id} className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100">
                   <p className="text-xs sm:text-sm font-medium text-gray-600 mb-1">{method.label}</p>
-                  <p className="text-xs text-gray-500">{dailyLabel}</p>
-                  <p className={`text-lg sm:text-xl font-semibold ${valueColor(method.daily)}`}>
-                    {formatCOP(method.daily)}
+                  <p className="text-xs text-gray-500">Ventas en el período</p>
+                  <p className="text-lg sm:text-xl font-semibold" style={{ color: COLORS.dark }}>
+                    {formatCOP(method.ventas)}
                   </p>
-                  <p className="text-xs text-gray-500 mt-3">{cumulativeLabel}</p>
-                  <p className="text-base sm:text-lg font-semibold" style={{ color: COLORS.dark }}>
-                    {formatCOP(method.total)}
+                  <p className="text-xs text-gray-500 mt-3">Gastos en el período</p>
+                  <p className="text-base sm:text-lg font-semibold text-red-600">
+                    {formatCOP(method.gastos)}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-3">Balance del período</p>
+                  <p className={`text-base sm:text-lg font-semibold ${valueColor(method.balance)}`}>
+                    {formatCOP(method.balance)}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-3">
+                    Balance histórico: {formatCOP(method.balanceHistorico)}
                   </p>
                 </div>
               ))}
             </div>
           )}
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Fecha
-                    </th>
-                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Ventas
-                    </th>
-                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Gastos
-                    </th>
-                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Balance diario
-                    </th>
-                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Efectivo
-                    </th>
-                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Nequi
-                    </th>
-                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Tarjeta
-                    </th>
-                    <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Acumulado
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {!hasFilteredData && (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="px-4 py-4 border-b border-gray-100">
+                <h3 className="text-base sm:text-lg font-semibold" style={{ color: COLORS.dark }}>
+                  Ventas por comanda
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Detalle de cada comanda registrada en el período seleccionado.
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full">
+                  <thead className="bg-gray-50">
                     <tr>
-                      <td colSpan={8} className="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500">
-                        No hay movimientos en el rango seleccionado.
-                      </td>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Fecha
+                      </th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Comanda
+                      </th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Cliente
+                      </th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Método de pago
+                      </th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Total
+                      </th>
                     </tr>
-                  )}
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filteredOrders.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500"
+                        >
+                          No hay ventas registradas en el rango seleccionado.
+                        </td>
+                      </tr>
+                    )}
+                    {filteredOrders.map((order) => (
+                      <tr key={order.id} className="hover:bg-gray-50">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
+                          {formatDateTime(order.timestamp)}
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium" style={{ color: COLORS.dark }}>
+                          {order.numero ? `#${order.numero}` : order.id}
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-600">
+                          {order.cliente ?? '—'}
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-600">
+                          {methodLabels[order.metodoPago ?? 'efectivo']}
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-semibold text-green-600">
+                          {formatCOP(order.total)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-                  {filteredData.map((entry) => (
-                    <tr key={entry.fecha} className="hover:bg-gray-50">
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
-                        {formatDateLabel(entry.fecha)}
-                      </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium" style={{ color: COLORS.dark }}>
-                        {formatCOP(entry.ingresosTotales)}
-                      </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-red-600">
-                        {formatCOP(entry.egresosTotales)}
-                      </td>
-                      <td className={`px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-semibold ${valueColor(entry.balanceDiario)}`}>
-                        {formatCOP(entry.balanceDiario)}
-                      </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
-                        <div className="flex flex-col">
-                          <span className={`font-medium ${valueColor(entry.saldoEfectivoDia)}`}>
-                            {formatCOP(entry.saldoEfectivoDia)}
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            Total: {formatCOP(entry.saldoEfectivoAcumulado)}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
-                        <div className="flex flex-col">
-                          <span className={`font-medium ${valueColor(entry.saldoNequiDia)}`}>
-                            {formatCOP(entry.saldoNequiDia)}
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            Total: {formatCOP(entry.saldoNequiAcumulado)}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm">
-                        <div className="flex flex-col">
-                          <span className={`font-medium ${valueColor(entry.saldoTarjetaDia)}`}>
-                            {formatCOP(entry.saldoTarjetaDia)}
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            Total: {formatCOP(entry.saldoTarjetaAcumulado)}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-semibold" style={{ color: COLORS.dark }}>
-                        {formatCOP(entry.saldoTotalAcumulado)}
-                      </td>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="px-4 py-4 border-b border-gray-100">
+                <h3 className="text-base sm:text-lg font-semibold" style={{ color: COLORS.dark }}>
+                  Gastos del período
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Desglose de cada gasto registrado en el período seleccionado.
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Fecha
+                      </th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Descripción
+                      </th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Categoría
+                      </th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Método de pago
+                      </th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Monto
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filteredGastos.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500"
+                        >
+                          No hay gastos registrados en el rango seleccionado.
+                        </td>
+                      </tr>
+                    )}
+                    {filteredGastos.map((gasto) => (
+                      <tr key={gasto.id} className="hover:bg-gray-50">
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
+                          {formatDateTime(gasto.fecha)}
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-600">
+                          {gasto.descripcion || '—'}
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-600">
+                          {gasto.categoria || '—'}
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-600">
+                          {methodLabels[gasto.metodoPago ?? 'efectivo']}
+                        </td>
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-semibold text-red-600">
+                          {formatCOP(gasto.monto)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </>
