@@ -206,13 +206,13 @@ export function Balance() {
   );
 
   return (
-    <div className="max-w-7xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
-      <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
+      <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h2 className="text-2xl sm:text-3xl font-bold" style={{ color: COLORS.dark }}>
+          <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold" style={{ color: COLORS.dark }}>
             Balance de Caja
           </h2>
-          <p className="text-sm sm:text-base text-gray-600">
+          <p className="text-sm lg:text-base text-gray-600">
             Ventas, gastos y saldo final por método de pago
           </p>
         </div>
@@ -221,7 +221,7 @@ export function Balance() {
           <select
             value={range}
             onChange={(event) => setRange(event.target.value as RangeValue)}
-            className="px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
+            className="px-3 lg:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm w-full sm:w-auto"
             style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
           >
             {rangeOptions.map((option) => (
@@ -234,75 +234,75 @@ export function Balance() {
       </div>
 
       {loading && (
-        <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100 text-center text-gray-500 text-sm">
+        <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 text-center text-gray-500 text-sm">
           Cargando balance...
         </div>
       )}
 
       {!loading && !hasAnyData && (
-        <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100 text-center text-gray-500 text-sm">
+        <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 text-center text-gray-500 text-sm">
           Aún no hay movimientos registrados en la caja.
         </div>
       )}
 
       {!loading && hasAnyData && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <div className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+            <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-5 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Ventas en el período</p>
+                <p className="text-xs lg:text-sm font-medium text-gray-600">Ventas</p>
                 <TrendingUp className="text-green-600" size={20} />
               </div>
-              <p className="text-lg sm:text-2xl font-bold" style={{ color: COLORS.dark }}>
+              <p className="text-sm sm:text-lg lg:text-2xl font-bold" style={{ color: COLORS.dark }}>
                 {formatCOP(totals.ventas)}
               </p>
             </div>
-            <div className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100">
+            <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-5 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Gastos en el período</p>
+                <p className="text-xs lg:text-sm font-medium text-gray-600">Gastos</p>
                 <TrendingDown className="text-red-600" size={20} />
               </div>
-              <p className="text-lg sm:text-2xl font-bold text-red-600">
+              <p className="text-sm sm:text-lg lg:text-2xl font-bold text-red-600">
                 {formatCOP(totals.gastos)}
               </p>
             </div>
-            <div className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100">
+            <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-5 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Balance neto</p>
+                <p className="text-xs lg:text-sm font-medium text-gray-600">Balance</p>
                 <Wallet className={valueColor(totals.balance)} size={20} />
               </div>
-              <p className={`text-lg sm:text-2xl font-bold ${valueColor(totals.balance)}`}>
+              <p className={`text-sm sm:text-lg lg:text-2xl font-bold ${valueColor(totals.balance)}`}>
                 {formatCOP(totals.balance)}
               </p>
             </div>
-            <div className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100">
+            <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-5 shadow-sm border border-gray-100 col-span-2 lg:col-span-1">
               <div className="flex items-center justify-between mb-1">
-                <p className="text-xs sm:text-sm font-medium text-gray-600">Balance histórico</p>
+                <p className="text-xs lg:text-sm font-medium text-gray-600">Histórico</p>
                 <PiggyBank className="text-indigo-600" size={20} />
               </div>
-              <p className="text-xs text-gray-500 mb-1">{periodSummaryLabel}</p>
-              <p className="text-xs text-gray-500 mb-1">{closingLabel}</p>
-              <p className="text-lg sm:text-2xl font-bold" style={{ color: COLORS.dark }}>
+              <p className="text-xs text-gray-500 mb-1 hidden sm:block">{periodSummaryLabel}</p>
+              <p className="text-xs text-gray-500 mb-1 hidden sm:block">{closingLabel}</p>
+              <p className="text-sm sm:text-lg lg:text-2xl font-bold" style={{ color: COLORS.dark }}>
                 {formatCOP(overallTotals.balance)}
               </p>
             </div>
           </div>
 
           {methodBreakdown.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {methodBreakdown.map((method) => (
-                <div key={method.id} className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-gray-100">
-                  <p className="text-xs sm:text-sm font-medium text-gray-600 mb-1">{method.label}</p>
+                <div key={method.id} className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-5 shadow-sm border border-gray-100">
+                  <p className="text-sm font-medium text-gray-600 mb-1">{method.label}</p>
                   <p className="text-xs text-gray-500">Ventas en el período</p>
-                  <p className="text-lg sm:text-xl font-semibold" style={{ color: COLORS.dark }}>
+                  <p className="text-base lg:text-xl font-semibold" style={{ color: COLORS.dark }}>
                     {formatCOP(method.ventas)}
                   </p>
                   <p className="text-xs text-gray-500 mt-3">Gastos en el período</p>
-                  <p className="text-base sm:text-lg font-semibold text-red-600">
+                  <p className="text-sm lg:text-lg font-semibold text-red-600">
                     {formatCOP(method.gastos)}
                   </p>
                   <p className="text-xs text-gray-500 mt-3">Balance del período</p>
-                  <p className={`text-base sm:text-lg font-semibold ${valueColor(method.balance)}`}>
+                  <p className={`text-sm lg:text-lg font-semibold ${valueColor(method.balance)}`}>
                     {formatCOP(method.balance)}
                   </p>
                   <p className="text-xs text-gray-500 mt-3">
@@ -313,10 +313,10 @@ export function Balance() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
+            <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="px-4 py-4 border-b border-gray-100">
-                <h3 className="text-base sm:text-lg font-semibold" style={{ color: COLORS.dark }}>
+                <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
                   Ventas por comanda
                 </h3>
                 <p className="text-xs text-gray-500">
@@ -327,19 +327,19 @@ export function Balance() {
                 <table className="min-w-full">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Fecha
                       </th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Comanda
                       </th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">
                         Cliente
                       </th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
                         Método de pago
                       </th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Total
                       </th>
                     </tr>
@@ -349,7 +349,7 @@ export function Balance() {
                       <tr>
                         <td
                           colSpan={5}
-                          className="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500"
+                          className="px-3 lg:px-6 py-8 text-center text-xs lg:text-sm text-gray-500"
                         >
                           No hay ventas registradas en el rango seleccionado.
                         </td>
@@ -357,19 +357,19 @@ export function Balance() {
                     )}
                     {filteredOrders.map((order) => (
                       <tr key={order.id} className="hover:bg-gray-50">
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
+                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-900">
                           {formatDateTime(order.timestamp)}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium" style={{ color: COLORS.dark }}>
+                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs font-medium" style={{ color: COLORS.dark }}>
                           {order.numero ? `#${order.numero}` : order.id}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-600">
+                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-600 hidden sm:table-cell">
                           {order.cliente ?? '—'}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-600">
+                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-600 hidden lg:table-cell">
                           {methodLabels[order.metodoPago ?? 'efectivo']}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-semibold text-green-600">
+                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs font-semibold text-green-600">
                           {formatCOP(order.total)}
                         </td>
                       </tr>
@@ -379,9 +379,9 @@ export function Balance() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="px-4 py-4 border-b border-gray-100">
-                <h3 className="text-base sm:text-lg font-semibold" style={{ color: COLORS.dark }}>
+                <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
                   Gastos del período
                 </h3>
                 <p className="text-xs text-gray-500">
@@ -392,19 +392,19 @@ export function Balance() {
                 <table className="min-w-full">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Fecha
                       </th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Descripción
                       </th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">
                         Categoría
                       </th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
                         Método de pago
                       </th>
-                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Monto
                       </th>
                     </tr>
@@ -414,7 +414,7 @@ export function Balance() {
                       <tr>
                         <td
                           colSpan={5}
-                          className="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500"
+                          className="px-3 lg:px-6 py-8 text-center text-xs lg:text-sm text-gray-500"
                         >
                           No hay gastos registrados en el rango seleccionado.
                         </td>
@@ -422,19 +422,19 @@ export function Balance() {
                     )}
                     {filteredGastos.map((gasto) => (
                       <tr key={gasto.id} className="hover:bg-gray-50">
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
+                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-900">
                           {formatDateTime(gasto.fecha)}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-600">
+                        <td className="px-3 lg:px-6 py-4 text-xs text-gray-600">
                           {gasto.descripcion || '—'}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-600">
+                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-600 hidden sm:table-cell">
                           {gasto.categoria || '—'}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-gray-600">
+                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-600 hidden lg:table-cell">
                           {methodLabels[gasto.metodoPago ?? 'efectivo']}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-semibold text-red-600">
+                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs font-semibold text-red-600">
                           {formatCOP(gasto.monto)}
                         </td>
                       </tr>

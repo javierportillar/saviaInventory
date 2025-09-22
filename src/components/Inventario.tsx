@@ -264,26 +264,26 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
   );
 
   return (
-    <div className="max-w-7xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
+    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
       <datalist id="category-options">
         {categories.map(category => (
           <option key={category} value={category} />
         ))}
       </datalist>
       <div className="text-center">
-        <h2 className="text-2xl sm:text-3xl font-bold mb-2" style={{ color: COLORS.dark }}>
+        <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold mb-2" style={{ color: COLORS.dark }}>
           Control de Inventario
         </h2>
-        <p className="text-sm sm:text-base text-gray-600">Gestión de stock y alertas de productos</p>
+        <p className="text-sm lg:text-base text-gray-600">Gestión de stock y alertas de productos</p>
       </div>
 
       {(lowStockItems.length > 0 || outOfStockItems.length > 0) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {outOfStockItems.length > 0 && (
-            <div className="bg-red-50 border border-red-200 rounded-xl p-3 sm:p-4">
+            <div className="bg-red-50 border border-red-200 rounded-lg lg:rounded-xl p-3 lg:p-4">
               <div className="flex items-center gap-2 mb-3">
                 <AlertTriangle size={20} className="text-red-600" />
-                <h3 className="font-semibold text-red-800 text-sm sm:text-base">Sin stock ({outOfStockItems.length})</h3>
+                <h3 className="font-semibold text-red-800 text-sm lg:text-base">Sin stock ({outOfStockItems.length})</h3>
               </div>
               <div className="space-y-1">
                 {outOfStockItems.slice(0,3).map(item => (
@@ -297,10 +297,10 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
           )}
 
           {lowStockItems.length > 0 && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 sm:p-4">
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg lg:rounded-xl p-3 lg:p-4">
               <div className="flex items-center gap-2 mb-3">
                 <AlertTriangle size={20} className="text-yellow-600" />
-                <h3 className="font-semibold text-yellow-800 text-sm sm:text-base">Stock bajo ({lowStockItems.length})</h3>
+                <h3 className="font-semibold text-yellow-800 text-sm lg:text-base">Stock bajo ({lowStockItems.length})</h3>
               </div>
               <div className="space-y-1">
                 {lowStockItems.slice(0,3).map(item => (
@@ -319,7 +319,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
       )}
 
       {/* Filtros */}
-      <div className="bg-white rounded-xl p-3 sm:p-4 shadow-sm border border-gray-100">
+      <div className="bg-white rounded-lg lg:rounded-xl p-3 lg:p-4 shadow-sm border border-gray-100">
         <div className="flex flex-col lg:flex-row gap-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
@@ -336,12 +336,12 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
           <div className="flex gap-4">
             <div className="flex items-center gap-2">
               <Filter size={16} className="text-gray-500" />
-              <span className="text-xs sm:text-sm font-medium whitespace-nowrap">Tipo:</span>
+              <span className="text-sm font-medium whitespace-nowrap">Tipo:</span>
             </div>
             <select
               value={inventoryFilter}
               onChange={(e) => setInventoryFilter(e.target.value as 'all' | 'inventariables' | 'no-inventariables')}
-              className="px-2 sm:px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-xs sm:text-sm"
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm w-full lg:w-auto"
               style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
             >
               <option value="all">Todos</option>
@@ -352,7 +352,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="px-2 sm:px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-xs sm:text-sm"
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm w-full lg:w-auto"
               style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
             >
               <option value="">Todas las categorías</option>
@@ -364,7 +364,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
         </div>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex flex-col lg:flex-row gap-4 lg:justify-end">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
           <input
@@ -389,7 +389,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
               descripcion: '',
             })
           }
-          className="flex items-center gap-1 px-3 sm:px-4 py-2 rounded-lg text-white hover:opacity-90 text-sm ml-2"
+          className="flex items-center gap-1 px-4 py-2 rounded-lg text-white hover:opacity-90 text-sm lg:ml-2 justify-center"
           style={{ backgroundColor: COLORS.accent }}
         >
           <Plus size={16} /> Agregar producto
@@ -397,8 +397,8 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
       </div>
 
       {newItem && (
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <input
               className="border border-gray-300 rounded px-3 py-2" placeholder="Nombre"
               value={newItem.nombre}
@@ -481,7 +481,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
               </>
             )}
             <textarea
-              className="border border-gray-300 rounded px-3 py-2 md:col-span-2" placeholder="Descripción (opcional)"
+              className="border border-gray-300 rounded px-3 py-2 lg:col-span-2" placeholder="Descripción (opcional)"
               value={newItem.descripcion || ''}
               onChange={e => setNewItem({ ...newItem, descripcion: e.target.value })}
             />

@@ -242,7 +242,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 overflow-x-hidden">
       <Navigation
         activeModule={module}
         onModuleChange={handleModuleChange}
@@ -250,7 +250,7 @@ function App() {
         onLogout={handleLogout}
       />
       
-      <main>
+      <main className="w-full">
         {module === 'dashboard' && (
           <Dashboard
             orders={orders}

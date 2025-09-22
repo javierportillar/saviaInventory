@@ -91,29 +91,29 @@ export function Empleados() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
+    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Users size={24} style={{ color: COLORS.dark }} />
-          <h2 className="text-xl sm:text-2xl font-bold" style={{ color: COLORS.dark }}>
+          <h2 className="text-xl lg:text-2xl font-bold" style={{ color: COLORS.dark }}>
             Gestión de Empleados
           </h2>
         </div>
         <button
           onClick={() => setShowForm(true)}
-          className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
+          className="flex items-center gap-1 lg:gap-2 px-3 lg:px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
           style={{ backgroundColor: COLORS.dark }}
         >
           <Plus size={16} />
-          <span className="hidden sm:inline">Agregar Empleado</span>
-          <span className="sm:hidden">Agregar</span>
+          <span className="hidden lg:inline">Agregar Empleado</span>
+          <span className="lg:hidden">Agregar</span>
         </button>
       </div>
 
       {/* Formulario */}
       {showForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md">
+          <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-bold mb-4" style={{ color: COLORS.dark }}>
               {editingId ? 'Editar Empleado' : 'Nuevo Empleado'}
             </h3>

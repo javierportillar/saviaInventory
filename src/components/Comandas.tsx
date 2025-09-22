@@ -190,52 +190,52 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
   );
 
   return (
-    <div className="max-w-7xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
+    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
       <div className="text-center">
-        <h2 className="text-2xl sm:text-3xl font-bold mb-2" style={{ color: COLORS.dark }}>
+        <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold mb-2" style={{ color: COLORS.dark }}>
           Gestión de Comandas
         </h2>
-        <p className="text-sm sm:text-base text-gray-600">
+        <p className="text-sm lg:text-base text-gray-600">
           Control de pedidos y estado de preparación
         </p>
       </div>
 
       {orders.length === 0 ? (
-        <div className="bg-white rounded-xl p-8 sm:p-12 text-center shadow-sm border border-gray-100">
+        <div className="bg-white rounded-lg lg:rounded-xl p-8 lg:p-12 text-center shadow-sm border border-gray-100">
           <Clock size={48} className="mx-auto text-gray-400 mb-4" />
-          <h3 className="text-lg sm:text-xl font-semibold text-gray-600 mb-2">No hay comandas</h3>
-          <p className="text-sm sm:text-base text-gray-500">Los pedidos aparecerán aquí cuando se procesen desde caja</p>
+          <h3 className="text-lg lg:text-xl font-semibold text-gray-600 mb-2">No hay comandas</h3>
+          <p className="text-sm lg:text-base text-gray-500">Los pedidos aparecerán aquí cuando se procesen desde caja</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6">
           {sortedOrders.map((order) => (
             <div
               key={order.id}
-              className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200"
+              className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200"
             >
-              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-4 space-y-2 sm:space-y-0">
+              <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start mb-4 space-y-2 lg:space-y-0">
                 <div className="flex-1">
-                  <h3 className="text-lg sm:text-xl font-bold mb-1" style={{ color: COLORS.dark }}>
+                  <h3 className="text-lg lg:text-xl font-bold mb-1" style={{ color: COLORS.dark }}>
                     #{order.numero}
                   </h3>
-                  <p className="text-xs sm:text-sm text-gray-500">{formatDateTime(order.timestamp)}</p>
+                  <p className="text-xs lg:text-sm text-gray-500">{formatDateTime(order.timestamp)}</p>
                 </div>
-                <span className={`px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium border flex items-center gap-1 self-start ${getStatusColor(order.estado)}`}>
+                <span className={`px-2 lg:px-3 py-1 rounded-full text-xs lg:text-sm font-medium border flex items-center gap-1 self-start ${getStatusColor(order.estado)}`}>
                   {getStatusIcon(order.estado)}
-                  <span className="hidden sm:inline">{order.estado}</span>
+                  <span className="hidden lg:inline">{order.estado}</span>
                 </span>
               </div>
 
               {order.cliente && (
-                <div className="flex items-center gap-2 mb-3 text-xs sm:text-sm text-gray-600">
-                  <User size={14} sm:size={16} />
+                <div className="flex items-center gap-2 mb-3 text-xs lg:text-sm text-gray-600">
+                  <User size={14} />
                   <span>{order.cliente}</span>
                 </div>
               )}
 
               {order.metodoPago && (
-                <div className="flex items-center gap-2 mb-4 text-xs sm:text-sm text-gray-600">
-                  <CreditCard size={14} sm:size={16} />
+                <div className="flex items-center gap-2 mb-4 text-xs lg:text-sm text-gray-600">
+                  <CreditCard size={14} />
                   <span className="capitalize">{order.metodoPago}</span>
                 </div>
               )}
@@ -256,7 +256,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
                           </button>
                         </div>
                         
-                        <div className="flex flex-col sm:flex-row gap-2">
+                        <div className="flex flex-col lg:flex-row gap-2">
                           <div className="flex items-center gap-2 flex-1">
                             <span className="text-xs text-gray-600">Cant:</span>
                             <div className="flex items-center gap-1">
@@ -296,7 +296,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
                     </div>
                   ))}
                   
-                  <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="flex flex-col lg:flex-row gap-2">
                     <button
                       onClick={() => setShowAddProduct(true)}
                       className="flex-1 py-2 px-3 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center justify-center gap-1"
@@ -335,7 +335,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
               ) : (
                 <div className="space-y-2 mb-4">
                   {order.items.map((cartItem, index) => (
-                    <div key={index} className="flex justify-between items-center text-xs sm:text-sm">
+                    <div key={index} className="flex justify-between items-center text-xs lg:text-sm">
                       <span>{cartItem.cantidad}x {cartItem.item.nombre}</span>
                       <span className="font-medium">{formatCOP(cartItem.item.precio * cartItem.cantidad)}</span>
                     </div>
@@ -403,8 +403,8 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
       {/* Modal para agregar productos */}
       {showAddProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-4 sm:p-6 w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col">
-            <h3 className="text-lg sm:text-xl font-bold mb-4" style={{ color: COLORS.dark }}>
+          <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col">
+            <h3 className="text-lg lg:text-xl font-bold mb-4" style={{ color: COLORS.dark }}>
               Agregar Producto
             </h3>
             
