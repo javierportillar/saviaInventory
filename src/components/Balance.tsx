@@ -4,6 +4,7 @@ import dataService from '../lib/dataService';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
 import { Wallet, TrendingUp, TrendingDown, CalendarDays, PiggyBank } from 'lucide-react';
+import { formatPaymentSummary, getOrderAllocations, isOrderPaid } from '../utils/payments';
 
 const rangeOptions = [
   { label: 'Últimos 7 días', value: '7' },
@@ -58,8 +59,14 @@ const computeMethodTotals = (orders: Order[], gastos: Gasto[]): MethodTotalsDeta
   const totals = emptyMethodTotals();
 
   orders.forEach((order) => {
-    const method = order.metodoPago ?? 'efectivo';
-    totals[method].ingresos += order.total;
+    if (!isOrderPaid(order)) {
+      return;
+    }
+
+    const allocations = getOrderAllocations(order);
+    allocations.forEach(({ metodo, monto }) => {
+      totals[metodo].ingresos += monto;
+    });
   });
 
   gastos.forEach((gasto) => {
@@ -355,25 +362,36 @@ export function Balance() {
                         </td>
                       </tr>
                     )}
-                    {filteredOrders.map((order) => (
-                      <tr key={order.id} className="hover:bg-gray-50">
-                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-900">
-                          {formatDateTime(order.timestamp)}
-                        </td>
-                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs font-medium" style={{ color: COLORS.dark }}>
-                          {order.numero ? `#${order.numero}` : order.id}
-                        </td>
-                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-600 hidden sm:table-cell">
-                          {order.cliente ?? '—'}
-                        </td>
-                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-600 hidden lg:table-cell">
-                          {methodLabels[order.metodoPago ?? 'efectivo']}
-                        </td>
-                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs font-semibold text-green-600">
-                          {formatCOP(order.total)}
-                        </td>
-                      </tr>
-                    ))}
+                    {filteredOrders.map((order) => {
+                      const allocations = getOrderAllocations(order);
+                      const paymentSummary = formatPaymentSummary(allocations, formatCOP);
+                      const paid = isOrderPaid(order);
+
+                      return (
+                        <tr key={order.id} className="hover:bg-gray-50">
+                          <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-900">
+                            {formatDateTime(order.timestamp)}
+                          </td>
+                          <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs font-medium" style={{ color: COLORS.dark }}>
+                            {order.numero ? `#${order.numero}` : order.id}
+                          </td>
+                          <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-600 hidden sm:table-cell">
+                            {order.cliente ?? '—'}
+                          </td>
+                          <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-600 hidden lg:table-cell">
+                            <div className="flex flex-col gap-1">
+                              <span>{paymentSummary}</span>
+                              <span className={`w-max px-2 py-0.5 rounded-full text-[11px] font-medium ${paid ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-800'}`}>
+                                {paid ? 'Pago registrado' : 'Pago pendiente'}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs font-semibold text-green-600">
+                            {formatCOP(order.total)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

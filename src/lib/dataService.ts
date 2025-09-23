@@ -1,4 +1,15 @@
-import { MenuItem, Order, Customer, Empleado, Gasto, BalanceResumen, PaymentMethod, CartItem } from '../types';
+import {
+  MenuItem,
+  Order,
+  Customer,
+  Empleado,
+  Gasto,
+  BalanceResumen,
+  PaymentMethod,
+  CartItem,
+  PaymentAllocation,
+  PaymentStatus,
+} from '../types';
 import { supabase } from './supabaseClient';
 import { getLocalData, setLocalData } from '../data/localData';
 import { slugify, generateMenuItemCode } from '../utils/strings';
@@ -6,6 +17,14 @@ import {
   buildNotesWithStudentDiscount,
   extractStudentDiscountFromNotes,
 } from '../utils/cart';
+import {
+  determinePaymentStatus,
+  getAllocationsTotal,
+  getOrderAllocations,
+  getPrimaryMethodFromAllocations,
+  mergeAllocations,
+  sanitizeAllocations,
+} from '../utils/payments';
 
 // Verificar si Supabase está disponible
 const isSupabaseAvailable = () => {
@@ -21,11 +40,15 @@ const ensureSupabaseReady = async (): Promise<boolean> => {
 
 const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi'];
 
-const normalizePaymentMethod = (method?: string | null): PaymentMethod => {
+const toOptionalPaymentMethod = (method?: string | null): PaymentMethod | undefined => {
   if (method && PAYMENT_METHODS.includes(method as PaymentMethod)) {
     return method as PaymentMethod;
   }
-  return 'efectivo';
+  return undefined;
+};
+
+const normalizePaymentMethod = (method?: string | null, fallback: PaymentMethod = 'efectivo'): PaymentMethod => {
+  return toOptionalPaymentMethod(method) ?? fallback;
 };
 
 const extractPaymentMethodValue = (record: any): string | null => {
@@ -42,6 +65,67 @@ const extractPaymentMethodValue = (record: any): string | null => {
 };
 
 const SUPABASE_PAYMENT_COLUMN = 'metodopago';
+
+interface OrderMetadata {
+  paymentStatus?: PaymentStatus;
+  paymentAllocations?: PaymentAllocation[];
+}
+
+const ORDER_METADATA_KEY = 'savia-order-metadata';
+
+const loadOrderMetadataMap = (): Record<string, OrderMetadata> => {
+  return getLocalData<Record<string, OrderMetadata>>(ORDER_METADATA_KEY, {});
+};
+
+const persistOrderMetadataMap = (metadata: Record<string, OrderMetadata>): void => {
+  setLocalData(ORDER_METADATA_KEY, metadata);
+};
+
+const getOrderMetadata = (orderId: string): OrderMetadata | undefined => {
+  const metadata = loadOrderMetadataMap();
+  return metadata[orderId];
+};
+
+const mergeOrderMetadata = (orderId: string, updates: OrderMetadata): OrderMetadata => {
+  const metadata = loadOrderMetadataMap();
+  const existing = metadata[orderId] ?? {};
+  const next: OrderMetadata = { ...existing };
+
+  if (updates.paymentStatus) {
+    next.paymentStatus = updates.paymentStatus;
+  } else if ('paymentStatus' in updates && updates.paymentStatus === undefined) {
+    delete next.paymentStatus;
+  }
+
+  if ('paymentAllocations' in updates) {
+    next.paymentAllocations = sanitizeAllocations(updates.paymentAllocations ?? []);
+  }
+
+  if (!next.paymentStatus && (!next.paymentAllocations || next.paymentAllocations.length === 0)) {
+    delete metadata[orderId];
+  } else {
+    metadata[orderId] = next;
+  }
+
+  persistOrderMetadataMap(metadata);
+  return next;
+};
+
+const clearOrderMetadata = (orderId: string): void => {
+  const metadata = loadOrderMetadataMap();
+  if (metadata[orderId]) {
+    delete metadata[orderId];
+    persistOrderMetadataMap(metadata);
+  }
+};
+
+const syncOrderMetadata = (order: Order): void => {
+  const updates: OrderMetadata = {
+    paymentStatus: order.paymentStatus,
+    paymentAllocations: order.paymentAllocations ?? [],
+  };
+  mergeOrderMetadata(order.id, updates);
+};
 
 const toLocalDateKey = (input: Date | string): string => {
   const date = input instanceof Date ? input : new Date(input);
@@ -236,12 +320,16 @@ const mapOrderRecord = (record: any): Order => {
   const items = mapCartItemsFromRecord(record);
   const timestamp = record?.timestamp ? new Date(record.timestamp) : new Date();
 
-  return {
-    id: typeof record?.id === 'string' && record.id
-      ? record.id
-      : typeof record?.order_id === 'string' && record.order_id
-        ? record.order_id
-        : `order-${Math.random().toString(36).slice(2, 10)}`,
+  const id = typeof record?.id === 'string' && record.id
+    ? record.id
+    : typeof record?.order_id === 'string' && record.order_id
+      ? record.order_id
+      : `order-${Math.random().toString(36).slice(2, 10)}`;
+
+  const metodoPago = toOptionalPaymentMethod(extractPaymentMethodValue(record));
+
+  const baseOrder: Order = {
+    id,
     numero: typeof record?.numero === 'number' ? record.numero : Number(record?.numero ?? 0),
     items,
     total: typeof record?.total === 'number' ? record.total : Number(record?.total ?? 0),
@@ -249,7 +337,36 @@ const mapOrderRecord = (record: any): Order => {
     timestamp,
     cliente_id: record?.cliente_id ?? record?.clienteId ?? undefined,
     cliente: record?.customer?.nombre ?? record?.cliente ?? undefined,
-    metodoPago: normalizePaymentMethod(extractPaymentMethodValue(record)),
+    metodoPago,
+  };
+
+  const metadata = getOrderMetadata(baseOrder.id);
+  const rawAllocations = sanitizeAllocations(record?.paymentAllocations);
+
+  let allocations: PaymentAllocation[] = [];
+  if (metadata?.paymentAllocations) {
+    allocations = sanitizeAllocations(metadata.paymentAllocations);
+  } else if (rawAllocations.length > 0) {
+    allocations = rawAllocations;
+  } else if (metodoPago) {
+    allocations = [{ metodo: metodoPago, monto: Math.round(baseOrder.total) }];
+  }
+
+  if (metadata && metadata.paymentAllocations && metadata.paymentAllocations.length === 0) {
+    allocations = [];
+  }
+
+  const mergedAllocations = allocations.length > 0 ? mergeAllocations(allocations) : allocations;
+  const paymentStatus: PaymentStatus = metadata?.paymentStatus
+    ?? (record?.paymentStatus as PaymentStatus | undefined)
+    ?? (Math.abs(getAllocationsTotal(mergedAllocations) - Math.round(baseOrder.total)) <= 1
+      ? 'pagado'
+      : 'pendiente');
+
+  return {
+    ...baseOrder,
+    paymentAllocations: mergedAllocations,
+    paymentStatus,
   };
 };
 
@@ -287,6 +404,7 @@ const loadLocalOrders = (): Order[] => {
 };
 
 const persistLocalOrders = (orders: Order[]): void => {
+  orders.forEach(syncOrderMetadata);
   setLocalData('savia-orders', orders);
 };
 
@@ -344,14 +462,25 @@ const computeLocalBalance = (orders: Order[], gastos: Gasto[]): BalanceResumen[]
   };
 
   orders.forEach((order) => {
+    if (determinePaymentStatus(order) !== 'pagado') {
+      return;
+    }
+
     const date = new Date(order.timestamp);
     if (Number.isNaN(date.getTime())) return;
     const key = toLocalDateKey(date);
     if (!key) return;
     const entry = getAccumulator(key);
-    const method = normalizePaymentMethod(order.metodoPago);
-    entry.ingresosTotales += order.total;
-    entry.ingresosPorMetodo[method] += order.total;
+    const allocations = getOrderAllocations(order);
+    if (allocations.length === 0) {
+      return;
+    }
+
+    const totalPagado = getAllocationsTotal(allocations);
+    entry.ingresosTotales += totalPagado;
+    allocations.forEach(({ metodo, monto }) => {
+      entry.ingresosPorMetodo[metodo] += monto;
+    });
   });
 
   gastos.forEach((gasto) => {
@@ -570,11 +699,26 @@ export const createOrder = async (order: Order): Promise<Order> => {
       ? cartItem.precioUnitario
       : cartItem.item.precio,
   }));
+  const sanitizedAllocations = sanitizeAllocations(order.paymentAllocations ?? []);
+  const paymentStatus: PaymentStatus = order.paymentStatus
+    ?? (Math.abs(getAllocationsTotal(sanitizedAllocations) - Math.round(order.total)) <= 1
+      ? 'pagado'
+      : 'pendiente');
+
+  let metodoPago = toOptionalPaymentMethod(order.metodoPago);
+  if (!metodoPago && sanitizedAllocations.length > 0) {
+    metodoPago = sanitizedAllocations[0].metodo;
+  }
+
   const sanitizedOrder: Order = {
     ...order,
     items: sanitizedItems,
-    metodoPago: normalizePaymentMethod(order.metodoPago),
+    metodoPago,
+    paymentAllocations: sanitizedAllocations,
+    paymentStatus,
   };
+
+  syncOrderMetadata(sanitizedOrder);
 
   if (await ensureSupabaseReady()) {
     try {
@@ -583,16 +727,16 @@ export const createOrder = async (order: Order): Promise<Order> => {
         .insert([
           {
             id: sanitizedOrder.id,
-            numero: sanitizedOrder.numero,
-            total: sanitizedOrder.total,
-            estado: sanitizedOrder.estado,
-            timestamp: sanitizedOrder.timestamp.toISOString(),
-            cliente_id: sanitizedOrder.cliente_id ?? null,
-            [SUPABASE_PAYMENT_COLUMN]: sanitizedOrder.metodoPago,
-          },
-        ])
-        .select('*')
-        .single();
+          numero: sanitizedOrder.numero,
+          total: sanitizedOrder.total,
+          estado: sanitizedOrder.estado,
+          timestamp: sanitizedOrder.timestamp.toISOString(),
+          cliente_id: sanitizedOrder.cliente_id ?? null,
+          [SUPABASE_PAYMENT_COLUMN]: normalizePaymentMethod(sanitizedOrder.metodoPago),
+        },
+      ])
+      .select('*')
+      .single();
       if (error) throw error;
 
       if (sanitizedOrder.items.length > 0) {
@@ -617,7 +761,7 @@ export const createOrder = async (order: Order): Promise<Order> => {
         id: data.id,
         timestamp: new Date(data.timestamp),
         cliente_id: data.cliente_id ?? undefined,
-        metodoPago: normalizePaymentMethod(extractPaymentMethodValue(data)),
+        metodoPago: toOptionalPaymentMethod(extractPaymentMethodValue(data)) ?? sanitizedOrder.metodoPago,
       };
       upsertLocalOrder(createdOrder);
       return createdOrder;
@@ -631,6 +775,50 @@ export const createOrder = async (order: Order): Promise<Order> => {
   const newOrders = [...orders, sanitizedOrder];
   persistLocalOrders(newOrders);
   return sanitizedOrder;
+};
+
+export const recordOrderPayment = async (
+  order: Order,
+  allocations: PaymentAllocation[]
+): Promise<Order> => {
+  const sanitizedAllocations = mergeAllocations(sanitizeAllocations(allocations));
+
+  if (sanitizedAllocations.length === 0) {
+    throw new Error('Debe seleccionar al menos un método de pago.');
+  }
+
+  const paidTotal = getAllocationsTotal(sanitizedAllocations);
+  const targetTotal = Math.round(order.total);
+  const paymentStatus: PaymentStatus = Math.abs(paidTotal - targetTotal) <= 1
+    ? 'pagado'
+    : 'pendiente';
+
+  const primaryMethod = getPrimaryMethodFromAllocations(sanitizedAllocations)
+    ?? order.metodoPago
+    ?? 'efectivo';
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ [SUPABASE_PAYMENT_COLUMN]: normalizePaymentMethod(primaryMethod) })
+        .eq('id', order.id);
+      if (error) throw error;
+    } catch (error) {
+      console.warn('Supabase not available, using local data:', error);
+    }
+  }
+
+  const updatedOrder: Order = {
+    ...order,
+    metodoPago: primaryMethod,
+    paymentAllocations: sanitizedAllocations,
+    paymentStatus,
+  };
+
+  syncOrderMetadata(updatedOrder);
+  upsertLocalOrder(updatedOrder);
+  return updatedOrder;
 };
 
 export const updateOrderStatus = async (order: Order, status: Order['estado']): Promise<Order> => {
@@ -716,13 +904,14 @@ export const updateOrder = async (orderId: string, updates: { items?: CartItem[]
           }));
           const { error: insertError } = await supabase.from('order_items').insert(orderItemsPayload);
           if (insertError) throw insertError;
-        }
       }
-      return;
-    } catch (error) {
-      console.warn('Supabase not available, using local data:', error);
     }
+    mergeOrderMetadata(orderId, { paymentStatus: 'pendiente', paymentAllocations: [] });
+    return;
+  } catch (error) {
+    console.warn('Supabase not available, using local data:', error);
   }
+}
 
   // Local storage fallback
   const orders = getLocalData<Order[]>('savia-orders', []).map(mapOrderRecord);
@@ -737,6 +926,7 @@ export const updateOrder = async (orderId: string, updates: { items?: CartItem[]
     return order;
   });
   setLocalData('savia-orders', updatedOrders);
+  mergeOrderMetadata(orderId, { paymentStatus: 'pendiente', paymentAllocations: [] });
 };
 
 // CUSTOMERS
@@ -1004,6 +1194,7 @@ export const dataService = {
   deleteMenuItem,
   fetchOrders,
   createOrder,
+  recordOrderPayment,
   updateOrder,
   updateOrderStatus,
   fetchCustomers,

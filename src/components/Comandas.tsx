@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Order, MenuItem, CartItem } from '../types';
+import { Order, MenuItem, CartItem, PaymentAllocation } from '../types';
 import { Clock, Check, CheckCircle, User, CreditCard, Edit3, Plus, Minus, Trash2, Save, X } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, formatDateTime, formatDate } from '../utils/format';
@@ -20,6 +20,8 @@ import {
   BOWL_TOPPING_OPTIONS,
   isBowlSalado,
 } from '../constants/bowl';
+import { formatPaymentSummary, getOrderAllocations, isOrderPaid } from '../utils/payments';
+import { PaymentModal } from './PaymentModal';
 
 const ITEMS_PER_PAGE = 30;
 
@@ -39,6 +41,7 @@ interface ComandasProps {
   orders: Order[];
   onUpdateOrderStatus: (order: Order, status: Order['estado']) => void;
   onSaveOrderChanges: (orderId: string, updates: { items: CartItem[]; total: number }) => Promise<void>;
+  onRecordOrderPayment: (order: Order, allocations: PaymentAllocation[]) => Promise<void>;
 }
 
 interface EditingOrder {
@@ -47,7 +50,7 @@ interface EditingOrder {
   total: number;
 }
 
-export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: ComandasProps) {
+export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRecordOrderPayment }: ComandasProps) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [editingOrder, setEditingOrder] = useState<EditingOrder | null>(null);
   const [showAddProduct, setShowAddProduct] = useState(false);
@@ -58,6 +61,8 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
   const [selectedBowlProtein, setSelectedBowlProtein] = useState<string | null>(null);
   const [selectedDateKey, setSelectedDateKey] = useState<string>(() => getDateKey(new Date()));
   const [currentPage, setCurrentPage] = useState(1);
+  const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
+  const [isRecordingPayment, setIsRecordingPayment] = useState(false);
 
   const sortedOrders = useMemo(
     () => [...orders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
@@ -402,6 +407,36 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
     setSearchQuery('');
   };
 
+  const openPaymentModal = (order: Order) => {
+    if (isOrderPaid(order)) {
+      return;
+    }
+    setPaymentOrder(order);
+  };
+
+  const handlePaymentModalClose = () => {
+    if (!isRecordingPayment) {
+      setPaymentOrder(null);
+    }
+  };
+
+  const handleSubmitPayment = async (allocations: PaymentAllocation[]) => {
+    if (!paymentOrder) {
+      return;
+    }
+
+    try {
+      setIsRecordingPayment(true);
+      await onRecordOrderPayment(paymentOrder, allocations);
+      setPaymentOrder(null);
+    } catch (error) {
+      console.error('Error al registrar el pago:', error);
+      alert('No se pudo registrar el pago. Inténtalo nuevamente.');
+    } finally {
+      setIsRecordingPayment(false);
+    }
+  };
+
   const handleDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
     setSelectedDateKey(value || getDateKey(new Date()));
@@ -429,6 +464,286 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
     const isNonInventariable = item.inventarioCategoria !== 'Inventariables';
     return matchesSearch && isNonInventariable;
   });
+
+  const renderOrderCard = (order: Order) => {
+    const allocations = getOrderAllocations(order);
+    const paymentSummary = formatPaymentSummary(allocations, formatCOP);
+    const paid = isOrderPaid(order);
+
+    return (
+      <div
+        key={order.id}
+        className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200"
+      >
+        <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start mb-4 space-y-2 lg:space-y-0">
+          <div className="flex-1">
+            <h3 className="text-lg lg:text-xl font-bold mb-1" style={{ color: COLORS.dark }}>
+              #{order.numero}
+            </h3>
+            <p className="text-xs lg:text-sm text-gray-500">{formatDateTime(order.timestamp)}</p>
+          </div>
+          <span className={`px-2 lg:px-3 py-1 rounded-full text-xs lg:text-sm font-medium border flex items-center gap-1 self-start ${getStatusColor(order.estado)}`}>
+            {getStatusIcon(order.estado)}
+            <span className="hidden lg:inline">{order.estado}</span>
+          </span>
+        </div>
+
+        {order.cliente && (
+          <div className="flex items-center gap-2 mb-3 text-xs lg:text-sm text-gray-600">
+            <User size={14} />
+            <span>{order.cliente}</span>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-2 mb-4">
+          <div className="flex items-center justify-between text-xs lg:text-sm">
+            <div className="flex items-center gap-2 text-gray-600">
+              <CreditCard size={14} />
+              <span className="text-left">{paymentSummary}</span>
+            </div>
+            <span className={`px-2 py-1 rounded-full font-medium ${paid ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-800'}`}>
+              {paid ? 'Pago registrado' : 'Pago pendiente'}
+            </span>
+          </div>
+        </div>
+
+        {editingOrder?.orderId === order.id ? (
+          <div className="space-y-3 mb-4">
+            <h4 className="font-semibold text-sm">Editando pedido:</h4>
+            {editingOrder.items.map((cartItem, index) => (
+              <div key={index} className="bg-gray-50 p-3 rounded-lg">
+                <div className="flex flex-col space-y-2">
+                  <div className="flex justify-between items-start">
+                    <span className="font-medium text-sm">{cartItem.item.nombre}</span>
+                    <button
+                      onClick={() => removeItem(index)}
+                      className="text-red-600 hover:text-red-800 p-1"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+
+                  {cartItem.studentDiscount && (
+                    <span className="inline-flex items-center text-[11px] font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full w-fit">
+                      {STUDENT_DISCOUNT_NOTE}
+                    </span>
+                  )}
+
+                  <div className="text-xs text-gray-600">
+                    Precio unidad:{' '}
+                    {cartItem.studentDiscount ? (
+                      <>
+                        <span className="line-through text-gray-400 mr-2">
+                          {formatCOP(getCartItemBaseUnitPrice(cartItem))}
+                        </span>
+                        <span className="font-semibold text-green-600">
+                          {formatCOP(getCartItemEffectiveUnitPrice(cartItem))}
+                        </span>
+                      </>
+                    ) : (
+                      <span>{formatCOP(getCartItemBaseUnitPrice(cartItem))}</span>
+                    )}
+                  </div>
+
+                  {cartItem.notas && (
+                    <p className="text-xs text-gray-500 whitespace-pre-line">
+                      {cartItem.notas}
+                    </p>
+                  )}
+
+                  <div className="flex flex-col lg:flex-row gap-2">
+                    <div className="flex items-center gap-2 flex-1">
+                      <span className="text-xs text-gray-600">Cant:</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => updateItemQuantity(index, cartItem.cantidad - 1)}
+                          className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center hover:bg-gray-300"
+                        >
+                          <Minus size={12} />
+                        </button>
+                        <span className="w-8 text-center text-sm">{cartItem.cantidad}</span>
+                        <button
+                          onClick={() => updateItemQuantity(index, cartItem.cantidad + 1)}
+                          className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center hover:bg-gray-300"
+                        >
+                          <Plus size={12} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-1">
+                      <span className="text-xs text-gray-600">Precio:</span>
+                      <input
+                        type="number"
+                        value={getCartItemBaseUnitPrice(cartItem)}
+                        onChange={(e) => updateItemPrice(index, Number(e.target.value))}
+                        className="w-20 px-2 py-1 text-xs border border-gray-300 rounded"
+                      />
+                    </div>
+                  </div>
+
+                  {isSandwichItem(cartItem.item) && (
+                    <button
+                      onClick={() => toggleEditingItemDiscount(index)}
+                      className={`self-start inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                        cartItem.studentDiscount
+                          ? 'bg-green-600 text-white hover:bg-green-700'
+                          : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
+                      }`}
+                    >
+                      {cartItem.studentDiscount ? 'Quitar descuento' : 'Aplicar descuento estudiante'}
+                    </button>
+                  )}
+
+                  <div className="text-right">
+                    <span className="text-sm font-medium">
+                      Subtotal: {formatCOP(getCartItemSubtotal(cartItem))}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            <div className="flex flex-col lg:flex-row gap-2">
+              <button
+                onClick={() => setShowAddProduct(true)}
+                className="flex-1 py-2 px-3 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center justify-center gap-1"
+              >
+                <Plus size={14} />
+                Agregar producto
+              </button>
+            </div>
+
+            <div className="border-t pt-3">
+              <div className="flex justify-between items-center mb-3">
+                <span className="font-bold">Nuevo Total:</span>
+                <span className="font-bold text-lg" style={{ color: COLORS.accent }}>
+                  {formatCOP(editingOrder.total)}
+                </span>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={saveOrderChanges}
+                  className="flex-1 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 flex items-center justify-center gap-1"
+                >
+                  <Save size={14} />
+                  Guardar
+                </button>
+                <button
+                  onClick={cancelEditing}
+                  className="flex-1 py-2 bg-gray-400 text-white rounded-lg text-sm font-medium hover:bg-gray-500 flex items-center justify-center gap-1"
+                >
+                  <X size={14} />
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2 mb-4">
+            {order.items.map((cartItem, index) => (
+              <div key={index} className="space-y-1">
+                <div className="flex justify-between items-center text-xs lg:text-sm">
+                  <span>{cartItem.cantidad}x {cartItem.item.nombre}</span>
+                  <span className="font-medium">{formatCOP(getCartItemSubtotal(cartItem))}</span>
+                </div>
+                <div className="text-[11px] lg:text-xs text-gray-600">
+                  Precio unidad:{' '}
+                  {cartItem.studentDiscount ? (
+                    <>
+                      <span className="line-through text-gray-400 mr-1">
+                        {formatCOP(getCartItemBaseUnitPrice(cartItem))}
+                      </span>
+                      <span className="font-semibold text-green-600">
+                        {formatCOP(getCartItemEffectiveUnitPrice(cartItem))}
+                      </span>
+                    </>
+                  ) : (
+                    <span>{formatCOP(getCartItemBaseUnitPrice(cartItem))}</span>
+                  )}
+                </div>
+                {cartItem.studentDiscount && (
+                  <span className="inline-flex items-center text-[11px] font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                    {STUDENT_DISCOUNT_NOTE}
+                  </span>
+                )}
+                {cartItem.notas && (
+                  <p className="text-xs text-gray-500 whitespace-pre-line">
+                    {cartItem.notas}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {editingOrder?.orderId !== order.id && (
+          <React.Fragment>
+            <div className="border-t pt-3 mb-4">
+              <div className="flex justify-between items-center">
+                <span className="font-bold">Total:</span>
+                <span className="font-bold text-lg" style={{ color: COLORS.accent }}>
+                  {formatCOP(order.total)}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {order.estado === 'entregado' ? (
+                !paid ? (
+                  <button
+                    onClick={() => openPaymentModal(order)}
+                    className="w-full py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm"
+                  >
+                    Registrar pago
+                  </button>
+                ) : null
+              ) : (
+                <React.Fragment>
+                  {order.estado === 'pendiente' && (
+                    <button
+                      onClick={() => onUpdateOrderStatus(order, 'preparando')}
+                      className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
+                      style={{ backgroundColor: COLORS.dark }}
+                    >
+                      Iniciar preparación
+                    </button>
+                  )}
+                  {order.estado === 'preparando' && (
+                    <button
+                      onClick={() => onUpdateOrderStatus(order, 'listo')}
+                      className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
+                      style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
+                    >
+                      Marcar como listo
+                    </button>
+                  )}
+                  {order.estado === 'listo' && (
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => startEditingOrder(order)}
+                        className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm flex items-center justify-center gap-1"
+                      >
+                        <Edit3 size={14} />
+                        Modificar pedido
+                      </button>
+                      <button
+                        onClick={() => onUpdateOrderStatus(order, 'entregado')}
+                        className="w-full py-2 bg-green-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm"
+                      >
+                        Entregar pedido
+                      </button>
+                    </div>
+                  )}
+                </React.Fragment>
+              )}
+            </div>
+          </React.Fragment>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
@@ -488,263 +803,8 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
           ) : (
             <>
               <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6">
-                {paginatedOrders.map((order) => (
-                  <div
-                    key={order.id}
-                    className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200"
-                  >
-                    <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start mb-4 space-y-2 lg:space-y-0">
-                      <div className="flex-1">
-                        <h3 className="text-lg lg:text-xl font-bold mb-1" style={{ color: COLORS.dark }}>
-                          #{order.numero}
-                        </h3>
-                        <p className="text-xs lg:text-sm text-gray-500">{formatDateTime(order.timestamp)}</p>
-                      </div>
-                      <span className={`px-2 lg:px-3 py-1 rounded-full text-xs lg:text-sm font-medium border flex items-center gap-1 self-start ${getStatusColor(order.estado)}`}>
-                        {getStatusIcon(order.estado)}
-                        <span className="hidden lg:inline">{order.estado}</span>
-                      </span>
-                    </div>
+                {paginatedOrders.map(renderOrderCard)}
 
-                    {order.cliente && (
-                      <div className="flex items-center gap-2 mb-3 text-xs lg:text-sm text-gray-600">
-                        <User size={14} />
-                        <span>{order.cliente}</span>
-                      </div>
-                    )}
-
-                    {order.metodoPago && (
-                      <div className="flex items-center gap-2 mb-4 text-xs lg:text-sm text-gray-600">
-                        <CreditCard size={14} />
-                        <span className="capitalize">{order.metodoPago}</span>
-                      </div>
-                    )}
-
-                    {editingOrder?.orderId === order.id ? (
-                      <div className="space-y-3 mb-4">
-                        <h4 className="font-semibold text-sm">Editando pedido:</h4>
-                        {editingOrder.items.map((cartItem, index) => (
-                          <div key={index} className="bg-gray-50 p-3 rounded-lg">
-                            <div className="flex flex-col space-y-2">
-                              <div className="flex justify-between items-start">
-                                <span className="font-medium text-sm">{cartItem.item.nombre}</span>
-                                <button
-                                  onClick={() => removeItem(index)}
-                                  className="text-red-600 hover:text-red-800 p-1"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </div>
-
-                              {cartItem.studentDiscount && (
-                                <span className="inline-flex items-center text-[11px] font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full w-fit">
-                                  {STUDENT_DISCOUNT_NOTE}
-                                </span>
-                              )}
-
-                              <div className="text-xs text-gray-600">
-                                Precio unidad:{' '}
-                                {cartItem.studentDiscount ? (
-                                  <>
-                                    <span className="line-through text-gray-400 mr-2">
-                                      {formatCOP(getCartItemBaseUnitPrice(cartItem))}
-                                    </span>
-                                    <span className="font-semibold text-green-600">
-                                      {formatCOP(getCartItemEffectiveUnitPrice(cartItem))}
-                                    </span>
-                                  </>
-                                ) : (
-                                  <span>{formatCOP(getCartItemBaseUnitPrice(cartItem))}</span>
-                                )}
-                              </div>
-
-                              {cartItem.notas && (
-                                <p className="text-xs text-gray-500 whitespace-pre-line">
-                                  {cartItem.notas}
-                                </p>
-                              )}
-
-                              <div className="flex flex-col lg:flex-row gap-2">
-                                <div className="flex items-center gap-2 flex-1">
-                                  <span className="text-xs text-gray-600">Cant:</span>
-                                  <div className="flex items-center gap-1">
-                                    <button
-                                      onClick={() => updateItemQuantity(index, cartItem.cantidad - 1)}
-                                      className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center hover:bg-gray-300"
-                                    >
-                                      <Minus size={12} />
-                                    </button>
-                                    <span className="w-8 text-center text-sm">{cartItem.cantidad}</span>
-                                    <button
-                                      onClick={() => updateItemQuantity(index, cartItem.cantidad + 1)}
-                                      className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center hover:bg-gray-300"
-                                    >
-                                      <Plus size={12} />
-                                    </button>
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center gap-2 flex-1">
-                                  <span className="text-xs text-gray-600">Precio:</span>
-                                  <input
-                                    type="number"
-                                    value={getCartItemBaseUnitPrice(cartItem)}
-                                    onChange={(e) => updateItemPrice(index, Number(e.target.value))}
-                                    className="w-20 px-2 py-1 text-xs border border-gray-300 rounded"
-                                  />
-                                </div>
-                              </div>
-
-                              {isSandwichItem(cartItem.item) && (
-                                <button
-                                  onClick={() => toggleEditingItemDiscount(index)}
-                                  className={`self-start inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-                                    cartItem.studentDiscount
-                                      ? 'bg-green-600 text-white hover:bg-green-700'
-                                      : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
-                                  }`}
-                                >
-                                  {cartItem.studentDiscount ? 'Quitar descuento' : 'Aplicar descuento estudiante'}
-                                </button>
-                              )}
-
-                              <div className="text-right">
-                                <span className="text-sm font-medium">
-                                  Subtotal: {formatCOP(getCartItemSubtotal(cartItem))}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-
-                        <div className="flex flex-col lg:flex-row gap-2">
-                          <button
-                            onClick={() => setShowAddProduct(true)}
-                            className="flex-1 py-2 px-3 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center justify-center gap-1"
-                          >
-                            <Plus size={14} />
-                            Agregar producto
-                          </button>
-                        </div>
-
-                        <div className="border-t pt-3">
-                          <div className="flex justify-between items-center mb-3">
-                            <span className="font-bold">Nuevo Total:</span>
-                            <span className="font-bold text-lg" style={{ color: COLORS.accent }}>
-                              {formatCOP(editingOrder.total)}
-                            </span>
-                          </div>
-
-                          <div className="flex gap-2">
-                            <button
-                              onClick={saveOrderChanges}
-                              className="flex-1 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 flex items-center justify-center gap-1"
-                            >
-                              <Save size={14} />
-                              Guardar
-                            </button>
-                            <button
-                              onClick={cancelEditing}
-                              className="flex-1 py-2 bg-gray-400 text-white rounded-lg text-sm font-medium hover:bg-gray-500 flex items-center justify-center gap-1"
-                            >
-                              <X size={14} />
-                              Cancelar
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-2 mb-4">
-                        {order.items.map((cartItem, index) => (
-                          <div key={index} className="space-y-1">
-                            <div className="flex justify-between items-center text-xs lg:text-sm">
-                              <span>{cartItem.cantidad}x {cartItem.item.nombre}</span>
-                              <span className="font-medium">{formatCOP(getCartItemSubtotal(cartItem))}</span>
-                            </div>
-                            <div className="text-[11px] lg:text-xs text-gray-600">
-                              Precio unidad:{' '}
-                              {cartItem.studentDiscount ? (
-                                <>
-                                  <span className="line-through text-gray-400 mr-1">
-                                    {formatCOP(getCartItemBaseUnitPrice(cartItem))}
-                                  </span>
-                                  <span className="font-semibold text-green-600">
-                                    {formatCOP(getCartItemEffectiveUnitPrice(cartItem))}
-                                  </span>
-                                </>
-                              ) : (
-                                <span>{formatCOP(getCartItemBaseUnitPrice(cartItem))}</span>
-                              )}
-                            </div>
-                            {cartItem.studentDiscount && (
-                              <span className="inline-flex items-center text-[11px] font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-                                {STUDENT_DISCOUNT_NOTE}
-                              </span>
-                            )}
-                            {cartItem.notas && (
-                              <p className="text-xs text-gray-500 whitespace-pre-line">
-                                {cartItem.notas}
-                              </p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {editingOrder?.orderId !== order.id && (
-                      <>
-                        <div className="border-t pt-3 mb-4">
-                          <div className="flex justify-between items-center">
-                            <span className="font-bold">Total:</span>
-                            <span className="font-bold text-lg" style={{ color: COLORS.accent }}>
-                              {formatCOP(order.total)}
-                            </span>
-                          </div>
-                        </div>
-
-                        {order.estado !== 'entregado' && (
-                          <div className="space-y-2">
-                            {order.estado === 'pendiente' && (
-                              <button
-                                onClick={() => onUpdateOrderStatus(order, 'preparando')}
-                                className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
-                                style={{ backgroundColor: COLORS.dark }}
-                              >
-                                Iniciar preparación
-                              </button>
-                            )}
-                            {order.estado === 'preparando' && (
-                              <button
-                                onClick={() => onUpdateOrderStatus(order, 'listo')}
-                                className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
-                                style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
-                              >
-                                Marcar como listo
-                              </button>
-                            )}
-                            {order.estado === 'listo' && (
-                              <div className="space-y-2">
-                                <button
-                                  onClick={() => startEditingOrder(order)}
-                                  className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm flex items-center justify-center gap-1"
-                                >
-                                  <Edit3 size={14} />
-                                  Modificar pedido
-                                </button>
-                                <button
-                                  onClick={() => onUpdateOrderStatus(order, 'entregado')}
-                                  className="w-full py-2 bg-green-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm"
-                                >
-                                  Entregar pedido
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                ))}
               </div>
 
               {hasPagination && (
@@ -791,6 +851,16 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges }: Co
             </>
           )}
         </div>
+      )}
+
+      {paymentOrder && (
+        <PaymentModal
+          order={paymentOrder}
+          onClose={handlePaymentModalClose}
+          onSubmit={handleSubmitPayment}
+          isSubmitting={isRecordingPayment}
+          title="Gestionar pago"
+        />
       )}
 
       {/* Modal para agregar productos */}

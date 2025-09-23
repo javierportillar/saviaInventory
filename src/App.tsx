@@ -10,7 +10,7 @@ import { Empleados } from './components/Empleados';
 import { Gastos } from './components/Gastos';
 import { Login } from './components/Login';
 import { Navigation } from './components/Navigation';
-import { ModuleType, User, MenuItem, Order, Customer, CartItem } from './types';
+import { ModuleType, User, MenuItem, Order, Customer, CartItem, PaymentAllocation } from './types';
 import { initializeLocalData } from './data/localData';
 import dataService from './lib/dataService';
 
@@ -177,6 +177,20 @@ function App() {
     setOrders((prev) => [...prev, data]);
   };
 
+  const handleRecordOrderPayment = async (order: Order, allocations: PaymentAllocation[]) => {
+    try {
+      const updatedOrder = await dataService.recordOrderPayment(order, allocations);
+      setOrders((prevOrders) =>
+        prevOrders.map((entry) =>
+          entry.id === updatedOrder.id ? updatedOrder : entry
+        )
+      );
+    } catch (error) {
+      console.error('Error registrando el pago del pedido:', error);
+      throw error;
+    }
+  };
+
   const handleUpdateOrderStatus = async (targetOrder: Order, status: Order['estado']) => {
     try {
       const updatedOrder = await dataService.updateOrderStatus(targetOrder, status);
@@ -208,6 +222,8 @@ function App() {
                 ...order,
                 items: updates.items,
                 total: updates.total,
+                paymentAllocations: [],
+                paymentStatus: 'pendiente',
               }
             : order
         )
@@ -261,8 +277,10 @@ function App() {
         {module === 'balance' && <Balance />}
         {module === 'caja' && (
           <Caja
+            orders={orders}
             onModuleChange={handleModuleChange}
             onCreateOrder={handleCreateOrder}
+            onRecordOrderPayment={handleRecordOrderPayment}
           />
         )}
         {module === 'comandas' && (
@@ -270,6 +288,7 @@ function App() {
             orders={orders}
             onUpdateOrderStatus={handleUpdateOrderStatus}
             onSaveOrderChanges={handleSaveOrderChanges}
+            onRecordOrderPayment={handleRecordOrderPayment}
           />
         )}
         {module === 'inventario' && (

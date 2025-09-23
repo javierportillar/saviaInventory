@@ -14,6 +14,13 @@ export interface MenuItem {
 
 export type PaymentMethod = 'efectivo' | 'tarjeta' | 'nequi';
 
+export interface PaymentAllocation {
+  metodo: PaymentMethod;
+  monto: number;
+}
+
+export type PaymentStatus = 'pendiente' | 'pagado';
+
 export interface BowlSaladoCustomization {
   bases: string[];
   toppings: string[];
@@ -40,6 +47,8 @@ export interface Order {
   cliente_id?: string;
   cliente?: string;
   metodoPago?: PaymentMethod;
+  paymentStatus?: PaymentStatus;
+  paymentAllocations?: PaymentAllocation[];
 }
 
 export interface InventoryAlert {

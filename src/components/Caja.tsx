@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MenuItem, CartItem, Order, ModuleType, Customer, PaymentMethod, BowlSaladoCustomization } from '../types';
+import { MenuItem, CartItem, Order, ModuleType, Customer, PaymentAllocation, BowlSaladoCustomization } from '../types';
 import { Plus, Minus, Trash2, Search, ShoppingCart, Edit2, Check } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, generateOrderNumber } from '../utils/format';
@@ -20,20 +20,25 @@ import {
   BOWL_TOPPING_OPTIONS,
   isBowlSalado,
 } from '../constants/bowl';
+import { formatPaymentSummary, getOrderAllocations, isOrderPaid } from '../utils/payments';
+import { PaymentModal } from './PaymentModal';
 
 interface CajaProps {
+  orders: Order[];
   onModuleChange: (module: ModuleType) => void;
   onCreateOrder: (order: Order) => Promise<void>;
+  onRecordOrderPayment: (order: Order, allocations: PaymentAllocation[]) => Promise<void>;
 }
 
-export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
+export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayment }: CajaProps) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
-  const [showPayment, setShowPayment] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
+  const [showCheckout, setShowCheckout] = useState(false);
+  const [paymentModalOrder, setPaymentModalOrder] = useState<Order | null>(null);
+  const [isRecordingPayment, setIsRecordingPayment] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [bowlModalItem, setBowlModalItem] = useState<MenuItem | null>(null);
@@ -243,7 +248,13 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
 
   const total = calculateCartTotal(cart);
 
-  const processPayment = async () => {
+  const pendingPaymentOrders = [...orders]
+    .filter(order => order.estado === 'entregado' && !isOrderPaid(order))
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+
+  const pendingPaymentCount = pendingPaymentOrders.length;
+
+  const submitOrder = async () => {
     if (cart.length === 0) return;
 
     let customer = selectedCustomer;
@@ -290,16 +301,47 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
       timestamp: new Date(),
       cliente_id: customerId,
       cliente: orderCustomerName,
-      metodoPago: paymentMethod,
+      paymentStatus: 'pendiente',
+      paymentAllocations: [],
     };
 
     await onCreateOrder(order);
 
     setCart([]);
-    setShowPayment(false);
+    setShowCheckout(false);
     setCustomerName('');
     setSelectedCustomer(null);
     onModuleChange('comandas');
+  };
+
+  const handleOpenPaymentModal = (order: Order) => {
+    if (isOrderPaid(order)) {
+      return;
+    }
+    setPaymentModalOrder(order);
+  };
+
+  const handlePaymentModalClose = () => {
+    if (!isRecordingPayment) {
+      setPaymentModalOrder(null);
+    }
+  };
+
+  const handleSubmitPayment = async (allocations: PaymentAllocation[]) => {
+    if (!paymentModalOrder) {
+      return;
+    }
+
+    try {
+      setIsRecordingPayment(true);
+      await onRecordOrderPayment(paymentModalOrder, allocations);
+      setPaymentModalOrder(null);
+    } catch (error) {
+      console.error('Error al registrar el pago:', error);
+      alert('No se pudo registrar el pago. Inténtalo nuevamente.');
+    } finally {
+      setIsRecordingPayment(false);
+    }
   };
 
   return (
@@ -493,17 +535,77 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
                   </div>
                   
                   <button
-                    onClick={() => setShowPayment(true)}
+                    onClick={() => setShowCheckout(true)}
                     className="w-full py-3 rounded-lg text-white font-semibold transition-all duration-200 hover:scale-105 text-base"
                     style={{ backgroundColor: COLORS.dark }}
                   >
-                    Procesar Pago
+                    Enviar a comanda
                   </button>
                 </div>
               </>
             )}
           </div>
         </div>
+
+        {pendingPaymentOrders.length > 0 && (
+          <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg lg:text-xl font-bold" style={{ color: COLORS.dark }}>
+                  Pagos de pedidos entregados
+                </h3>
+                <p className="text-sm text-gray-500">
+                  {pendingPaymentCount === 1
+                    ? '1 pago pendiente por registrar'
+                    : `${pendingPaymentCount} pagos pendientes por registrar`}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 max-h-80 overflow-y-auto">
+              {pendingPaymentOrders.map((order) => {
+                const allocations = getOrderAllocations(order);
+                const paymentSummary = formatPaymentSummary(allocations, formatCOP);
+
+                return (
+                  <div
+                    key={order.id}
+                    className="border border-gray-200 rounded-lg p-3 space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                          Pedido #{order.numero}
+                        </p>
+                        {order.cliente && (
+                          <p className="text-xs text-gray-500">Cliente: {order.cliente}</p>
+                        )}
+                      </div>
+                      <span className="text-sm font-bold" style={{ color: COLORS.accent }}>
+                        {formatCOP(order.total)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="inline-flex items-center gap-2 px-2 py-1 rounded-full font-medium bg-yellow-100 text-yellow-800">
+                        Pago pendiente
+                      </span>
+                      <span className="text-gray-500 text-right flex-1 ml-3 line-clamp-2">
+                        {paymentSummary}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenPaymentModal(order)}
+                      className="w-full py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
+                    >
+                      Registrar pago
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modal personalización Bowl Salado */}
@@ -668,11 +770,11 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
       )}
 
       {/* Modal de pago */}
-      {showPayment && (
+      {showCheckout && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg lg:text-xl font-bold mb-4" style={{ color: COLORS.dark }}>
-              Procesar Pago
+              Confirmar pedido
             </h3>
             
               <div className="space-y-4">
@@ -722,28 +824,6 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
                   )}
                 </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-2">Método de pago</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['efectivo', 'tarjeta', 'nequi'] as PaymentMethod[]).map((method) => (
-                    <button
-                      key={method}
-                      onClick={() => setPaymentMethod(method)}
-                      className={`py-2 px-3 rounded-lg border text-sm font-medium transition-colors ${
-                        paymentMethod === method
-                          ? 'border-transparent text-white'
-                          : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-                      }`}
-                      style={{
-                        backgroundColor: paymentMethod === method ? COLORS.dark : 'transparent'
-                      }}
-                    >
-                      {method.charAt(0).toUpperCase() + method.slice(1)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               <div className="pt-4 border-t">
                 <div className="flex justify-between items-center mb-4">
                   <span className="text-lg font-bold">Total a pagar:</span>
@@ -754,23 +834,33 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
                 
                 <div className="flex gap-3">
                   <button
-                    onClick={() => setShowPayment(false)}
+                    onClick={() => setShowCheckout(false)}
                     className="flex-1 py-3 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm"
                   >
                     Cancelar
                   </button>
                   <button
-                    onClick={processPayment}
+                    onClick={submitOrder}
                     className="flex-1 py-3 rounded-lg text-white font-semibold transition-all duration-200 hover:scale-105 text-sm"
                     style={{ backgroundColor: COLORS.dark }}
                   >
-                    Confirmar
+                    Confirmar pedido
                   </button>
                 </div>
               </div>
             </div>
           </div>
         </div>
+      )}
+
+      {paymentModalOrder && (
+        <PaymentModal
+          order={paymentModalOrder}
+          onClose={handlePaymentModalClose}
+          onSubmit={handleSubmitPayment}
+          isSubmitting={isRecordingPayment}
+          title="Gestionar pago"
+        />
       )}
     </div>
   );
