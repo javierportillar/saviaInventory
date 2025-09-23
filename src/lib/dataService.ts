@@ -9,6 +9,7 @@ import {
   CartItem,
   PaymentAllocation,
   PaymentStatus,
+  DatabaseConnectionState,
 } from '../types';
 import { supabase } from './supabaseClient';
 import { getLocalData, setLocalData } from '../data/localData';
@@ -36,6 +37,28 @@ const ensureSupabaseReady = async (): Promise<boolean> => {
     return false;
   }
   return true;
+};
+
+export const checkDatabaseConnection = async (): Promise<DatabaseConnectionState> => {
+  if (!(await ensureSupabaseReady())) {
+    return 'local';
+  }
+
+  try {
+    const { error } = await supabase
+      .from('orders')
+      .select('id', { head: true })
+      .limit(1);
+
+    if (error) {
+      throw error;
+    }
+
+    return 'online';
+  } catch (error) {
+    console.warn('Supabase connection check failed, falling back to local mode:', error);
+    return 'local';
+  }
 };
 
 const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi'];
@@ -1210,6 +1233,7 @@ export const dataService = {
   updateGasto,
   deleteGasto,
   fetchBalanceResumen,
+  checkDatabaseConnection,
 } as const;
 
 export default dataService;

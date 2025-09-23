@@ -63,6 +63,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
   const [currentPage, setCurrentPage] = useState(1);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
+  const [isSavingOrderChanges, setIsSavingOrderChanges] = useState(false);
 
   const sortedOrders = useMemo(
     () => [...orders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
@@ -384,9 +385,10 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     !!selectedBowlProtein;
 
   const saveOrderChanges = async () => {
-    if (!editingOrder) return;
-    
+    if (!editingOrder || isSavingOrderChanges) return;
+
     try {
+      setIsSavingOrderChanges(true);
       await onSaveOrderChanges(editingOrder.orderId, {
         items: editingOrder.items,
         total: editingOrder.total
@@ -398,6 +400,8 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     } catch (error) {
       console.error('Error updating order:', error);
       alert('Error al actualizar la orden');
+    } finally {
+      setIsSavingOrderChanges(false);
     }
   };
 
@@ -405,6 +409,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     setEditingOrder(null);
     setShowAddProduct(false);
     setSearchQuery('');
+    setIsSavingOrderChanges(false);
   };
 
   const openPaymentModal = (order: Order) => {
@@ -607,7 +612,8 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
             <div className="flex flex-col lg:flex-row gap-2">
               <button
                 onClick={() => setShowAddProduct(true)}
-                className="flex-1 py-2 px-3 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center justify-center gap-1"
+                disabled={isSavingOrderChanges}
+                className="flex-1 py-2 px-3 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Plus size={14} />
                 Agregar producto
@@ -625,14 +631,16 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
               <div className="flex gap-2">
                 <button
                   onClick={saveOrderChanges}
-                  className="flex-1 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 flex items-center justify-center gap-1"
+                  disabled={isSavingOrderChanges}
+                  className="flex-1 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Save size={14} />
-                  Guardar
+                  {isSavingOrderChanges ? 'Guardando...' : 'Guardar'}
                 </button>
                 <button
                   onClick={cancelEditing}
-                  className="flex-1 py-2 bg-gray-400 text-white rounded-lg text-sm font-medium hover:bg-gray-500 flex items-center justify-center gap-1"
+                  disabled={isSavingOrderChanges}
+                  className="flex-1 py-2 bg-gray-400 text-white rounded-lg text-sm font-medium hover:bg-gray-500 flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <X size={14} />
                   Cancelar

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ModuleType, User } from '../types';
+import { ModuleType, User, DatabaseConnectionState } from '../types';
 import {
   Home,
   PiggyBank,
@@ -21,6 +21,7 @@ interface NavigationProps {
   onModuleChange: (module: ModuleType) => void;
   user: User;
   onLogout: () => void;
+  connectionStatus: DatabaseConnectionState;
 }
 
 const modules = [
@@ -35,13 +36,33 @@ const modules = [
   { id: 'gastos' as ModuleType, label: 'Gastos', icon: Receipt },
 ];
 
-export function Navigation({ activeModule, onModuleChange, user, onLogout }: NavigationProps) {
+export function Navigation({ activeModule, onModuleChange, user, onLogout, connectionStatus }: NavigationProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const allowedModules =
     user.role === 'admin'
       ? modules
       : modules.filter(m => ['caja', 'comandas', 'cocina', 'clientes', 'gastos','inventario'].includes(m.id));
+
+  const statusConfig: Record<DatabaseConnectionState, { label: string; dotClass: string; textClass: string }> = {
+    checking: {
+      label: 'Verificando conexión…',
+      dotClass: 'bg-yellow-400 animate-pulse',
+      textClass: 'text-yellow-700',
+    },
+    online: {
+      label: 'Conectado a Base de Datos',
+      dotClass: 'bg-green-500',
+      textClass: 'text-green-700',
+    },
+    local: {
+      label: 'Modo sin conexión (local)',
+      dotClass: 'bg-red-500',
+      textClass: 'text-red-600',
+    },
+  };
+
+  const currentStatus = statusConfig[connectionStatus];
 
   const handleModuleClick = (moduleId: ModuleType) => {
     onModuleChange(moduleId);
@@ -73,33 +94,39 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout }: Nav
             </div>
             
             {/* Desktop Menu */}
-            <div className="hidden lg:flex items-center space-x-1">
-              {allowedModules.map(({ id, label, icon: Icon }) => (
+            <div className="hidden lg:flex items-center gap-4">
+              <div className={`flex items-center gap-2 text-sm font-medium ${currentStatus.textClass}`}>
+                <span className={`inline-flex h-2.5 w-2.5 rounded-full ${currentStatus.dotClass}`} />
+                <span>{currentStatus.label}</span>
+              </div>
+              <div className="flex items-center space-x-1">
+                {allowedModules.map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    onClick={() => handleModuleClick(id)}
+                    className={`
+                      flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 whitespace-nowrap
+                      ${activeModule === id
+                        ? 'text-white shadow-md transform scale-105'
+                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                      }
+                    `}
+                    style={{
+                      backgroundColor: activeModule === id ? COLORS.dark : 'transparent'
+                    }}
+                  >
+                    <Icon size={18} />
+                    <span className="font-medium">{label}</span>
+                  </button>
+                ))}
                 <button
-                  key={id}
-                  onClick={() => handleModuleClick(id)}
-                  className={`
-                    flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 whitespace-nowrap
-                    ${activeModule === id 
-                      ? 'text-white shadow-md transform scale-105' 
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                    }
-                  `}
-                  style={{
-                    backgroundColor: activeModule === id ? COLORS.dark : 'transparent'
-                  }}
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 whitespace-nowrap"
                 >
-                  <Icon size={18} />
-                  <span className="font-medium">{label}</span>
+                  <LogOut size={18} />
+                  <span className="font-medium">Salir</span>
                 </button>
-              ))}
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 whitespace-nowrap"
-              >
-                <LogOut size={18} />
-                <span className="font-medium">Salir</span>
-              </button>
+              </div>
             </div>
 
             {/* Mobile Menu Button */}
@@ -138,6 +165,10 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout }: Nav
             </div>
             
             <div className="py-4">
+              <div className={`px-4 pb-4 text-sm font-medium flex items-center gap-2 ${currentStatus.textClass}`}>
+                <span className={`inline-flex h-2.5 w-2.5 rounded-full ${currentStatus.dotClass}`} />
+                <span>{currentStatus.label}</span>
+              </div>
               {allowedModules.map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}

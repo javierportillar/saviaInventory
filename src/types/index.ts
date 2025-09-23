@@ -21,6 +21,8 @@ export interface PaymentAllocation {
 
 export type PaymentStatus = 'pendiente' | 'pagado';
 
+export type DatabaseConnectionState = 'checking' | 'online' | 'local';
+
 export interface BowlSaladoCustomization {
   bases: string[];
   toppings: string[];

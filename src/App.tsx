@@ -10,7 +10,16 @@ import { Empleados } from './components/Empleados';
 import { Gastos } from './components/Gastos';
 import { Login } from './components/Login';
 import { Navigation } from './components/Navigation';
-import { ModuleType, User, MenuItem, Order, Customer, CartItem, PaymentAllocation } from './types';
+import {
+  ModuleType,
+  User,
+  MenuItem,
+  Order,
+  Customer,
+  CartItem,
+  PaymentAllocation,
+  DatabaseConnectionState,
+} from './types';
 import { initializeLocalData } from './data/localData';
 import dataService from './lib/dataService';
 
@@ -33,6 +42,7 @@ function App() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<DatabaseConnectionState>('checking');
 
   useEffect(() => {
     initializeLocalData();
@@ -83,6 +93,32 @@ function App() {
       isActive = false;
     };
   }, [user]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkConnection = async () => {
+      try {
+        const status = await dataService.checkDatabaseConnection();
+        if (isMounted) {
+          setConnectionStatus(status);
+        }
+      } catch (error) {
+        console.error('[App] Error verificando la conexión con la base de datos.', error);
+        if (isMounted) {
+          setConnectionStatus('local');
+        }
+      }
+    };
+
+    checkConnection();
+    const intervalId = window.setInterval(checkConnection, 30_000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user) {
@@ -264,6 +300,7 @@ function App() {
         onModuleChange={handleModuleChange}
         user={user}
         onLogout={handleLogout}
+        connectionStatus={connectionStatus}
       />
       
       <main className="w-full">
