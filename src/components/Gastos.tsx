@@ -2,7 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Gasto, PaymentMethod } from '../types';
 import { Receipt, Plus, Edit3, Trash2, Calendar, TrendingDown, Filter } from 'lucide-react';
 import { COLORS } from '../data/menu';
-import { formatCOP } from '../utils/format';
+import {
+  formatCOP,
+  formatDateInputValue,
+  getTodayDateInputValue,
+  parseDateInputValue,
+} from '../utils/format';
 import dataService from '../lib/dataService';
 
 export function Gastos() {
@@ -10,7 +15,7 @@ export function Gastos() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [viewMode, setViewMode] = useState<'diario' | 'semanal' | 'mensual'>('diario');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(getTodayDateInputValue());
   const [formData, setFormData] = useState<{
     descripcion: string;
     monto: number;
@@ -21,7 +26,7 @@ export function Gastos() {
     descripcion: '',
     monto: 0,
     categoria: '',
-    fecha: new Date().toISOString().split('T')[0],
+    fecha: getTodayDateInputValue(),
     metodoPago: 'efectivo'
   });
 
@@ -52,10 +57,10 @@ export function Gastos() {
     const data = await dataService.fetchGastos();
     const normalized = data.map((gasto) => ({
       ...gasto,
-      fecha: gasto.fecha instanceof Date ? gasto.fecha : new Date(gasto.fecha),
+      fecha: parseDateInputValue(gasto.fecha),
       created_at: gasto.created_at
         ? gasto.created_at instanceof Date
-          ? gasto.created_at
+          ? new Date(gasto.created_at.getTime())
           : new Date(gasto.created_at)
         : undefined,
       metodoPago: gasto.metodoPago ?? 'efectivo'
@@ -71,7 +76,7 @@ export function Gastos() {
       monto: parseFloat(formData.monto.toString())
     };
 
-    const fecha = new Date(gastoData.fecha);
+    const fecha = parseDateInputValue(gastoData.fecha);
 
     if (editingId) {
       await dataService.updateGasto({ ...gastoData, id: editingId, fecha });
@@ -95,7 +100,7 @@ export function Gastos() {
       descripcion: gasto.descripcion,
       monto: gasto.monto,
       categoria: gasto.categoria,
-      fecha: gasto.fecha instanceof Date ? gasto.fecha.toISOString().split('T')[0] : new Date(gasto.fecha).toISOString().split('T')[0],
+      fecha: formatDateInputValue(gasto.fecha instanceof Date ? gasto.fecha : new Date(gasto.fecha)),
       metodoPago: gasto.metodoPago ?? 'efectivo'
     });
     setEditingId(gasto.id);
@@ -114,7 +119,7 @@ export function Gastos() {
       descripcion: '',
       monto: 0,
       categoria: '',
-      fecha: new Date().toISOString().split('T')[0],
+      fecha: getTodayDateInputValue(),
       metodoPago: 'efectivo'
     });
     setEditingId(null);
@@ -122,10 +127,10 @@ export function Gastos() {
   };
 
   const getFilteredGastos = () => {
-    const today = new Date(selectedDate);
-    
+    const today = parseDateInputValue(selectedDate);
+
     return gastos.filter(gasto => {
-      const gastoDate = new Date(gasto.fecha);
+      const gastoDate = parseDateInputValue(gasto.fecha);
       
       switch (viewMode) {
         case 'diario':

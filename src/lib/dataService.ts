@@ -13,6 +13,7 @@ import {
 } from '../types';
 import { supabase } from './supabaseClient';
 import { getLocalData, setLocalData } from '../data/localData';
+import { formatDateInputValue, parseDateInputValue } from '../utils/format';
 import { slugify, generateMenuItemCode } from '../utils/strings';
 import {
   buildNotesWithStudentDiscount,
@@ -447,7 +448,7 @@ const normalizeGastoRecord = (gasto: any): Gasto => ({
   descripcion: gasto?.descripcion ?? '',
   monto: typeof gasto?.monto === 'number' ? gasto.monto : Number(gasto?.monto ?? 0),
   categoria: gasto?.categoria ?? '',
-  fecha: gasto?.fecha ? new Date(gasto.fecha) : new Date(),
+  fecha: parseDateInputValue(gasto?.fecha),
   created_at: gasto?.created_at ? new Date(gasto.created_at) : undefined,
   metodoPago: normalizePaymentMethod(extractPaymentMethodValue(gasto)),
 });
@@ -1138,6 +1139,10 @@ export const createGasto = async (gasto: Gasto): Promise<Gasto> => {
   const sanitized = normalizeGastoRecord(gasto);
   if (await ensureSupabaseReady()) {
     try {
+      const fechaValue = formatDateInputValue(
+        sanitized.fecha instanceof Date ? sanitized.fecha : new Date(sanitized.fecha)
+      );
+
       const { data, error } = await supabase
         .from('gastos')
         .insert([
@@ -1146,7 +1151,7 @@ export const createGasto = async (gasto: Gasto): Promise<Gasto> => {
             descripcion: sanitized.descripcion,
             monto: sanitized.monto,
             categoria: sanitized.categoria,
-            fecha: sanitized.fecha instanceof Date ? sanitized.fecha.toISOString().split('T')[0] : sanitized.fecha,
+            fecha: fechaValue,
             created_at: sanitized.created_at instanceof Date
               ? sanitized.created_at.toISOString()
               : sanitized.created_at ?? new Date().toISOString(),
@@ -1173,13 +1178,17 @@ export const updateGasto = async (gasto: Gasto): Promise<Gasto> => {
   const sanitized = normalizeGastoRecord(gasto);
   if (await ensureSupabaseReady()) {
     try {
+      const fechaValue = formatDateInputValue(
+        sanitized.fecha instanceof Date ? sanitized.fecha : new Date(sanitized.fecha)
+      );
+
       const { error } = await supabase
         .from('gastos')
         .update({
           descripcion: sanitized.descripcion,
           monto: sanitized.monto,
           categoria: sanitized.categoria,
-          fecha: sanitized.fecha instanceof Date ? sanitized.fecha.toISOString().split('T')[0] : sanitized.fecha,
+          fecha: fechaValue,
           [SUPABASE_PAYMENT_COLUMN]: sanitized.metodoPago,
         })
         .eq('id', sanitized.id);
