@@ -13,6 +13,7 @@ import {
 } from '../utils/cart';
 import dataService from '../lib/dataService';
 import {
+  BOWL_BASE_MIN,
   BOWL_BASE_LIMIT,
   BOWL_BASE_OPTIONS,
   BOWL_PROTEIN_OPTIONS,
@@ -342,7 +343,8 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     if (!bowlModalItem || !selectedBowlProtein) return;
 
     if (
-      selectedBowlBases.length !== BOWL_BASE_LIMIT ||
+      selectedBowlBases.length < BOWL_BASE_MIN ||
+      selectedBowlBases.length > BOWL_BASE_LIMIT ||
       selectedBowlToppings.length !== BOWL_TOPPING_LIMIT
     ) {
       return;
@@ -383,7 +385,8 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
   const baseLimitReached = selectedBowlBases.length >= BOWL_BASE_LIMIT;
   const toppingLimitReached = selectedBowlToppings.length >= BOWL_TOPPING_LIMIT;
   const isBowlSelectionValid =
-    selectedBowlBases.length === BOWL_BASE_LIMIT &&
+    selectedBowlBases.length >= BOWL_BASE_MIN &&
+    selectedBowlBases.length <= BOWL_BASE_LIMIT &&
     selectedBowlToppings.length === BOWL_TOPPING_LIMIT &&
     !!selectedBowlProtein;
 

@@ -14,6 +14,7 @@ export const BOWL_TOPPING_OPTIONS = [
   'Pepino',
 ] as const;
 export const BOWL_PROTEIN_OPTIONS = ['Pechuga de pollo', 'Jamón de cerdo', 'Carne desmechada'] as const;
+export const BOWL_BASE_MIN = 1;
 export const BOWL_BASE_LIMIT = 2;
 export const BOWL_TOPPING_LIMIT = 4;
 

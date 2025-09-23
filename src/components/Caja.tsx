@@ -13,6 +13,7 @@ import {
 } from '../utils/cart';
 import dataService from '../lib/dataService';
 import {
+  BOWL_BASE_MIN,
   BOWL_BASE_LIMIT,
   BOWL_BASE_OPTIONS,
   BOWL_PROTEIN_OPTIONS,
@@ -137,7 +138,8 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     if (!bowlModalItem || !selectedBowlProtein) return;
 
     if (
-      selectedBowlBases.length !== BOWL_BASE_LIMIT ||
+      selectedBowlBases.length < BOWL_BASE_MIN ||
+      selectedBowlBases.length > BOWL_BASE_LIMIT ||
       selectedBowlToppings.length !== BOWL_TOPPING_LIMIT
     ) {
       return;
@@ -302,7 +304,8 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   const baseLimitReached = selectedBowlBases.length >= BOWL_BASE_LIMIT;
   const toppingLimitReached = selectedBowlToppings.length >= BOWL_TOPPING_LIMIT;
   const isBowlSelectionValid =
-    selectedBowlBases.length === BOWL_BASE_LIMIT &&
+    selectedBowlBases.length >= BOWL_BASE_MIN &&
+    selectedBowlBases.length <= BOWL_BASE_LIMIT &&
     selectedBowlToppings.length === BOWL_TOPPING_LIMIT &&
     !!selectedBowlProtein;
 
@@ -715,7 +718,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                   Personaliza tu Bowl Salado
                 </h3>
                 <p className="text-sm text-gray-600">
-                  Selecciona {BOWL_BASE_LIMIT} bases, {BOWL_TOPPING_LIMIT} toppings y 1 proteína.
+                  Selecciona entre {BOWL_BASE_MIN} y {BOWL_BASE_LIMIT} bases, {BOWL_TOPPING_LIMIT} toppings y 1 proteína.
                 </p>
               </div>
               <button
