@@ -270,6 +270,16 @@ function App() {
     }
   };
 
+  const handleDeleteOrder = async (orderId: string) => {
+    try {
+      await dataService.deleteOrder(orderId);
+      setOrders((prevOrders) => prevOrders.filter((order) => order.id !== orderId));
+    } catch (error) {
+      console.error('Error eliminando la comanda:', error);
+      throw error;
+    }
+  };
+
   const handleAddCustomer = async (newCustomer: Customer) => {
     const data = await dataService.createCustomer(newCustomer);
     setCustomers([...customers, data]);
@@ -326,6 +336,8 @@ function App() {
             onUpdateOrderStatus={handleUpdateOrderStatus}
             onSaveOrderChanges={handleSaveOrderChanges}
             onRecordOrderPayment={handleRecordOrderPayment}
+            onDeleteOrder={handleDeleteOrder}
+            isAdmin={user.role === 'admin'}
           />
         )}
         {module === 'inventario' && (

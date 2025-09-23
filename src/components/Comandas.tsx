@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Order, MenuItem, CartItem, PaymentAllocation } from '../types';
-import { Clock, Check, CheckCircle, User, CreditCard, Edit3, Plus, Minus, Trash2, Save, X } from 'lucide-react';
+import { Clock, Check, CheckCircle, User, CreditCard, Edit3, Plus, Minus, Trash2, Save, X, Loader2 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, formatDateTime, formatDate } from '../utils/format';
 import {
@@ -42,6 +42,8 @@ interface ComandasProps {
   onUpdateOrderStatus: (order: Order, status: Order['estado']) => void;
   onSaveOrderChanges: (orderId: string, updates: { items: CartItem[]; total: number }) => Promise<void>;
   onRecordOrderPayment: (order: Order, allocations: PaymentAllocation[]) => Promise<void>;
+  onDeleteOrder: (orderId: string) => Promise<void>;
+  isAdmin: boolean;
 }
 
 interface EditingOrder {
@@ -50,7 +52,7 @@ interface EditingOrder {
   total: number;
 }
 
-export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRecordOrderPayment }: ComandasProps) {
+export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRecordOrderPayment, onDeleteOrder, isAdmin }: ComandasProps) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [editingOrder, setEditingOrder] = useState<EditingOrder | null>(null);
   const [showAddProduct, setShowAddProduct] = useState(false);
@@ -64,6 +66,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
   const [isSavingOrderChanges, setIsSavingOrderChanges] = useState(false);
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
 
   const sortedOrders = useMemo(
     () => [...orders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
@@ -412,6 +415,30 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     setIsSavingOrderChanges(false);
   };
 
+  const handleDeleteOrder = async (order: Order) => {
+    if (deletingOrderId === order.id) {
+      return;
+    }
+
+    const confirmed = window.confirm(`¿Eliminar la comanda #${order.numero}? Esta acción no se puede deshacer.`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeletingOrderId(order.id);
+      await onDeleteOrder(order.id);
+      if (editingOrder?.orderId === order.id) {
+        cancelEditing();
+      }
+    } catch (error) {
+      console.error('Error al eliminar la comanda:', error);
+      alert('No se pudo eliminar la comanda. Inténtalo nuevamente.');
+    } finally {
+      setDeletingOrderId(null);
+    }
+  };
+
   const openPaymentModal = (order: Order) => {
     if (isOrderPaid(order)) {
       return;
@@ -474,6 +501,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     const allocations = getOrderAllocations(order);
     const paymentSummary = formatPaymentSummary(allocations, formatCOP);
     const paid = isOrderPaid(order);
+    const isDeleting = deletingOrderId === order.id;
 
     return (
       <div
@@ -487,10 +515,24 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
             </h3>
             <p className="text-xs lg:text-sm text-gray-500">{formatDateTime(order.timestamp)}</p>
           </div>
-          <span className={`px-2 lg:px-3 py-1 rounded-full text-xs lg:text-sm font-medium border flex items-center gap-1 self-start ${getStatusColor(order.estado)}`}>
-            {getStatusIcon(order.estado)}
-            <span className="hidden lg:inline">{order.estado}</span>
-          </span>
+          <div className="flex items-center gap-2 self-start">
+            <span className={`px-2 lg:px-3 py-1 rounded-full text-xs lg:text-sm font-medium border flex items-center gap-1 ${getStatusColor(order.estado)}`}>
+              {getStatusIcon(order.estado)}
+              <span className="hidden lg:inline">{order.estado}</span>
+            </span>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => handleDeleteOrder(order)}
+                disabled={isDeleting}
+                className="p-1.5 rounded-full border border-transparent text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Eliminar comanda"
+                aria-label="Eliminar comanda"
+              >
+                {isDeleting ? <Loader2 size={16} className="animate-spin text-red-600" /> : <Trash2 size={16} />}
+              </button>
+            )}
+          </div>
         </div>
 
         {order.cliente && (
