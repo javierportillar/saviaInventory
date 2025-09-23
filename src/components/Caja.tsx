@@ -134,7 +134,10 @@ export function Caja({ onModuleChange, onCreateOrder }: CajaProps) {
     setCustomers(data);
   };
 
-  const categories = Array.from(new Set(menuItems.map(item => item.categoria)));
+  const nonInventariableCategories = menuItems
+    .filter(item => item.inventarioCategoria !== 'Inventariables')
+    .map(item => item.categoria);
+  const categories = Array.from(new Set(nonInventariableCategories));
   
   const filteredItems = menuItems.filter(item => {
     const matchesSearch = !searchQuery ||

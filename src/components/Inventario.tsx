@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { MenuItem } from '../types';
 import { Package, AlertTriangle, Plus, Minus, Search, Edit3, Trash, Filter } from 'lucide-react';
 import { COLORS } from '../data/menu';
@@ -28,7 +28,35 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
     descripcion?: string;
   } | null>(null);
 
-  const categories = Array.from(new Set(menuItems.map(item => item.categoria)));
+  const inventariableCategories = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          menuItems
+            .filter(item => item.inventarioCategoria === 'Inventariables')
+            .map(item => item.categoria)
+        )
+      ),
+    [menuItems]
+  );
+
+  const nonInventariableCategories = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          menuItems
+            .filter(item => item.inventarioCategoria !== 'Inventariables')
+            .map(item => item.categoria)
+        )
+      ),
+    [menuItems]
+  );
+
+  useEffect(() => {
+    if (selectedCategory && !nonInventariableCategories.includes(selectedCategory)) {
+      setSelectedCategory('');
+    }
+  }, [nonInventariableCategories, selectedCategory]);
 
   const filteredItems = menuItems.filter(item => {
     const matchesSearch = !searchQuery || item.nombre.toLowerCase().includes(searchQuery.toLowerCase());
@@ -115,7 +143,11 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
               }}
             />
             <input
-              list="category-options"
+              list={
+                editingItem.inventarioCategoria === 'Inventariables'
+                  ? 'inventariable-category-options'
+                  : 'non-inventariable-category-options'
+              }
               className="border border-gray-300 rounded px-3 py-2"
               placeholder="Categoría (selecciona o crea)"
               value={editingItem.categoria}
@@ -265,9 +297,14 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
 
   return (
     <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
-      <datalist id="category-options">
-        {categories.map(category => (
-          <option key={category} value={category} />
+      <datalist id="inventariable-category-options">
+        {inventariableCategories.map(category => (
+          <option key={`inventariable-${category}`} value={category} />
+        ))}
+      </datalist>
+      <datalist id="non-inventariable-category-options">
+        {nonInventariableCategories.map(category => (
+          <option key={`non-inventariable-${category}`} value={category} />
         ))}
       </datalist>
       <div className="text-center">
@@ -356,7 +393,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
               style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
             >
               <option value="">Todas las categorías</option>
-              {categories.map(category => (
+              {nonInventariableCategories.map(category => (
                 <option key={category} value={category}>{category}</option>
               ))}
             </select>
@@ -416,7 +453,11 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
               }}
             />
             <input
-              list="category-options"
+              list={
+                newItem.inventarioCategoria === 'Inventariables'
+                  ? 'inventariable-category-options'
+                  : 'non-inventariable-category-options'
+              }
               className="border border-gray-300 rounded px-3 py-2"
               placeholder="Categoría (selecciona o crea)"
               value={newItem.categoria}

@@ -373,6 +373,7 @@ INSERT INTO menu_items
 ('sand-pollo-toscano', 'Pollo Toscano', 18500, 'Salsa verde, jamón de pollo, lechuga, rúgula, champiñones, tomates horneados, parmesano, queso doble crema, tocineta, miel de uvilla.', 'pollo toscano, jamón de pollo, lechuga, rúgula, champiñones, tomate horneado, queso tajado, queso parmesano, tocineta', 'Sandwiches', 0, 'No inventariables', 'unidad', 'unidad'),
 ('sand-mexicano', 'Mexicano', 19000, 'Frijol refrito, pollo desmechado, pico de gallo, queso crema tajado, guacamole, sour cream, salsa brava.', 'mexicano, pollo desmechado, guacamole, pico de gallo, frijol refrito, salsa brava, sour cream, queso tajado', 'Sandwiches', 0, 'No inventariables', 'unidad', 'unidad');
 
+
 -- Bowls Salados
 INSERT INTO menu_items
 (codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida) VALUES
@@ -403,7 +404,27 @@ INSERT INTO menu_items
 ('acomp-muffin-queso', 'Muffin de queso', 4500, NULL, 'muffin queso', 'Acompañamientos', 0, 'No inventariables', 'unidad', 'unidad'),
 ('acomp-tapitas', 'Tapitas', 10000, 'Pan con queso feta, tomate al horno y albahaca.', 'tapitas, pan, queso feta, tomate al horno, albahaca', 'Acompañamientos', 0, 'No inventariables', 'unidad', 'unidad');
 
+-- Batidos especiales
+INSERT INTO menu_items
+(codigo, nombre, precio, descripcion, keywords, categoria, stock, inventarioCategoria, inventarioTipo, unidadMedida)
+VALUES
+-- Pink
+('batido-pink', 'Pink', 12000,
+ 'Fresa y banano con yogurt natural y leche; chía y avena.',
+ 'pink, fresa, banano, yogurt natural, leche, chía, avena, batido especial',
+ 'Batidos especiales', 0, 'No inventariables', 'unidad', 'unidad'),
 
+-- Moca Energy
+('batido-moca-energy', 'Moca Energy', 12000,
+ 'Banano, café frío y leche con cacao puro, crema de maní y avena.',
+ 'moca energy, banano, café frío, leche, cacao puro, crema de maní, avena, batido especial, energía',
+ 'Batidos especiales', 0, 'No inventariables', 'unidad', 'unidad'),
+
+-- Matcha Protein
+('batido-matcha-protein', 'Matcha Protein', 16000,
+ 'Té matcha con 1 scoop de proteína whey (30 g).',
+ 'matcha protein, té matcha, proteína, whey, 30 g, batido especial, alto en proteína',
+ 'Batidos especiales', 0, 'No inventariables', 'unidad', 'unidad');
 
 -- ======================
 -- PRODUCTOS INVENTARIABLES (INSUMOS)
