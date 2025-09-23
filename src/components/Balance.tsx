@@ -6,14 +6,6 @@ import { formatCOP } from '../utils/format';
 import { Wallet, TrendingUp, TrendingDown, CalendarDays, PiggyBank } from 'lucide-react';
 import { formatPaymentSummary, getOrderAllocations, isOrderPaid } from '../utils/payments';
 
-const rangeOptions = [
-  { label: 'Últimos 7 días', value: '7' },
-  { label: 'Últimos 30 días', value: '30' },
-  { label: 'Todo el histórico', value: 'all' },
-] as const;
-
-type RangeValue = (typeof rangeOptions)[number]['value'];
-
 type MethodSummary = {
   id: PaymentMethod;
   label: string;
@@ -77,25 +69,76 @@ const computeMethodTotals = (orders: Order[], gastos: Gasto[]): MethodTotalsDeta
   return totals;
 };
 
-const filterAndSortByRange = <T,>(items: T[], range: RangeValue, getDate: (item: T) => Date) => {
+const endOfDay = (value: Date) => {
+  const date = new Date(value);
+  date.setHours(23, 59, 59, 999);
+  return date;
+};
+
+const formatDateInput = (value: Date) => {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, '0');
+  const day = `${value.getDate()}`.padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+};
+
+const parseDateInput = (value?: string) => {
+  if (!value) {
+    return null;
+  }
+
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day);
+};
+
+const filterAndSortByDateRange = <T,>(
+  items: T[],
+  startDate: string,
+  endDate: string,
+  getDate: (item: T) => Date,
+) => {
   const sorted = [...items].sort((a, b) => getDate(b).getTime() - getDate(a).getTime());
 
-  if (range === 'all') {
+  const parsedStart = parseDateInput(startDate);
+  const parsedEnd = parseDateInput(endDate);
+
+  if (!parsedStart && !parsedEnd) {
     return sorted;
   }
 
-  const days = parseInt(range, 10);
-  const cutoff = new Date();
-  cutoff.setHours(0, 0, 0, 0);
-  cutoff.setDate(cutoff.getDate() - (days - 1));
+  const startBoundary = parsedStart ? normalizeDate(parsedStart).getTime() : null;
+  const endBoundary = parsedEnd ? endOfDay(parsedEnd).getTime() : null;
 
-  return sorted.filter((item) => normalizeDate(getDate(item)) >= cutoff);
+  return sorted.filter((item) => {
+    const itemTime = getDate(item).getTime();
+
+    if (startBoundary !== null && itemTime < startBoundary) {
+      return false;
+    }
+
+    if (endBoundary !== null && itemTime > endBoundary) {
+      return false;
+    }
+
+    return true;
+  });
 };
 
 export function Balance() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [gastos, setGastos] = useState<Gasto[]>([]);
-  const [range, setRange] = useState<RangeValue>('7');
+  const today = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return now;
+  }, []);
+  const [startDate, setStartDate] = useState(() => formatDateInput(today));
+  const [endDate, setEndDate] = useState(() => formatDateInput(today));
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -130,12 +173,12 @@ export function Balance() {
   }, []);
 
   const filteredOrders = useMemo(
-    () => filterAndSortByRange(orders, range, (order) => order.timestamp),
-    [orders, range],
+    () => filterAndSortByDateRange(orders, startDate, endDate, (order) => order.timestamp),
+    [orders, startDate, endDate],
   );
   const filteredGastos = useMemo(
-    () => filterAndSortByRange(gastos, range, (gasto) => gasto.fecha),
-    [gastos, range],
+    () => filterAndSortByDateRange(gastos, startDate, endDate, (gasto) => gasto.fecha),
+    [gastos, startDate, endDate],
   );
 
   const totals = useMemo(() => {
@@ -179,14 +222,41 @@ export function Balance() {
     return null;
   }, [filteredOrders, filteredGastos]);
 
+  const dateFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat('es-CO', {
+        dateStyle: 'medium',
+      }),
+    [],
+  );
+
+  const selectedRangeLabel = useMemo(() => {
+    const start = parseDateInput(startDate);
+    const end = parseDateInput(endDate);
+
+    if (start && end) {
+      return `${dateFormatter.format(start)} - ${dateFormatter.format(end)}`;
+    }
+
+    if (start) {
+      return `Desde ${dateFormatter.format(start)}`;
+    }
+
+    if (end) {
+      return `Hasta ${dateFormatter.format(end)}`;
+    }
+
+    return 'Todo el histórico';
+  }, [dateFormatter, startDate, endDate]);
+
   const periodSummaryLabel = hasFilteredData
-    ? `Movimientos en el período: ${filteredOrders.length + filteredGastos.length}`
-    : 'No hay movimientos en el período seleccionado.';
+    ? `Movimientos en el período (${selectedRangeLabel}): ${filteredOrders.length + filteredGastos.length}`
+    : `No hay movimientos en el período seleccionado (${selectedRangeLabel}).`;
 
   const closingLabel = lastMovementDate
     ? `Último movimiento: ${formatDateTime(lastMovementDate)}`
     : hasAnyData
-      ? 'No hay movimientos en el rango.'
+      ? `No hay movimientos en el rango (${selectedRangeLabel}).`
       : 'Sin registros disponibles.';
 
   const rangeMethodTotals = useMemo(
@@ -223,20 +293,59 @@ export function Balance() {
             Ventas, gastos y saldo final por método de pago
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <CalendarDays className="text-gray-500" size={18} />
-          <select
-            value={range}
-            onChange={(event) => setRange(event.target.value as RangeValue)}
-            className="px-3 lg:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm w-full sm:w-auto"
-            style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
-          >
-            {rangeOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+          <div className="flex items-center gap-3">
+            <CalendarDays className="text-gray-500" size={18} />
+            <span className="text-sm text-gray-600">Filtrar por fecha</span>
+          </div>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
+            <label className="flex flex-col text-xs text-gray-500 uppercase tracking-wide">
+              Desde
+              <input
+                type="date"
+                value={startDate}
+                max={endDate}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setStartDate(value);
+                  if (value && endDate && value > endDate) {
+                    setEndDate(value);
+                  }
+                }}
+                className="mt-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
+                style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+              />
+            </label>
+            <label className="flex flex-col text-xs text-gray-500 uppercase tracking-wide">
+              Hasta
+              <input
+                type="date"
+                value={endDate}
+                min={startDate}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setEndDate(value);
+                  if (value && startDate && value < startDate) {
+                    setStartDate(value);
+                  }
+                }}
+                className="mt-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
+                style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                const todayFormatted = formatDateInput(today);
+                setStartDate(todayFormatted);
+                setEndDate(todayFormatted);
+              }}
+              className="px-3 py-2 text-sm font-medium text-white rounded-lg"
+              style={{ backgroundColor: COLORS.accent }}
+            >
+              Hoy
+            </button>
+          </div>
         </div>
       </div>
 
