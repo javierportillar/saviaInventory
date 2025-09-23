@@ -6,10 +6,16 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const baseEnv = env.VITE_BASE_PATH?.trim();
 
-  let base = '/';
+  const isProduction = mode === 'production';
+
+  let base = isProduction ? './' : '/';
   if (baseEnv) {
-    const normalized = baseEnv.replace(/^\/+|\/+$/g, '');
-    base = normalized ? `/${normalized}/` : '/';
+    if (baseEnv === '.' || baseEnv === './') {
+      base = './';
+    } else {
+      const normalized = baseEnv.replace(/^\/+|\/+$/g, '');
+      base = normalized ? `/${normalized}/` : '/';
+    }
   }
 
   return {
