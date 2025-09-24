@@ -48,7 +48,7 @@ export const getOrderAllocations = (order: Order): PaymentAllocation[] => {
     return mergeAllocations(normalized);
   }
 
-  if (order.metodoPago) {
+  if (order.paymentStatus === 'pagado' && order.metodoPago) {
     return [{ metodo: order.metodoPago, monto: roundToCOP(order.total) }];
   }
 

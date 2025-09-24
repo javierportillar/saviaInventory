@@ -756,7 +756,7 @@ export const createOrder = async (order: Order): Promise<Order> => {
           estado: sanitizedOrder.estado,
           timestamp: sanitizedOrder.timestamp.toISOString(),
           cliente_id: sanitizedOrder.cliente_id ?? null,
-          [SUPABASE_PAYMENT_COLUMN]: normalizePaymentMethod(sanitizedOrder.metodoPago),
+          [SUPABASE_PAYMENT_COLUMN]: sanitizedOrder.metodoPago ?? null,
         },
       ])
       .select('*')

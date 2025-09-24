@@ -117,7 +117,8 @@ export type ModuleType =
   | 'cocina'
   | 'clientes'
   | 'empleados'
-  | 'gastos';
+  | 'gastos'
+  | 'analitica';
 
 export type UserRole = 'admin' | 'employee';
 

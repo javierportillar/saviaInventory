@@ -10,6 +10,7 @@ import {
   Users,
   UserCheck,
   Receipt,
+  BarChart3,
   LogOut,
   Menu,
   X
@@ -34,6 +35,7 @@ const modules = [
   { id: 'clientes' as ModuleType, label: 'Clientes', icon: Users },
   { id: 'empleados' as ModuleType, label: 'Empleados', icon: UserCheck },
   { id: 'gastos' as ModuleType, label: 'Gastos', icon: Receipt },
+  { id: 'analitica' as ModuleType, label: 'Analítica', icon: BarChart3 },
 ];
 
 export function Navigation({ activeModule, onModuleChange, user, onLogout, connectionStatus }: NavigationProps) {

@@ -471,6 +471,8 @@ export function Empleados() {
       persistWeeklySchedules(updated);
       return updated;
     });
+
+    closeScheduleModal();
   };
 
   const calcularHorasSemana = (schedule: WeeklySchedule) => sumWeeklyHours(buildWeeklyHoursFromBase(schedule));

@@ -10,6 +10,7 @@ import { Empleados } from './components/Empleados';
 import { Gastos } from './components/Gastos';
 import { Login } from './components/Login';
 import { Navigation } from './components/Navigation';
+import { Analitica } from './components/Analitica';
 import {
   ModuleType,
   User,
@@ -188,6 +189,9 @@ function App() {
   };
 
   const handleModuleChange = (module: ModuleType) => {
+    if (module === 'analitica' && user?.role !== 'admin') {
+      return;
+    }
     setModule(module);
   };
 
@@ -364,6 +368,9 @@ function App() {
         )}
         {module === 'empleados' && <Empleados />}
         {module === 'gastos' && <Gastos />}
+        {module === 'analitica' && user.role === 'admin' && (
+          <Analitica orders={orders} />
+        )}
       </main>
     </div>
   );

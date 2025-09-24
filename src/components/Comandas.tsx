@@ -17,6 +17,7 @@ import {
   BOWL_BASE_LIMIT,
   BOWL_BASE_OPTIONS,
   BOWL_PROTEIN_OPTIONS,
+  BOWL_TOPPING_MIN,
   BOWL_TOPPING_LIMIT,
   BOWL_TOPPING_OPTIONS,
   isBowlSalado,
@@ -345,7 +346,8 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     if (
       selectedBowlBases.length < BOWL_BASE_MIN ||
       selectedBowlBases.length > BOWL_BASE_LIMIT ||
-      selectedBowlToppings.length !== BOWL_TOPPING_LIMIT
+      selectedBowlToppings.length < BOWL_TOPPING_MIN ||
+      selectedBowlToppings.length > BOWL_TOPPING_LIMIT
     ) {
       return;
     }
@@ -387,7 +389,8 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
   const isBowlSelectionValid =
     selectedBowlBases.length >= BOWL_BASE_MIN &&
     selectedBowlBases.length <= BOWL_BASE_LIMIT &&
-    selectedBowlToppings.length === BOWL_TOPPING_LIMIT &&
+    selectedBowlToppings.length >= BOWL_TOPPING_MIN &&
+    selectedBowlToppings.length <= BOWL_TOPPING_LIMIT &&
     !!selectedBowlProtein;
 
   const saveOrderChanges = async () => {
@@ -744,14 +747,29 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
 
             <div className="space-y-2">
               {order.estado === 'entregado' ? (
-                !paid ? (
-                  <button
-                    onClick={() => openPaymentModal(order)}
-                    className="w-full py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm"
-                  >
-                    Registrar pago
-                  </button>
-                ) : null
+                <div className="space-y-2">
+                  {!paid ? (
+                    <>
+                      <button
+                        onClick={() => startEditingOrder(order)}
+                        className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm flex items-center justify-center gap-1"
+                      >
+                        <Edit3 size={14} />
+                        Modificar pedido
+                      </button>
+                      <button
+                        onClick={() => openPaymentModal(order)}
+                        className="w-full py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm"
+                      >
+                        Registrar pago
+                      </button>
+                    </>
+                  ) : (
+                    <p className="text-xs text-gray-500 text-center">
+                      Pago registrado. No es posible modificar la comanda.
+                    </p>
+                  )}
+                </div>
               ) : (
                 <React.Fragment>
                   {order.estado === 'pendiente' && (
@@ -773,21 +791,12 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
                     </button>
                   )}
                   {order.estado === 'listo' && (
-                    <div className="space-y-2">
-                      <button
-                        onClick={() => startEditingOrder(order)}
-                        className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm flex items-center justify-center gap-1"
-                      >
-                        <Edit3 size={14} />
-                        Modificar pedido
-                      </button>
-                      <button
-                        onClick={() => onUpdateOrderStatus(order, 'entregado')}
-                        className="w-full py-2 bg-green-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm"
-                      >
-                        Entregar pedido
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => onUpdateOrderStatus(order, 'entregado')}
+                      className="w-full py-2 bg-green-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm"
+                    >
+                      Entregar pedido
+                    </button>
                   )}
                 </React.Fragment>
               )}
