@@ -729,10 +729,10 @@ export const createOrder = async (order: Order): Promise<Order> => {
       ? 'pagado'
       : 'pendiente');
 
-  let metodoPago = toOptionalPaymentMethod(order.metodoPago);
-  if (!metodoPago && sanitizedAllocations.length > 0) {
-    metodoPago = sanitizedAllocations[0].metodo;
-  }
+  const primaryMethod = sanitizedAllocations.length > 0
+    ? sanitizedAllocations[0].metodo
+    : undefined;
+  const metodoPago = normalizePaymentMethod(order.metodoPago ?? primaryMethod);
 
   const sanitizedOrder: Order = {
     ...order,
@@ -751,14 +751,14 @@ export const createOrder = async (order: Order): Promise<Order> => {
         .insert([
           {
             id: sanitizedOrder.id,
-          numero: sanitizedOrder.numero,
-          total: sanitizedOrder.total,
-          estado: sanitizedOrder.estado,
-          timestamp: sanitizedOrder.timestamp.toISOString(),
-          cliente_id: sanitizedOrder.cliente_id ?? null,
-          [SUPABASE_PAYMENT_COLUMN]: sanitizedOrder.metodoPago ?? null,
-        },
-      ])
+            numero: sanitizedOrder.numero,
+            total: sanitizedOrder.total,
+            estado: sanitizedOrder.estado,
+            timestamp: sanitizedOrder.timestamp.toISOString(),
+            cliente_id: sanitizedOrder.cliente_id ?? null,
+            [SUPABASE_PAYMENT_COLUMN]: sanitizedOrder.metodoPago,
+          },
+        ])
       .select('*')
       .single();
       if (error) throw error;
