@@ -1,0 +1,608 @@
+
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+
+CREATE SCHEMA IF NOT EXISTS "public";
+
+
+ALTER SCHEMA "public" OWNER TO "pg_database_owner";
+
+
+COMMENT ON SCHEMA "public" IS 'standard public schema';
+
+
+
+CREATE TYPE "public"."inventario_categoria_type" AS ENUM (
+    'Inventariables',
+    'No inventariables'
+);
+
+
+ALTER TYPE "public"."inventario_categoria_type" OWNER TO "postgres";
+
+
+CREATE TYPE "public"."inventario_tipo_type" AS ENUM (
+    'cantidad',
+    'gramos'
+);
+
+
+ALTER TYPE "public"."inventario_tipo_type" OWNER TO "postgres";
+
+
+CREATE TYPE "public"."metodo_pago_type" AS ENUM (
+    'efectivo',
+    'tarjeta',
+    'transferencia'
+);
+
+
+ALTER TYPE "public"."metodo_pago_type" OWNER TO "postgres";
+
+
+CREATE TYPE "public"."order_estado_type" AS ENUM (
+    'pendiente',
+    'preparando',
+    'listo',
+    'entregado'
+);
+
+
+ALTER TYPE "public"."order_estado_type" OWNER TO "postgres";
+
+
+CREATE TYPE "public"."unidad_medida_type" AS ENUM (
+    'kg',
+    'g',
+    'mg'
+);
+
+
+ALTER TYPE "public"."unidad_medida_type" OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."generate_order_number"() RETURNS integer
+    LANGUAGE "plpgsql"
+    AS $$
+DECLARE
+    new_number integer;
+    max_attempts integer := 100;
+    attempt_count integer := 0;
+BEGIN
+    LOOP
+        -- Generar número aleatorio entre 1000 y 9999
+        new_number := floor(random() * 9000 + 1000)::integer;
+        
+        -- Verificar si ya existe
+        IF NOT EXISTS (SELECT 1 FROM orders WHERE numero = new_number) THEN
+            RETURN new_number;
+        END IF;
+        
+        attempt_count := attempt_count + 1;
+        IF attempt_count >= max_attempts THEN
+            RAISE EXCEPTION 'No se pudo generar un número de orden único después de % intentos', max_attempts;
+        END IF;
+    END LOOP;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."generate_order_number"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."insertar_egreso_desde_gasto"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  INSERT INTO caja_movimientos (tipo, concepto, monto, fecha, metodoPago, gasto_id)
+  VALUES ('EGRESO', NEW.categoria || ': ' || NEW.descripcion, NEW.monto, NEW.fecha, NEW.metodoPago, NEW.id);
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."insertar_egreso_desde_gasto"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."insertar_ingreso_desde_order"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  INSERT INTO caja_movimientos (tipo, concepto, monto, fecha, metodoPago, order_id)
+  VALUES ('INGRESO', 'Venta #' || NEW.numero, NEW.total, NEW.timestamp::date, NEW.metodoPago, NEW.id);
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."insertar_ingreso_desde_order"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."update_updated_at_column"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."update_updated_at_column"() OWNER TO "postgres";
+
+SET default_tablespace = '';
+
+SET default_table_access_method = "heap";
+
+
+CREATE TABLE IF NOT EXISTS "public"."caja_movimientos" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "fecha" "date" DEFAULT CURRENT_DATE,
+    "tipo" "text" NOT NULL,
+    "concepto" "text" NOT NULL,
+    "monto" numeric NOT NULL,
+    "metodopago" "text" DEFAULT 'efectivo'::"text" NOT NULL,
+    "order_id" "uuid",
+    "gasto_id" "uuid",
+    CONSTRAINT "caja_movimientos_metodopago_check" CHECK (("metodopago" = ANY (ARRAY['efectivo'::"text", 'tarjeta'::"text", 'nequi'::"text"]))),
+    CONSTRAINT "caja_movimientos_tipo_check" CHECK (("tipo" = ANY (ARRAY['INGRESO'::"text", 'EGRESO'::"text"])))
+);
+
+
+ALTER TABLE "public"."caja_movimientos" OWNER TO "postgres";
+
+
+CREATE OR REPLACE VIEW "public"."balance_caja" AS
+ WITH "resumen" AS (
+         SELECT "caja_movimientos"."fecha",
+            "sum"(
+                CASE
+                    WHEN ("caja_movimientos"."tipo" = 'INGRESO'::"text") THEN "caja_movimientos"."monto"
+                    ELSE (0)::numeric
+                END) AS "ingresos_totales",
+            "sum"(
+                CASE
+                    WHEN ("caja_movimientos"."tipo" = 'EGRESO'::"text") THEN "caja_movimientos"."monto"
+                    ELSE (0)::numeric
+                END) AS "egresos_totales",
+            "sum"(
+                CASE
+                    WHEN (("caja_movimientos"."tipo" = 'INGRESO'::"text") AND ("caja_movimientos"."metodopago" = 'efectivo'::"text")) THEN "caja_movimientos"."monto"
+                    ELSE (0)::numeric
+                END) AS "ingresos_efectivo",
+            "sum"(
+                CASE
+                    WHEN (("caja_movimientos"."tipo" = 'EGRESO'::"text") AND ("caja_movimientos"."metodopago" = 'efectivo'::"text")) THEN "caja_movimientos"."monto"
+                    ELSE (0)::numeric
+                END) AS "egresos_efectivo",
+            "sum"(
+                CASE
+                    WHEN (("caja_movimientos"."tipo" = 'INGRESO'::"text") AND ("caja_movimientos"."metodopago" = 'nequi'::"text")) THEN "caja_movimientos"."monto"
+                    ELSE (0)::numeric
+                END) AS "ingresos_nequi",
+            "sum"(
+                CASE
+                    WHEN (("caja_movimientos"."tipo" = 'EGRESO'::"text") AND ("caja_movimientos"."metodopago" = 'nequi'::"text")) THEN "caja_movimientos"."monto"
+                    ELSE (0)::numeric
+                END) AS "egresos_nequi",
+            "sum"(
+                CASE
+                    WHEN (("caja_movimientos"."tipo" = 'INGRESO'::"text") AND ("caja_movimientos"."metodopago" = 'tarjeta'::"text")) THEN "caja_movimientos"."monto"
+                    ELSE (0)::numeric
+                END) AS "ingresos_tarjeta",
+            "sum"(
+                CASE
+                    WHEN (("caja_movimientos"."tipo" = 'EGRESO'::"text") AND ("caja_movimientos"."metodopago" = 'tarjeta'::"text")) THEN "caja_movimientos"."monto"
+                    ELSE (0)::numeric
+                END) AS "egresos_tarjeta"
+           FROM "public"."caja_movimientos"
+          GROUP BY "caja_movimientos"."fecha"
+        )
+ SELECT "fecha",
+    "ingresos_totales",
+    "egresos_totales",
+    ("ingresos_totales" - "egresos_totales") AS "balance_diario",
+    "ingresos_efectivo",
+    "egresos_efectivo",
+    "ingresos_nequi",
+    "egresos_nequi",
+    "ingresos_tarjeta",
+    "egresos_tarjeta",
+    ("ingresos_efectivo" - "egresos_efectivo") AS "saldo_efectivo_dia",
+    ("ingresos_nequi" - "egresos_nequi") AS "saldo_nequi_dia",
+    ("ingresos_tarjeta" - "egresos_tarjeta") AS "saldo_tarjeta_dia",
+    "sum"(("ingresos_totales" - "egresos_totales")) OVER (ORDER BY "fecha") AS "saldo_total_acumulado",
+    "sum"(("ingresos_efectivo" - "egresos_efectivo")) OVER (ORDER BY "fecha") AS "saldo_efectivo_acumulado",
+    "sum"(("ingresos_nequi" - "egresos_nequi")) OVER (ORDER BY "fecha") AS "saldo_nequi_acumulado",
+    "sum"(("ingresos_tarjeta" - "egresos_tarjeta")) OVER (ORDER BY "fecha") AS "saldo_tarjeta_acumulado"
+   FROM "resumen"
+  ORDER BY "fecha" DESC;
+
+
+ALTER VIEW "public"."balance_caja" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."customers" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "nombre" "text" NOT NULL,
+    "telefono" "text" NOT NULL
+);
+
+
+ALTER TABLE "public"."customers" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."empleados" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "nombre" "text" NOT NULL,
+    "telefono" "text",
+    "email" "text",
+    "horas_dia" integer DEFAULT 8,
+    "dias_semana" integer DEFAULT 5,
+    "salario_hora" numeric DEFAULT 0,
+    "activo" boolean DEFAULT true,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."empleados" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."gastos" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "descripcion" "text" NOT NULL,
+    "monto" numeric NOT NULL,
+    "categoria" "text" NOT NULL,
+    "fecha" "date" DEFAULT CURRENT_DATE,
+    "metodopago" "text" DEFAULT 'efectivo'::"text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    CONSTRAINT "gastos_metodopago_check" CHECK (("metodopago" = ANY (ARRAY['efectivo'::"text", 'tarjeta'::"text", 'nequi'::"text"])))
+);
+
+
+ALTER TABLE "public"."gastos" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."menu_items" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "codigo" "text" NOT NULL,
+    "nombre" "text" NOT NULL,
+    "precio" numeric NOT NULL,
+    "descripcion" "text",
+    "keywords" "text",
+    "categoria" "text" NOT NULL,
+    "stock" integer DEFAULT 0 NOT NULL,
+    "inventariocategoria" "text" NOT NULL,
+    "inventariotipo" "text",
+    "unidadmedida" "text"
+);
+
+
+ALTER TABLE "public"."menu_items" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."order_items" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "order_id" "uuid",
+    "menu_item_id" "uuid",
+    "cantidad" integer NOT NULL,
+    "notas" "text"
+);
+
+
+ALTER TABLE "public"."order_items" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."orders" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "numero" integer NOT NULL,
+    "total" numeric NOT NULL,
+    "estado" "text" NOT NULL,
+    "timestamp" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "cliente_id" "uuid",
+    "metodopago" "text" DEFAULT 'efectivo'::"text" NOT NULL,
+    CONSTRAINT "orders_metodopago_check" CHECK (("metodopago" = ANY (ARRAY['efectivo'::"text", 'tarjeta'::"text", 'nequi'::"text"])))
+);
+
+
+ALTER TABLE "public"."orders" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."users" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "username" "text" NOT NULL,
+    "email" "text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."users" OWNER TO "postgres";
+
+
+ALTER TABLE ONLY "public"."caja_movimientos"
+    ADD CONSTRAINT "caja_movimientos_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."customers"
+    ADD CONSTRAINT "customers_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."empleados"
+    ADD CONSTRAINT "empleados_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."gastos"
+    ADD CONSTRAINT "gastos_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."menu_items"
+    ADD CONSTRAINT "menu_items_codigo_key" UNIQUE ("codigo");
+
+
+
+ALTER TABLE ONLY "public"."menu_items"
+    ADD CONSTRAINT "menu_items_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."order_items"
+    ADD CONSTRAINT "order_items_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."orders"
+    ADD CONSTRAINT "orders_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."users"
+    ADD CONSTRAINT "users_email_key" UNIQUE ("email");
+
+
+
+ALTER TABLE ONLY "public"."users"
+    ADD CONSTRAINT "users_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."users"
+    ADD CONSTRAINT "users_username_key" UNIQUE ("username");
+
+
+
+CREATE OR REPLACE TRIGGER "trg_gasto_to_caja" AFTER INSERT ON "public"."gastos" FOR EACH ROW EXECUTE FUNCTION "public"."insertar_egreso_desde_gasto"();
+
+
+
+CREATE OR REPLACE TRIGGER "trg_order_to_caja" AFTER INSERT ON "public"."orders" FOR EACH ROW EXECUTE FUNCTION "public"."insertar_ingreso_desde_order"();
+
+
+
+CREATE OR REPLACE TRIGGER "update_empleados_updated_at" BEFORE UPDATE ON "public"."empleados" FOR EACH ROW EXECUTE FUNCTION "public"."update_updated_at_column"();
+
+
+
+ALTER TABLE ONLY "public"."caja_movimientos"
+    ADD CONSTRAINT "caja_movimientos_gasto_id_fkey" FOREIGN KEY ("gasto_id") REFERENCES "public"."gastos"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."caja_movimientos"
+    ADD CONSTRAINT "caja_movimientos_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."order_items"
+    ADD CONSTRAINT "order_items_menu_item_id_fkey" FOREIGN KEY ("menu_item_id") REFERENCES "public"."menu_items"("id");
+
+
+
+ALTER TABLE ONLY "public"."order_items"
+    ADD CONSTRAINT "order_items_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id");
+
+
+
+ALTER TABLE ONLY "public"."orders"
+    ADD CONSTRAINT "orders_cliente_id_fkey" FOREIGN KEY ("cliente_id") REFERENCES "public"."customers"("id");
+
+
+
+ALTER TABLE "public"."caja_movimientos" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."customers" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."empleados" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."gastos" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."menu_items" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."order_items" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."orders" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "public_all_caja_movimientos" ON "public"."caja_movimientos" USING (true) WITH CHECK (true);
+
+
+
+CREATE POLICY "public_all_customers" ON "public"."customers" USING (true) WITH CHECK (true);
+
+
+
+CREATE POLICY "public_all_empleados" ON "public"."empleados" USING (true) WITH CHECK (true);
+
+
+
+CREATE POLICY "public_all_gastos" ON "public"."gastos" USING (true) WITH CHECK (true);
+
+
+
+CREATE POLICY "public_all_menu_items" ON "public"."menu_items" USING (true) WITH CHECK (true);
+
+
+
+CREATE POLICY "public_all_order_items" ON "public"."order_items" USING (true) WITH CHECK (true);
+
+
+
+CREATE POLICY "public_all_orders" ON "public"."orders" USING (true) WITH CHECK (true);
+
+
+
+CREATE POLICY "public_delete_users" ON "public"."users" FOR DELETE USING (true);
+
+
+
+CREATE POLICY "public_insert_users" ON "public"."users" FOR INSERT WITH CHECK (true);
+
+
+
+CREATE POLICY "public_select_users" ON "public"."users" FOR SELECT USING (true);
+
+
+
+CREATE POLICY "public_update_users" ON "public"."users" FOR UPDATE USING (true) WITH CHECK (true);
+
+
+
+ALTER TABLE "public"."users" ENABLE ROW LEVEL SECURITY;
+
+
+GRANT USAGE ON SCHEMA "public" TO "postgres";
+GRANT USAGE ON SCHEMA "public" TO "anon";
+GRANT USAGE ON SCHEMA "public" TO "authenticated";
+GRANT USAGE ON SCHEMA "public" TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."generate_order_number"() TO "anon";
+GRANT ALL ON FUNCTION "public"."generate_order_number"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."generate_order_number"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."insertar_egreso_desde_gasto"() TO "anon";
+GRANT ALL ON FUNCTION "public"."insertar_egreso_desde_gasto"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."insertar_egreso_desde_gasto"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."insertar_ingreso_desde_order"() TO "anon";
+GRANT ALL ON FUNCTION "public"."insertar_ingreso_desde_order"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."insertar_ingreso_desde_order"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."update_updated_at_column"() TO "anon";
+GRANT ALL ON FUNCTION "public"."update_updated_at_column"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."update_updated_at_column"() TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."caja_movimientos" TO "anon";
+GRANT ALL ON TABLE "public"."caja_movimientos" TO "authenticated";
+GRANT ALL ON TABLE "public"."caja_movimientos" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."balance_caja" TO "anon";
+GRANT ALL ON TABLE "public"."balance_caja" TO "authenticated";
+GRANT ALL ON TABLE "public"."balance_caja" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."customers" TO "anon";
+GRANT ALL ON TABLE "public"."customers" TO "authenticated";
+GRANT ALL ON TABLE "public"."customers" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."empleados" TO "anon";
+GRANT ALL ON TABLE "public"."empleados" TO "authenticated";
+GRANT ALL ON TABLE "public"."empleados" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."gastos" TO "anon";
+GRANT ALL ON TABLE "public"."gastos" TO "authenticated";
+GRANT ALL ON TABLE "public"."gastos" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."menu_items" TO "anon";
+GRANT ALL ON TABLE "public"."menu_items" TO "authenticated";
+GRANT ALL ON TABLE "public"."menu_items" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."order_items" TO "anon";
+GRANT ALL ON TABLE "public"."order_items" TO "authenticated";
+GRANT ALL ON TABLE "public"."order_items" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."orders" TO "anon";
+GRANT ALL ON TABLE "public"."orders" TO "authenticated";
+GRANT ALL ON TABLE "public"."orders" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."users" TO "anon";
+GRANT ALL ON TABLE "public"."users" TO "authenticated";
+GRANT ALL ON TABLE "public"."users" TO "service_role";
+
+
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "service_role";
+
+
+
+
+
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "service_role";
+
+
+
+
+
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "service_role";
+
+
+
+
+
+
+RESET ALL;
