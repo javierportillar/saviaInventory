@@ -11,7 +11,7 @@ import { Gastos } from './components/Gastos';
 import { Login } from './components/Login';
 import { Navigation } from './components/Navigation';
 import { Analitica } from './components/Analitica';
-import { CreditoClientes } from './components/CreditoClientes';
+import { CreditoEmpleados } from './components/CreditoEmpleados';
 import {
   ModuleType,
   User,
@@ -232,9 +232,12 @@ function App() {
     }
   };
 
-  const handleAssignOrderCredit = async (order: Order) => {
+  const handleAssignOrderCredit = async (
+    order: Order,
+    options: { employeeId: string; amount: number; employeeName?: string }
+  ) => {
     try {
-      const updatedOrder = await dataService.assignOrderCredit(order);
+      const updatedOrder = await dataService.assignOrderCredit(order, options);
       setOrders((prevOrders) =>
         prevOrders.map((entry) =>
           entry.id === updatedOrder.id ? updatedOrder : entry
@@ -242,6 +245,20 @@ function App() {
       );
     } catch (error) {
       console.error('Error asignando el pedido a crédito de empleados:', error);
+      throw error;
+    }
+  };
+
+  const handleSettleOrderCredit = async (order: Order) => {
+    try {
+      const updatedOrder = await dataService.settleOrderEmployeeCredit(order);
+      setOrders((prevOrders) =>
+        prevOrders.map((entry) =>
+          entry.id === updatedOrder.id ? updatedOrder : entry
+        )
+      );
+    } catch (error) {
+      console.error('Error marcando el crédito de empleados como pagado:', error);
       throw error;
     }
   };
@@ -385,8 +402,11 @@ function App() {
         )}
         {module === 'empleados' && <Empleados />}
         {module === 'gastos' && <Gastos />}
-        {module === 'creditoClientes' && (
-          <CreditoClientes orders={orders} />
+        {module === 'creditoEmpleados' && (
+          <CreditoEmpleados
+            orders={orders}
+            onSettleCredit={handleSettleOrderCredit}
+          />
         )}
         {module === 'analitica' && user.role === 'admin' && (
           <Analitica orders={orders} />

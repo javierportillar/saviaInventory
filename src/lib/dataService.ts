@@ -85,6 +85,7 @@ const normalizeCreditHistoryEntry = (entry: Partial<EmployeeCreditHistoryEntry>)
   orderId: typeof entry.orderId === 'string' ? entry.orderId : undefined,
   orderNumero: typeof entry.orderNumero === 'number' ? entry.orderNumero : undefined,
   monto: Math.max(0, Math.round(Number(entry.monto) || 0)),
+  tipo: entry?.tipo === 'abono' ? 'abono' : 'cargo',
   timestamp: typeof entry.timestamp === 'string' ? entry.timestamp : new Date().toISOString(),
 });
 
@@ -152,6 +153,7 @@ export const addEmployeeCredit = async ({ empleadoId, monto, orderId, orderNumer
     orderId,
     orderNumero,
     monto: amount,
+    tipo: 'cargo',
   });
 
   if (entryIndex !== -1) {
@@ -166,6 +168,39 @@ export const addEmployeeCredit = async ({ empleadoId, monto, orderId, orderNumer
       history: [historyEntry],
     });
   }
+
+  persistEmployeeCredits(records);
+};
+
+interface SettleEmployeeCreditBalanceOptions {
+  empleadoId: string;
+  monto: number;
+  orderId?: string;
+  orderNumero?: number;
+}
+
+const settleEmployeeCreditBalance = async ({ empleadoId, monto, orderId, orderNumero }: SettleEmployeeCreditBalanceOptions): Promise<void> => {
+  const amount = Math.max(0, Math.round(Number(monto) || 0));
+  if (!empleadoId || amount <= 0) {
+    return;
+  }
+
+  const records = loadEmployeeCredits();
+  const entryIndex = records.findIndex((record) => record.empleadoId === empleadoId);
+  if (entryIndex === -1) {
+    return;
+  }
+
+  const target = { ...records[entryIndex] };
+  target.total = Math.max(0, Math.round(target.total - amount));
+  const historyEntry = normalizeCreditHistoryEntry({
+    orderId,
+    orderNumero,
+    monto: amount,
+    tipo: 'abono',
+  });
+  target.history = [historyEntry, ...target.history];
+  records[entryIndex] = target;
 
   persistEmployeeCredits(records);
 };
@@ -194,12 +229,69 @@ const extractPaymentMethodValue = (record: any): string | null => {
   return null;
 };
 
-const SUPABASE_PAYMENT_COLUMN = 'metodopago';
+const SUPABASE_GASTOS_PAYMENT_COLUMN = 'metodopago';
+
+const SUPABASE_ORDER_PAYMENT_METHODS = ['efectivo', 'nequi', 'tarjeta'] as const;
+type SupabaseOrderPaymentMethod = typeof SUPABASE_ORDER_PAYMENT_METHODS[number];
+
+const SUPABASE_ORDER_PAYMENT_COLUMNS: Record<SupabaseOrderPaymentMethod, string> = {
+  efectivo: 'pago_efectivo',
+  nequi: 'pago_nequi',
+  tarjeta: 'pago_tarjeta',
+};
+
+const parseSupabasePaymentAmount = (value: any): number => {
+  const amount = Number(value ?? 0);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return 0;
+  }
+  return Math.round(amount);
+};
+
+const extractSupabasePaymentAllocations = (record: any): PaymentAllocation[] => {
+  if (!record || typeof record !== 'object') {
+    return [];
+  }
+
+  const allocations: PaymentAllocation[] = [];
+  for (const method of SUPABASE_ORDER_PAYMENT_METHODS) {
+    const column = SUPABASE_ORDER_PAYMENT_COLUMNS[method];
+    const value = parseSupabasePaymentAmount(record[column]);
+    if (value > 0) {
+      allocations.push({ metodo: method, monto: value });
+    }
+  }
+  return allocations;
+};
+
+const buildSupabaseOrderPaymentPayload = (allocations: PaymentAllocation[]): Record<string, number> => {
+  const totals: Record<SupabaseOrderPaymentMethod, number> = {
+    efectivo: 0,
+    nequi: 0,
+    tarjeta: 0,
+  };
+
+  allocations.forEach((allocation) => {
+    if (SUPABASE_ORDER_PAYMENT_METHODS.includes(allocation.metodo as SupabaseOrderPaymentMethod)) {
+      const method = allocation.metodo as SupabaseOrderPaymentMethod;
+      totals[method] += Math.round(allocation.monto);
+    }
+  });
+
+  return Object.fromEntries(
+    SUPABASE_ORDER_PAYMENT_METHODS.map((method) => [
+      SUPABASE_ORDER_PAYMENT_COLUMNS[method],
+      totals[method],
+    ])
+  );
+};
 
 interface OrderCreditMetadata {
   type: 'empleados';
   amount: number;
   assignedAt: string;
+  employeeId?: string;
+  employeeName?: string;
 }
 
 interface OrderMetadata {
@@ -280,6 +372,8 @@ const syncOrderMetadata = (order: Order): void => {
       type: order.creditInfo.type,
       amount: Math.round(order.creditInfo.amount),
       assignedAt: order.creditInfo.assignedAt.toISOString(),
+      employeeId: order.creditInfo.employeeId,
+      employeeName: order.creditInfo.employeeName,
     };
   } else {
     updates.credit = null;
@@ -486,30 +580,44 @@ const mapOrderRecord = (record: any): Order => {
       ? record.order_id
       : `order-${Math.random().toString(36).slice(2, 10)}`;
 
-  const metodoPago = toOptionalPaymentMethod(extractPaymentMethodValue(record));
+  const metodoPagoFromRecord = toOptionalPaymentMethod(extractPaymentMethodValue(record));
+  const supabaseAllocations = mergeAllocations(
+    sanitizeAllocations(extractSupabasePaymentAllocations(record))
+  );
+
+  const itemsTotal = Math.round(
+    items.reduce((sum, cartItem) => {
+      const unitPrice = typeof cartItem.precioUnitario === 'number'
+        ? cartItem.precioUnitario
+        : cartItem.item.precio;
+      return sum + unitPrice * cartItem.cantidad;
+    }, 0)
+  );
+  const rawTotal = Number(record?.total ?? 0);
+  const baseTotal = Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : itemsTotal;
 
   const baseOrder: Order = {
     id,
     numero: typeof record?.numero === 'number' ? record.numero : Number(record?.numero ?? 0),
     items,
-    total: typeof record?.total === 'number' ? record.total : Number(record?.total ?? 0),
+    total: baseTotal > 0 ? baseTotal : rawTotal,
     estado: (record?.estado as Order['estado']) ?? 'pendiente',
     timestamp,
     cliente_id: record?.cliente_id ?? record?.clienteId ?? undefined,
     cliente: record?.customer?.nombre ?? record?.cliente ?? undefined,
-    metodoPago,
+    metodoPago: metodoPagoFromRecord,
   };
 
   const metadata = getOrderMetadata(baseOrder.id);
   const rawAllocations = sanitizeAllocations(record?.paymentAllocations);
 
-  let allocations: PaymentAllocation[] = [];
-  if (metadata?.paymentAllocations) {
+  let allocations: PaymentAllocation[] = supabaseAllocations;
+  if (metadata?.paymentAllocations && metadata.paymentAllocations.length > 0) {
     allocations = sanitizeAllocations(metadata.paymentAllocations);
-  } else if (rawAllocations.length > 0) {
+  } else if (rawAllocations.length > 0 && allocations.length === 0) {
     allocations = rawAllocations;
-  } else if (metodoPago) {
-    allocations = [{ metodo: metodoPago, monto: Math.round(baseOrder.total) }];
+  } else if (allocations.length === 0 && metodoPagoFromRecord) {
+    allocations = [{ metodo: metodoPagoFromRecord, monto: Math.round(baseOrder.total) }];
   }
 
   if (metadata && metadata.paymentAllocations && metadata.paymentAllocations.length === 0) {
@@ -517,6 +625,7 @@ const mapOrderRecord = (record: any): Order => {
   }
 
   const mergedAllocations = allocations.length > 0 ? mergeAllocations(allocations) : allocations;
+  const derivedMetodoPago = getPrimaryMethodFromAllocations(mergedAllocations) ?? metodoPagoFromRecord;
   const paymentStatus: PaymentStatus = metadata?.paymentStatus
     ?? (record?.paymentStatus as PaymentStatus | undefined)
     ?? (Math.abs(getAllocationsTotal(mergedAllocations) - Math.round(baseOrder.total)) <= 1
@@ -534,6 +643,8 @@ const mapOrderRecord = (record: any): Order => {
         typeof creditMeta.amount === 'number' ? creditMeta.amount : Math.round(baseOrder.total)
       ),
       assignedAt,
+      employeeId: creditMeta.employeeId,
+      employeeName: creditMeta.employeeName,
     };
   }
 
@@ -542,6 +653,7 @@ const mapOrderRecord = (record: any): Order => {
     paymentAllocations: mergedAllocations,
     paymentStatus,
     creditInfo,
+    metodoPago: derivedMetodoPago,
   };
 };
 
@@ -552,7 +664,9 @@ const ORDER_SELECT_COLUMNS = `
   estado,
   timestamp,
   cliente_id,
-  ${SUPABASE_PAYMENT_COLUMN},
+  ${SUPABASE_ORDER_PAYMENT_COLUMNS.efectivo},
+  ${SUPABASE_ORDER_PAYMENT_COLUMNS.nequi},
+  ${SUPABASE_ORDER_PAYMENT_COLUMNS.tarjeta},
   customer:customers ( id, nombre ),
   order_items (
     id,
@@ -895,6 +1009,8 @@ export const createOrder = async (order: Order): Promise<Order> => {
 
   syncOrderMetadata(sanitizedOrder);
 
+  const supabasePaymentPayload = buildSupabaseOrderPaymentPayload(sanitizedAllocations);
+
   if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase
@@ -907,7 +1023,7 @@ export const createOrder = async (order: Order): Promise<Order> => {
             estado: sanitizedOrder.estado,
             timestamp: sanitizedOrder.timestamp.toISOString(),
             cliente_id: sanitizedOrder.cliente_id ?? null,
-            [SUPABASE_PAYMENT_COLUMN]: sanitizedOrder.metodoPago,
+            ...supabasePaymentPayload,
           },
         ])
       .select('*')
@@ -936,7 +1052,8 @@ export const createOrder = async (order: Order): Promise<Order> => {
         id: data.id,
         timestamp: new Date(data.timestamp),
         cliente_id: data.cliente_id ?? undefined,
-        metodoPago: toOptionalPaymentMethod(extractPaymentMethodValue(data)) ?? sanitizedOrder.metodoPago,
+        metodoPago: getPrimaryMethodFromAllocations(sanitizedAllocations)
+          ?? sanitizedOrder.metodoPago,
       };
       upsertLocalOrder(createdOrder);
       return createdOrder;
@@ -987,9 +1104,10 @@ export const recordOrderPayment = async (
 
   if (await ensureSupabaseReady()) {
     try {
+      const supabasePaymentPayload = buildSupabaseOrderPaymentPayload(sanitizedAllocations);
       const { error } = await supabase
         .from('orders')
-        .update({ [SUPABASE_PAYMENT_COLUMN]: normalizePaymentMethod(primaryMethod) })
+        .update(supabasePaymentPayload)
         .eq('id', order.id);
       if (error) throw error;
     } catch (error) {
@@ -1010,17 +1128,53 @@ export const recordOrderPayment = async (
   return updatedOrder;
 };
 
+interface AssignOrderCreditOptions {
+  amount?: number;
+  employeeId?: string;
+  employeeName?: string;
+}
+
 export const assignOrderCredit = async (
   order: Order,
-  options?: { amount?: number }
+  options?: AssignOrderCreditOptions
 ): Promise<Order> => {
   const amount = Math.max(0, Math.round(options?.amount ?? order.total));
   const assignedAt = new Date();
+  const rawEmployeeId = options?.employeeId?.trim();
+  const employeeId = rawEmployeeId ? rawEmployeeId : undefined;
+  const rawEmployeeName = options?.employeeName?.trim();
+  const employeeName = rawEmployeeName ? rawEmployeeName : undefined;
+
+  if (employeeId && amount > 0) {
+    await addEmployeeCredit({
+      empleadoId: employeeId,
+      monto: amount,
+      orderId: order.id,
+      orderNumero: order.numero,
+    });
+  }
+
   const creditMetadata: OrderCreditMetadata = {
     type: 'empleados',
     amount,
     assignedAt: assignedAt.toISOString(),
+    employeeId,
+    employeeName,
   };
+
+  if (order.estado !== 'entregado') {
+    if (await ensureSupabaseReady()) {
+      try {
+        const { error } = await supabase
+          .from('orders')
+          .update({ estado: 'entregado' })
+          .eq('id', order.id);
+        if (error) throw error;
+      } catch (error) {
+        console.warn('Supabase not available al marcar crédito, se usará caché local:', error);
+      }
+    }
+  }
 
   mergeOrderMetadata(order.id, {
     paymentStatus: 'pendiente',
@@ -1030,13 +1184,80 @@ export const assignOrderCredit = async (
 
   const updatedOrder: Order = {
     ...order,
+    estado: 'entregado',
+    metodoPago: 'credito_empleados',
     paymentStatus: 'pendiente',
     paymentAllocations: [],
     creditInfo: {
       type: 'empleados',
       amount,
       assignedAt,
+      employeeId,
+      employeeName,
     },
+  };
+
+  upsertLocalOrder(updatedOrder);
+  return updatedOrder;
+};
+
+export const settleOrderEmployeeCredit = async (order: Order): Promise<Order> => {
+  if (!order.creditInfo) {
+    throw new Error('La orden no tiene un crédito de empleados pendiente.');
+  }
+
+  const amount = Math.max(0, Math.round(order.creditInfo.amount ?? order.total));
+  const employeeId = order.creditInfo.employeeId;
+  const employeeName = order.creditInfo.employeeName;
+
+  if (employeeId && amount > 0) {
+    await settleEmployeeCreditBalance({
+      empleadoId: employeeId,
+      monto: amount,
+      orderId: order.id,
+      orderNumero: order.numero,
+    });
+  }
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ estado: 'entregado' })
+        .eq('id', order.id);
+      if (error) throw error;
+    } catch (error) {
+      console.warn('Supabase no disponible al cerrar crédito, se usará caché local:', error);
+    }
+  }
+
+  mergeOrderMetadata(order.id, {
+    paymentStatus: 'pagado',
+    paymentAllocations: employeeId
+      ? [{
+          metodo: 'credito_empleados',
+          monto: amount,
+          empleadoId,
+          empleadoNombre: employeeName,
+        }]
+      : [],
+    credit: null,
+  });
+
+  const updatedOrder: Order = {
+    ...order,
+    estado: 'entregado',
+    metodoPago: 'credito_empleados',
+    paymentStatus: 'pagado',
+    paymentAllocations: employeeId
+      ? [{
+          metodo: 'credito_empleados',
+          monto: amount,
+          empleadoId,
+          empleadoNombre: employeeName,
+        }]
+      : [],
+    creditInfo: undefined,
   };
 
   upsertLocalOrder(updatedOrder);
@@ -1353,7 +1574,7 @@ export const createGasto = async (gasto: Gasto): Promise<Gasto> => {
             created_at: sanitized.created_at instanceof Date
               ? sanitized.created_at.toISOString()
               : sanitized.created_at ?? new Date().toISOString(),
-            [SUPABASE_PAYMENT_COLUMN]: sanitized.metodoPago,
+            [SUPABASE_GASTOS_PAYMENT_COLUMN]: sanitized.metodoPago,
           },
         ])
         .select('*')
@@ -1387,7 +1608,7 @@ export const updateGasto = async (gasto: Gasto): Promise<Gasto> => {
           monto: sanitized.monto,
           categoria: sanitized.categoria,
           fecha: fechaValue,
-          [SUPABASE_PAYMENT_COLUMN]: sanitized.metodoPago,
+          [SUPABASE_GASTOS_PAYMENT_COLUMN]: sanitized.metodoPago,
         })
         .eq('id', sanitized.id);
       if (error) throw error;
@@ -1450,6 +1671,7 @@ export const dataService = {
   createOrder,
   recordOrderPayment,
   assignOrderCredit,
+  settleOrderEmployeeCredit,
   updateOrder,
   deleteOrder,
   updateOrderStatus,

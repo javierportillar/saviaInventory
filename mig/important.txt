@@ -2,8 +2,9 @@ export REMOTE_DB_URL="postgresql://postgres:PortillaRosero1.@db.nrpzetdjwayaxzbc
 
 # Exportar sólo la estructura del esquema 'public'
 
-supabase db dump --db-url "$REMOTE_DB_URL" -f
-remote_schema.sql --schema public # Exportar sólo los datos del esquema 'public'
+supabase db dump --db-url "$REMOTE_DB_URL" -f remote_schema.sql --schema public
+
+# Exportar sólo los datos del esquema 'public'
 supabase db dump --db-url "$REMOTE_DB_URL" -f remote_data.sql --data-only --use-copy --schema public
 # En la carpeta donde tienes remote_schema.sql y remote_data.sql
 

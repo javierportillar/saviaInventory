@@ -83,7 +83,7 @@ interface CajaProps {
   onModuleChange: (module: ModuleType) => void;
   onCreateOrder: (order: Order) => Promise<void>;
   onRecordOrderPayment: (order: Order, allocations: PaymentAllocation[]) => Promise<void>;
-  onAssignOrderCredit: (order: Order) => Promise<void>;
+  onAssignOrderCredit: (order: Order, options: { employeeId: string; amount: number; employeeName?: string }) => Promise<void>;
 }
 
 export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayment, onAssignOrderCredit }: CajaProps) {
@@ -430,14 +430,14 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     }
   };
 
-  const handleAssignCredit = async () => {
+  const handleAssignCredit = async (options: { employeeId: string; amount: number; employeeName?: string }) => {
     if (!paymentModalOrder) {
       return;
     }
 
     try {
       setIsRecordingPayment(true);
-      await onAssignOrderCredit(paymentModalOrder);
+      await onAssignOrderCredit(paymentModalOrder, options);
       setPaymentModalOrder(null);
     } catch (error) {
       console.error('Error al asignar el pedido a crédito de empleados:', error);

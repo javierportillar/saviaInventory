@@ -46,7 +46,7 @@ interface ComandasProps {
   onRecordOrderPayment: (order: Order, allocations: PaymentAllocation[]) => Promise<void>;
   onDeleteOrder: (orderId: string) => Promise<void>;
   isAdmin: boolean;
-  onAssignOrderCredit: (order: Order) => Promise<void>;
+  onAssignOrderCredit: (order: Order, options: { employeeId: string; amount: number; employeeName?: string }) => Promise<void>;
 }
 
 interface EditingOrder {
@@ -497,14 +497,14 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     }
   };
 
-  const handleAssignCredit = async () => {
+  const handleAssignCredit = async (options: { employeeId: string; amount: number; employeeName?: string }) => {
     if (!paymentOrder) {
       return;
     }
 
     try {
       setIsRecordingPayment(true);
-      await onAssignOrderCredit(paymentOrder);
+      await onAssignOrderCredit(paymentOrder, options);
       setPaymentOrder(null);
     } catch (error) {
       console.error('Error al asignar la comanda a crédito de empleados:', error);
@@ -548,9 +548,21 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
 
   const renderOrderCard = (order: Order) => {
     const allocations = getOrderAllocations(order);
-    const paymentSummary = formatPaymentSummary(allocations, formatCOP);
+    const isEmployeeCredit = order.creditInfo?.type === 'empleados';
+    let employeeCreditLabel = '';
+    if (isEmployeeCredit) {
+      const employeeName = order.creditInfo?.employeeName?.trim();
+      if (employeeName) {
+        employeeCreditLabel = ` · ${employeeName}`;
+      } else if (order.creditInfo?.employeeId) {
+        employeeCreditLabel = ` · Empleado ${order.creditInfo.employeeId}`;
+      }
+    }
+    const paymentSummary = isEmployeeCredit
+      ? `Crédito empleados pendiente${employeeCreditLabel}`
+      : formatPaymentSummary(allocations, formatCOP);
     const paid = isOrderPaid(order);
-    const canModifyOrder = paid;
+    const canModifyOrder = paid || (isEmployeeCredit && isAdmin);
     const showPaymentResetNotice = paid && isAdmin;
     const isDeleting = deletingOrderId === order.id;
     const isActionsExpanded = expandedActionsOrderId === order.id;
@@ -855,6 +867,26 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
                         )}
                       </div>
                     )
+                  ) : isEmployeeCredit ? (
+                    <div className="space-y-2">
+                      <div className="px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-lg text-xs text-yellow-800">
+                        <p className="font-semibold">
+                          Crédito de empleados pendiente{employeeCreditLabel}
+                        </p>
+                        <p className="mt-1 text-[11px] text-yellow-700">
+                          Gestiona el pago desde el módulo Crédito empleados cuando el colaborador pague.
+                        </p>
+                      </div>
+                      {isAdmin && (
+                        <button
+                          onClick={() => openPaymentModal(order)}
+                          className="w-full py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm flex items-center justify-center gap-1"
+                        >
+                          <CreditCard size={14} />
+                          Gestionar crédito
+                        </button>
+                      )}
+                    </div>
                   ) : (
                     <button
                       onClick={() => openPaymentModal(order)}

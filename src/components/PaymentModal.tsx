@@ -21,7 +21,7 @@ interface PaymentModalProps {
   onSubmit: (allocations: PaymentAllocation[]) => Promise<void> | void;
   isSubmitting?: boolean;
   title?: string;
-  onAssignCredit?: () => Promise<void> | void;
+  onAssignCredit?: (options: { employeeId: string; amount: number; employeeName?: string }) => Promise<void> | void;
 }
 
 type PaymentMode = 'single' | 'split';
@@ -549,8 +549,46 @@ export function PaymentModal({
         return prevSelected;
       }
 
-      const nextSelected = { ...prevSelected };
-      nextSelected[method] = !isCurrentlySelected;
+      if (prevSelected['credito_empleados'] && method !== 'credito_empleados' && !isCurrentlySelected) {
+        setFeedback('No puedes combinar el crédito de empleados con otros métodos.');
+        return prevSelected;
+      }
+
+      if (method === 'credito_empleados') {
+        if (!isCurrentlySelected) {
+          setMethodAmounts(() => ({
+            efectivo: '',
+            tarjeta: '',
+            nequi: '',
+            credito_empleados: total > 0 ? String(total) : '',
+          }));
+
+          if (
+            !selectedCreditEmployeeId ||
+            !activeEmployees.some((employee) => employee.id === selectedCreditEmployeeId)
+          ) {
+            setSelectedCreditEmployeeId(activeEmployees[0]?.id ?? '');
+          }
+
+          setFeedback(null);
+          return {
+            efectivo: false,
+            tarjeta: false,
+            nequi: false,
+            credito_empleados: true,
+          };
+        }
+
+        setMethodAmounts((prev) => ({ ...prev, credito_empleados: '' }));
+        setSelectedCreditEmployeeId('');
+        setFeedback(null);
+        return {
+          ...prevSelected,
+          credito_empleados: false,
+        };
+      }
+
+      const nextSelected = { ...prevSelected, [method]: !isCurrentlySelected };
 
       setMethodAmounts((prevAmounts) => {
         const nextAmounts = { ...prevAmounts };
@@ -563,19 +601,6 @@ export function PaymentModal({
         }
         return nextAmounts;
       });
-
-      if (!isCurrentlySelected && method === 'credito_empleados') {
-        if (
-          !selectedCreditEmployeeId ||
-          !activeEmployees.some((employee) => employee.id === selectedCreditEmployeeId)
-        ) {
-          setSelectedCreditEmployeeId(activeEmployees[0]?.id ?? '');
-        }
-      }
-
-      if (isCurrentlySelected && method === 'credito_empleados') {
-        setSelectedCreditEmployeeId('');
-      }
 
       setFeedback(null);
       return nextSelected;
@@ -719,7 +744,48 @@ export function PaymentModal({
     setFeedback(null);
   };
 
+  const assignCredit = async (options: { employeeId: string; amount: number; employeeName?: string }) => {
+    if (!onAssignCredit || isSubmitting) {
+      return;
+    }
+    setFeedback(null);
+    await onAssignCredit(options);
+  };
+
   const handleSubmit = async () => {
+    const isSingleCreditSelection =
+      mode === 'single' && selectedList.length === 1 && selectedList[0] === 'credito_empleados';
+
+    if (isSingleCreditSelection && onAssignCredit && !isCreditOrder) {
+      if (singleCreditMissingEmployee) {
+        setFeedback('Selecciona el empleado al registrar un crédito.');
+        return;
+      }
+
+      const employeeId = selectedCreditEmployeeId;
+      const creditAmount = Math.max(
+        0,
+        toPositiveInteger(methodAmounts['credito_empleados']) || total
+      );
+
+      if (!employeeId) {
+        setFeedback('Selecciona el empleado al registrar un crédito.');
+        return;
+      }
+
+      if (creditAmount <= 0) {
+        setFeedback('El monto a crédito debe ser mayor a cero.');
+        return;
+      }
+
+      await assignCredit({
+        employeeId,
+        amount: creditAmount,
+        employeeName: getEmployeeNameById(employeeId) || undefined,
+      });
+      return;
+    }
+
     if (mode === 'split') {
       if (!splitHasAssignments) {
         setFeedback('Asigna al menos un producto y método de pago para continuar.');
@@ -756,14 +822,6 @@ export function PaymentModal({
 
     setFeedback(null);
     await onSubmit(sanitized);
-  };
-
-  const handleAssignCredit = async () => {
-    if (!onAssignCredit || isSubmitting) {
-      return;
-    }
-    setFeedback(null);
-    await onAssignCredit();
   };
 
   return (
@@ -820,13 +878,19 @@ export function PaymentModal({
                   {PAYMENT_METHODS.map((method) => {
                     const isActive = selectedMethods[method];
                     const label = PAYMENT_METHOD_LABELS[method];
+                    const disableMethod =
+                      (selectedMethods['credito_empleados'] && method !== 'credito_empleados') ||
+                      isSubmitting;
                     return (
                       <button
                         key={method}
                         type="button"
                         onClick={() => handleToggleMethod(method)}
-                        className={`py-2 px-3 rounded-lg border text-sm font-medium transition-colors ${
-                          isActive ? 'border-transparent text-white' : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                        disabled={disableMethod}
+                        className={`py-2 px-3 rounded-lg border text-sm font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                          isActive
+                            ? 'border-transparent text-white'
+                            : 'border-gray-300 text-gray-700 hover:bg-gray-50'
                         }`}
                         style={{
                           backgroundColor: isActive ? COLORS.dark : 'transparent',
@@ -836,19 +900,6 @@ export function PaymentModal({
                       </button>
                     );
                   })}
-                  {onAssignCredit && !isCreditOrder && (
-                    <button
-                      type="button"
-                      onClick={handleAssignCredit}
-                      className="py-2 px-3 rounded-lg text-sm font-semibold transition-colors border border-yellow-200 text-yellow-900 bg-yellow-50 hover:bg-yellow-100 disabled:opacity-70 disabled:cursor-not-allowed"
-                      disabled={isSubmitting}
-                    >
-                      Crédito empleados
-                      <span className="block text-xs font-normal text-yellow-800">
-                        Lleva el pedido a crédito
-                      </span>
-                    </button>
-                  )}
                 </div>
               </div>
 

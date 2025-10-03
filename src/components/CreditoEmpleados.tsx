@@ -1,19 +1,21 @@
 import React, { useMemo, useState } from 'react';
-import { CalendarRange, Users, ClipboardList } from 'lucide-react';
+import { CalendarRange, Users, ClipboardList, CheckCircle, Loader2 } from 'lucide-react';
 import { Order } from '../types';
 import { COLORS } from '../data/menu';
 import { formatCOP, formatDateInputValue, parseDateInputValue } from '../utils/format';
 import { formatPaymentSummary, getOrderAllocations, isOrderPaid } from '../utils/payments';
 
-interface CreditoClientesProps {
+interface CreditoEmpleadosProps {
   orders: Order[];
+  onSettleCredit: (order: Order) => Promise<void>;
 }
 
 interface CreditOrderView {
   order: Order;
   assignedAt: Date;
   amount: number;
-  customerLabel: string;
+  employeeLabel: string;
+  employeeKey: string;
 }
 
 const normalizeDateStart = (value: Date) => {
@@ -35,19 +37,34 @@ const formatAssignedAt = (value: Date) => {
   });
 };
 
-export function CreditoClientes({ orders }: CreditoClientesProps) {
+export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosProps) {
   const pendingCreditOrders = useMemo<CreditOrderView[]>(() => {
     return orders
-      .filter((order) => order.creditInfo && !isOrderPaid(order))
+      .filter((order) => {
+        const creditInfo = order.creditInfo;
+        if (!creditInfo || creditInfo.type !== 'empleados') {
+          return false;
+        }
+        return !isOrderPaid(order);
+      })
       .map((order) => {
-        const assignedAt = order.creditInfo?.assignedAt ?? order.timestamp;
-        const amount = Math.round(order.creditInfo?.amount ?? order.total);
-        const customerLabel = order.cliente?.trim() ? order.cliente : 'Sin cliente registrado';
+        const creditInfo = order.creditInfo!;
+        const assignedAt = creditInfo.assignedAt ?? order.timestamp;
+        const amount = Math.max(0, Math.round(creditInfo.amount ?? order.total));
+        const rawName = creditInfo.employeeName?.trim();
+        const employeeLabel =
+          rawName && rawName.length > 0
+            ? rawName
+            : creditInfo.employeeId
+              ? `Empleado ${creditInfo.employeeId}`
+              : 'Empleado sin asignar';
+        const employeeKey = creditInfo.employeeId ?? employeeLabel;
         return {
           order,
           assignedAt,
           amount,
-          customerLabel,
+          employeeLabel,
+          employeeKey,
         };
       })
       .sort((a, b) => b.assignedAt.getTime() - a.assignedAt.getTime());
@@ -68,12 +85,19 @@ export function CreditoClientes({ orders }: CreditoClientesProps) {
 
   const [startDate, setStartDate] = useState<string>(defaultStartDate);
   const [endDate, setEndDate] = useState<string>(today);
-  const [selectedCustomer, setSelectedCustomer] = useState<string>('todos');
+  const [selectedEmployee, setSelectedEmployee] = useState<string>('todos');
+  const [settlingOrderId, setSettlingOrderId] = useState<string | null>(null);
 
-  const availableCustomers = useMemo(() => {
-    const labels = new Set<string>();
-    pendingCreditOrders.forEach((entry) => labels.add(entry.customerLabel));
-    return Array.from(labels).sort((a, b) => a.localeCompare(b, 'es'));
+  const availableEmployees = useMemo(() => {
+    const map = new Map<string, string>();
+    pendingCreditOrders.forEach(({ employeeKey, employeeLabel }) => {
+      if (!map.has(employeeKey)) {
+        map.set(employeeKey, employeeLabel);
+      }
+    });
+    return Array.from(map.entries())
+      .map(([key, label]) => ({ key, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'es'));
   }, [pendingCreditOrders]);
 
   const filteredCreditOrders = useMemo(() => {
@@ -91,35 +115,63 @@ export function CreditoClientes({ orders }: CreditoClientesProps) {
       if (assignedTime < startTime || assignedTime > endTime) {
         return false;
       }
-      if (selectedCustomer !== 'todos' && entry.customerLabel !== selectedCustomer) {
+      if (selectedEmployee !== 'todos' && entry.employeeKey !== selectedEmployee) {
         return false;
       }
       return true;
     });
-  }, [pendingCreditOrders, startDate, endDate, selectedCustomer]);
+  }, [pendingCreditOrders, startDate, endDate, selectedEmployee]);
 
   const filteredTotal = useMemo(
     () => filteredCreditOrders.reduce((sum, entry) => sum + entry.amount, 0),
     [filteredCreditOrders]
   );
 
-  const totalsByCustomer = useMemo(() => {
-    const map = new Map<string, number>();
-    pendingCreditOrders.forEach((entry) => {
-      const current = map.get(entry.customerLabel) ?? 0;
-      map.set(entry.customerLabel, current + entry.amount);
+  const totalsByEmployee = useMemo(() => {
+    const map = new Map<string, { label: string; total: number }>();
+    pendingCreditOrders.forEach(({ employeeKey, employeeLabel, amount }) => {
+      const existing = map.get(employeeKey);
+      if (existing) {
+        existing.total += amount;
+      } else {
+        map.set(employeeKey, { label: employeeLabel, total: amount });
+      }
     });
-    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+    return Array.from(map.entries())
+      .map(([key, value]) => ({ key, ...value }))
+      .sort((a, b) => b.total - a.total);
   }, [pendingCreditOrders]);
+
+  const handleSettleCredit = async (order: Order) => {
+    if (settlingOrderId) {
+      return;
+    }
+
+    const orderLabel = typeof order.numero === 'number' ? `#${order.numero}` : order.id;
+    const confirmed = window.confirm(`¿Marcar como pagado el crédito del pedido ${orderLabel}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setSettlingOrderId(order.id);
+      await onSettleCredit(order);
+    } catch (error) {
+      console.error('Error marcando crédito como pagado:', error);
+      alert('No se pudo marcar el crédito como pagado. Inténtalo nuevamente.');
+    } finally {
+      setSettlingOrderId(null);
+    }
+  };
 
   return (
     <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-6">
       <header className="space-y-2">
         <h2 className="text-2xl font-bold" style={{ color: COLORS.dark }}>
-          Crédito Clientes
+          Crédito empleados
         </h2>
         <p className="text-sm text-gray-600">
-          Consulta y gestiona los pedidos asignados como crédito de empleados. Estos valores no se reflejan en el balance hasta que se registre su pago.
+          Consulta y gestiona los pedidos asignados como crédito de empleados. Marca los valores como pagados cuando el colaborador salde su deuda.
         </p>
       </header>
 
@@ -158,17 +210,17 @@ export function CreditoClientes({ orders }: CreditoClientesProps) {
         <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
           <div className="flex items-center gap-2 text-sm text-gray-600 font-medium">
             <Users size={18} />
-            <span>Filtrar por cliente</span>
+            <span>Filtrar por empleado</span>
           </div>
           <select
-            value={selectedCustomer}
-            onChange={(event) => setSelectedCustomer(event.target.value)}
+            value={selectedEmployee}
+            onChange={(event) => setSelectedEmployee(event.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:border-transparent"
             style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
           >
-            <option value="todos">Todos los clientes</option>
-            {availableCustomers.map((label) => (
-              <option key={label} value={label}>
+            <option value="todos">Todos los empleados</option>
+            {availableEmployees.map(({ key, label }) => (
+              <option key={key} value={key}>
                 {label}
               </option>
             ))}
@@ -221,7 +273,7 @@ export function CreditoClientes({ orders }: CreditoClientesProps) {
                     Fecha asignación
                   </th>
                   <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Cliente
+                    Empleado
                   </th>
                   <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">
                     Pedido
@@ -232,28 +284,34 @@ export function CreditoClientes({ orders }: CreditoClientesProps) {
                   <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Valor pendiente
                   </th>
+                  <th className="px-3 lg:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Acciones
+                  </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
                 {filteredCreditOrders.length === 0 && (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-3 lg:px-6 py-8 text-center text-xs lg:text-sm text-gray-500"
                     >
-                      No hay créditos registrados para el filtro seleccionado.
+                      No hay créditos de empleados para el filtro seleccionado.
                     </td>
                   </tr>
                 )}
-                {filteredCreditOrders.map(({ order, assignedAt, amount, customerLabel }) => {
-                  const paymentSummary = formatPaymentSummary(getOrderAllocations(order), formatCOP);
+                {filteredCreditOrders.map(({ order, assignedAt, amount, employeeLabel }) => {
+                  const paymentSummary = order.creditInfo
+                    ? 'Crédito empleados pendiente'
+                    : formatPaymentSummary(getOrderAllocations(order), formatCOP);
+                  const isSettling = settlingOrderId === order.id;
                   return (
                     <tr key={order.id} className="hover:bg-gray-50">
                       <td className="px-3 lg:px-6 py-3 text-xs text-gray-600">
                         {formatAssignedAt(assignedAt)}
                       </td>
                       <td className="px-3 lg:px-6 py-3 text-xs text-gray-600">
-                        {customerLabel}
+                        {employeeLabel}
                       </td>
                       <td className="px-3 lg:px-6 py-3 text-xs text-gray-600 hidden md:table-cell">
                         {order.numero ? `#${order.numero}` : order.id}
@@ -263,6 +321,21 @@ export function CreditoClientes({ orders }: CreditoClientesProps) {
                       </td>
                       <td className="px-3 lg:px-6 py-3 text-xs font-semibold" style={{ color: COLORS.accent }}>
                         {formatCOP(amount)}
+                      </td>
+                      <td className="px-3 lg:px-6 py-3 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => handleSettleCredit(order)}
+                          disabled={isSettling}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-green-600 text-white font-semibold hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {isSettling ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <CheckCircle size={14} />
+                          )}
+                          {isSettling ? 'Marcando...' : 'Marcar pagado'}
+                        </button>
                       </td>
                     </tr>
                   );
@@ -275,21 +348,21 @@ export function CreditoClientes({ orders }: CreditoClientesProps) {
         <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100">
             <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
-              Total por cliente
+              Total por empleado
             </h3>
             <p className="text-xs text-gray-500">
-              Sumatoria de créditos pendientes agrupados por cliente.
+              Sumatoria de créditos pendientes agrupados por empleado.
             </p>
           </div>
           <div className="divide-y divide-gray-100">
-            {totalsByCustomer.length === 0 && (
+            {totalsByEmployee.length === 0 && (
               <p className="px-4 py-6 text-xs lg:text-sm text-gray-500 text-center">
                 No hay créditos pendientes registrados.
               </p>
             )}
-            {totalsByCustomer.map(([customerLabel, total]) => (
-              <div key={customerLabel} className="px-4 py-3 flex items-center justify-between text-sm">
-                <span className="font-medium text-gray-600">{customerLabel}</span>
+            {totalsByEmployee.map(({ key, label, total }) => (
+              <div key={key} className="px-4 py-3 flex items-center justify-between text-sm">
+                <span className="font-medium text-gray-600">{label}</span>
                 <span className="font-semibold" style={{ color: COLORS.dark }}>
                   {formatCOP(total)}
                 </span>

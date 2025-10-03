@@ -20,6 +20,8 @@ export interface OrderCreditInfo {
   type: CreditType;
   amount: number;
   assignedAt: Date;
+  employeeId?: string;
+  employeeName?: string;
 }
 
 export interface PaymentAllocation {
@@ -94,6 +96,7 @@ export interface EmployeeCreditHistoryEntry {
   orderId?: string;
   orderNumero?: number;
   monto: number;
+  tipo: 'cargo' | 'abono';
   timestamp: string;
 }
 
@@ -143,7 +146,7 @@ export type ModuleType =
   | 'clientes'
   | 'empleados'
   | 'gastos'
-  | 'creditoClientes'
+  | 'creditoEmpleados'
   | 'analitica';
 
 export type UserRole = 'admin' | 'employee';
