@@ -12,11 +12,21 @@ export interface MenuItem {
   unidadMedida?: 'kg' | 'g' | 'mg' | 'ml';
 }
 
-export type PaymentMethod = 'efectivo' | 'tarjeta' | 'nequi';
+export type PaymentMethod = 'efectivo' | 'tarjeta' | 'nequi' | 'credito_empleados';
+
+export type CreditType = 'empleados';
+
+export interface OrderCreditInfo {
+  type: CreditType;
+  amount: number;
+  assignedAt: Date;
+}
 
 export interface PaymentAllocation {
   metodo: PaymentMethod;
   monto: number;
+  empleadoId?: string;
+  empleadoNombre?: string;
 }
 
 export type PaymentStatus = 'pendiente' | 'pagado';
@@ -51,6 +61,7 @@ export interface Order {
   metodoPago?: PaymentMethod;
   paymentStatus?: PaymentStatus;
   paymentAllocations?: PaymentAllocation[];
+  creditInfo?: OrderCreditInfo;
 }
 
 export interface InventoryAlert {
@@ -76,6 +87,20 @@ export interface Empleado {
   activo: boolean;
   created_at?: Date;
   updated_at?: Date;
+}
+
+export interface EmployeeCreditHistoryEntry {
+  id: string;
+  orderId?: string;
+  orderNumero?: number;
+  monto: number;
+  timestamp: string;
+}
+
+export interface EmployeeCreditRecord {
+  empleadoId: string;
+  total: number;
+  history: EmployeeCreditHistoryEntry[];
 }
 
 export interface Gasto {
@@ -118,6 +143,7 @@ export type ModuleType =
   | 'clientes'
   | 'empleados'
   | 'gastos'
+  | 'creditoClientes'
   | 'analitica';
 
 export type UserRole = 'admin' | 'employee';

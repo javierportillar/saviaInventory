@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Empleado } from '../types';
 import {
   Users,
@@ -9,11 +9,12 @@ import {
   DollarSign,
   CalendarDays,
   RefreshCcw,
-  X
+  X,
+  CreditCard
 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
-import dataService from '../lib/dataService';
+import dataService, { EMPLOYEE_CREDIT_UPDATED_EVENT } from '../lib/dataService';
 
 type DayKey = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 
@@ -163,10 +164,42 @@ export function Empleados() {
   const [scheduleWeek, setScheduleWeek] = useState<string>(getCurrentWeekKey());
   const [modalBaseSchedule, setModalBaseSchedule] = useState<WeeklySchedule | null>(null);
   const [modalWeeklyHours, setModalWeeklyHours] = useState<WeeklyHours | null>(null);
+  const [employeeCredits, setEmployeeCredits] = useState<Record<string, number>>({});
+
+  const refreshEmployeeCredits = useCallback(async () => {
+    try {
+      const credits = await dataService.fetchEmployeeCredits();
+      const map = credits.reduce<Record<string, number>>((acc, entry) => {
+        acc[entry.empleadoId] = Math.max(0, Math.round(entry.total));
+        return acc;
+      }, {});
+      setEmployeeCredits(map);
+    } catch (error) {
+      console.error('Error cargando créditos de empleados:', error);
+    }
+  }, []);
 
   useEffect(() => {
     fetchEmpleados();
   }, []);
+
+  useEffect(() => {
+    refreshEmployeeCredits();
+
+    const handleUpdate = () => {
+      refreshEmployeeCredits();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener(EMPLOYEE_CREDIT_UPDATED_EVENT, handleUpdate);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener(EMPLOYEE_CREDIT_UPDATED_EVENT, handleUpdate);
+      }
+    };
+  }, [refreshEmployeeCredits]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -925,6 +958,20 @@ export function Empleados() {
                       {formatCOP(calcularSalarioMensual(baseSchedule, empleado.salario_hora))}
                     </p>
                   </div>
+                </div>
+                <div className="mt-4 rounded-lg bg-gray-50 p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-gray-600">
+                      <CreditCard size={16} />
+                      <span>Crédito acumulado</span>
+                    </div>
+                    <span className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                      {formatCOP(employeeCredits[empleado.id] ?? 0)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Registra abonos desde la caja con el método "Crédito empleados".
+                  </p>
                 </div>
               </div>
             </div>

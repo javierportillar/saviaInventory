@@ -10,6 +10,8 @@ import {
   PaymentAllocation,
   PaymentStatus,
   DatabaseConnectionState,
+  EmployeeCreditRecord,
+  EmployeeCreditHistoryEntry,
 } from '../types';
 import { supabase } from './supabaseClient';
 import { getLocalData, setLocalData } from '../data/localData';
@@ -62,7 +64,111 @@ export const checkDatabaseConnection = async (): Promise<DatabaseConnectionState
   }
 };
 
-const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi'];
+const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi', 'credito_empleados'];
+
+const EMPLOYEE_CREDITS_STORAGE_KEY = 'savia-employee-credits';
+export const EMPLOYEE_CREDIT_UPDATED_EVENT = 'savia-employee-credit-updated';
+
+const generateLocalId = () => {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch (error) {
+    console.warn('[dataService] No se pudo generar un UUID con crypto.randomUUID.', error);
+  }
+  return `credit-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const normalizeCreditHistoryEntry = (entry: Partial<EmployeeCreditHistoryEntry>): EmployeeCreditHistoryEntry => ({
+  id: typeof entry.id === 'string' && entry.id.trim().length > 0 ? entry.id : generateLocalId(),
+  orderId: typeof entry.orderId === 'string' ? entry.orderId : undefined,
+  orderNumero: typeof entry.orderNumero === 'number' ? entry.orderNumero : undefined,
+  monto: Math.max(0, Math.round(Number(entry.monto) || 0)),
+  timestamp: typeof entry.timestamp === 'string' ? entry.timestamp : new Date().toISOString(),
+});
+
+const normalizeEmployeeCreditRecord = (record: any): EmployeeCreditRecord | null => {
+  if (!record || typeof record !== 'object') {
+    return null;
+  }
+
+  const empleadoId = typeof record.empleadoId === 'string' ? record.empleadoId : undefined;
+  if (!empleadoId) {
+    return null;
+  }
+
+  const total = Math.max(0, Math.round(Number(record.total) || 0));
+  const historySource = Array.isArray(record.history) ? record.history : [];
+  const history = historySource
+    .map((entry) => normalizeCreditHistoryEntry(entry))
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  return {
+    empleadoId,
+    total,
+    history,
+  };
+};
+
+const loadEmployeeCredits = (): EmployeeCreditRecord[] => {
+  const raw = getLocalData<any[]>(EMPLOYEE_CREDITS_STORAGE_KEY, []);
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .map((entry) => normalizeEmployeeCreditRecord(entry))
+    .filter((entry): entry is EmployeeCreditRecord => entry !== null);
+};
+
+const persistEmployeeCredits = (records: EmployeeCreditRecord[]): void => {
+  setLocalData(EMPLOYEE_CREDITS_STORAGE_KEY, records);
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent(EMPLOYEE_CREDIT_UPDATED_EVENT));
+  }
+};
+
+export const fetchEmployeeCredits = async (): Promise<EmployeeCreditRecord[]> => {
+  return loadEmployeeCredits();
+};
+
+interface AddEmployeeCreditOptions {
+  empleadoId: string;
+  monto: number;
+  orderId?: string;
+  orderNumero?: number;
+}
+
+export const addEmployeeCredit = async ({ empleadoId, monto, orderId, orderNumero }: AddEmployeeCreditOptions): Promise<void> => {
+  const amount = Math.max(0, Math.round(Number(monto) || 0));
+  if (!empleadoId || amount <= 0) {
+    return;
+  }
+
+  const records = loadEmployeeCredits();
+  const entryIndex = records.findIndex((record) => record.empleadoId === empleadoId);
+  const historyEntry = normalizeCreditHistoryEntry({
+    orderId,
+    orderNumero,
+    monto: amount,
+  });
+
+  if (entryIndex !== -1) {
+    const target = { ...records[entryIndex] };
+    target.total = Math.max(0, Math.round(target.total + amount));
+    target.history = [historyEntry, ...target.history];
+    records[entryIndex] = target;
+  } else {
+    records.push({
+      empleadoId,
+      total: amount,
+      history: [historyEntry],
+    });
+  }
+
+  persistEmployeeCredits(records);
+};
 
 const toOptionalPaymentMethod = (method?: string | null): PaymentMethod | undefined => {
   if (method && PAYMENT_METHODS.includes(method as PaymentMethod)) {
@@ -90,9 +196,16 @@ const extractPaymentMethodValue = (record: any): string | null => {
 
 const SUPABASE_PAYMENT_COLUMN = 'metodopago';
 
+interface OrderCreditMetadata {
+  type: 'empleados';
+  amount: number;
+  assignedAt: string;
+}
+
 interface OrderMetadata {
   paymentStatus?: PaymentStatus;
   paymentAllocations?: PaymentAllocation[];
+  credit?: OrderCreditMetadata;
 }
 
 const ORDER_METADATA_KEY = 'savia-order-metadata';
@@ -110,7 +223,10 @@ const getOrderMetadata = (orderId: string): OrderMetadata | undefined => {
   return metadata[orderId];
 };
 
-const mergeOrderMetadata = (orderId: string, updates: OrderMetadata): OrderMetadata => {
+const mergeOrderMetadata = (
+  orderId: string,
+  updates: Partial<OrderMetadata> & { credit?: OrderCreditMetadata | null }
+): OrderMetadata => {
   const metadata = loadOrderMetadataMap();
   const existing = metadata[orderId] ?? {};
   const next: OrderMetadata = { ...existing };
@@ -125,7 +241,18 @@ const mergeOrderMetadata = (orderId: string, updates: OrderMetadata): OrderMetad
     next.paymentAllocations = sanitizeAllocations(updates.paymentAllocations ?? []);
   }
 
-  if (!next.paymentStatus && (!next.paymentAllocations || next.paymentAllocations.length === 0)) {
+  if ('credit' in updates) {
+    if (updates.credit) {
+      next.credit = updates.credit;
+    } else {
+      delete next.credit;
+    }
+  }
+
+  const hasPaymentInfo = !!next.paymentStatus || (next.paymentAllocations && next.paymentAllocations.length > 0);
+  const hasCreditInfo = !!next.credit;
+
+  if (!hasPaymentInfo && !hasCreditInfo) {
     delete metadata[orderId];
   } else {
     metadata[orderId] = next;
@@ -144,10 +271,19 @@ const clearOrderMetadata = (orderId: string): void => {
 };
 
 const syncOrderMetadata = (order: Order): void => {
-  const updates: OrderMetadata = {
+  const updates: Partial<OrderMetadata> & { credit?: OrderCreditMetadata | null } = {
     paymentStatus: order.paymentStatus,
     paymentAllocations: order.paymentAllocations ?? [],
   };
+  if (order.creditInfo) {
+    updates.credit = {
+      type: order.creditInfo.type,
+      amount: Math.round(order.creditInfo.amount),
+      assignedAt: order.creditInfo.assignedAt.toISOString(),
+    };
+  } else {
+    updates.credit = null;
+  }
   mergeOrderMetadata(order.id, updates);
 };
 
@@ -387,10 +523,25 @@ const mapOrderRecord = (record: any): Order => {
       ? 'pagado'
       : 'pendiente');
 
+  let creditInfo: OrderCreditInfo | undefined;
+  const creditMeta = metadata?.credit;
+  if (creditMeta && creditMeta.type === 'empleados') {
+    const assignedAtRaw = creditMeta.assignedAt ? new Date(creditMeta.assignedAt) : new Date(timestamp);
+    const assignedAt = Number.isNaN(assignedAtRaw.getTime()) ? new Date(timestamp) : assignedAtRaw;
+    creditInfo = {
+      type: 'empleados',
+      amount: Math.round(
+        typeof creditMeta.amount === 'number' ? creditMeta.amount : Math.round(baseOrder.total)
+      ),
+      assignedAt,
+    };
+  }
+
   return {
     ...baseOrder,
     paymentAllocations: mergedAllocations,
     paymentStatus,
+    creditInfo,
   };
 };
 
@@ -821,6 +972,19 @@ export const recordOrderPayment = async (
     ?? order.metodoPago
     ?? 'efectivo';
 
+  const creditAllocations = sanitizedAllocations.filter(
+    (allocation) => allocation.metodo === 'credito_empleados' && allocation.empleadoId
+  );
+
+  for (const allocation of creditAllocations) {
+    await addEmployeeCredit({
+      empleadoId: allocation.empleadoId!,
+      monto: allocation.monto,
+      orderId: order.id,
+      orderNumero: order.numero,
+    });
+  }
+
   if (await ensureSupabaseReady()) {
     try {
       const { error } = await supabase
@@ -838,9 +1002,43 @@ export const recordOrderPayment = async (
     metodoPago: primaryMethod,
     paymentAllocations: sanitizedAllocations,
     paymentStatus,
+    creditInfo: paymentStatus === 'pagado' ? undefined : order.creditInfo,
   };
 
   syncOrderMetadata(updatedOrder);
+  upsertLocalOrder(updatedOrder);
+  return updatedOrder;
+};
+
+export const assignOrderCredit = async (
+  order: Order,
+  options?: { amount?: number }
+): Promise<Order> => {
+  const amount = Math.max(0, Math.round(options?.amount ?? order.total));
+  const assignedAt = new Date();
+  const creditMetadata: OrderCreditMetadata = {
+    type: 'empleados',
+    amount,
+    assignedAt: assignedAt.toISOString(),
+  };
+
+  mergeOrderMetadata(order.id, {
+    paymentStatus: 'pendiente',
+    paymentAllocations: [],
+    credit: creditMetadata,
+  });
+
+  const updatedOrder: Order = {
+    ...order,
+    paymentStatus: 'pendiente',
+    paymentAllocations: [],
+    creditInfo: {
+      type: 'empleados',
+      amount,
+      assignedAt,
+    },
+  };
+
   upsertLocalOrder(updatedOrder);
   return updatedOrder;
 };
@@ -1251,6 +1449,7 @@ export const dataService = {
   fetchOrders,
   createOrder,
   recordOrderPayment,
+  assignOrderCredit,
   updateOrder,
   deleteOrder,
   updateOrderStatus,
@@ -1262,6 +1461,7 @@ export const dataService = {
   createEmpleado,
   updateEmpleado,
   deleteEmpleado,
+  fetchEmployeeCredits,
   fetchGastos,
   createGasto,
   updateGasto,

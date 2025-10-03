@@ -83,9 +83,10 @@ interface CajaProps {
   onModuleChange: (module: ModuleType) => void;
   onCreateOrder: (order: Order) => Promise<void>;
   onRecordOrderPayment: (order: Order, allocations: PaymentAllocation[]) => Promise<void>;
+  onAssignOrderCredit: (order: Order) => Promise<void>;
 }
 
-export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayment }: CajaProps) {
+export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayment, onAssignOrderCredit }: CajaProps) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -424,6 +425,23 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     } catch (error) {
       console.error('Error al registrar el pago:', error);
       alert('No se pudo registrar el pago. Inténtalo nuevamente.');
+    } finally {
+      setIsRecordingPayment(false);
+    }
+  };
+
+  const handleAssignCredit = async () => {
+    if (!paymentModalOrder) {
+      return;
+    }
+
+    try {
+      setIsRecordingPayment(true);
+      await onAssignOrderCredit(paymentModalOrder);
+      setPaymentModalOrder(null);
+    } catch (error) {
+      console.error('Error al asignar el pedido a crédito de empleados:', error);
+      alert('No se pudo asignar el crédito. Inténtalo nuevamente.');
     } finally {
       setIsRecordingPayment(false);
     }
@@ -970,6 +988,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
           onSubmit={handleSubmitPayment}
           isSubmitting={isRecordingPayment}
           title="Gestionar pago"
+          onAssignCredit={handleAssignCredit}
         />
       )}
     </div>

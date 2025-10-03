@@ -13,7 +13,8 @@ import {
   BarChart3,
   LogOut,
   Menu,
-  X
+  X,
+  CreditCard
 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 
@@ -35,6 +36,7 @@ const modules = [
   { id: 'clientes' as ModuleType, label: 'Clientes', icon: Users },
   { id: 'empleados' as ModuleType, label: 'Empleados', icon: UserCheck },
   { id: 'gastos' as ModuleType, label: 'Gastos', icon: Receipt },
+  { id: 'creditoClientes' as ModuleType, label: 'Crédito Clientes', icon: CreditCard },
   { id: 'analitica' as ModuleType, label: 'Analítica', icon: BarChart3 },
 ];
 
@@ -44,7 +46,7 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
   const allowedModules =
     user.role === 'admin'
       ? modules
-      : modules.filter(m => ['caja', 'comandas', 'cocina', 'clientes', 'gastos','inventario'].includes(m.id));
+      : modules.filter(m => ['caja', 'comandas', 'cocina', 'clientes', 'gastos', 'inventario', 'creditoClientes'].includes(m.id));
 
   const statusConfig: Record<DatabaseConnectionState, { label: string; dotClass: string; textClass: string }> = {
     checking: {

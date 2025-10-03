@@ -46,6 +46,7 @@ interface ComandasProps {
   onRecordOrderPayment: (order: Order, allocations: PaymentAllocation[]) => Promise<void>;
   onDeleteOrder: (orderId: string) => Promise<void>;
   isAdmin: boolean;
+  onAssignOrderCredit: (order: Order) => Promise<void>;
 }
 
 interface EditingOrder {
@@ -54,9 +55,10 @@ interface EditingOrder {
   total: number;
 }
 
-export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRecordOrderPayment, onDeleteOrder, isAdmin }: ComandasProps) {
+export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRecordOrderPayment, onDeleteOrder, isAdmin, onAssignOrderCredit }: ComandasProps) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [editingOrder, setEditingOrder] = useState<EditingOrder | null>(null);
+  const [expandedActionsOrderId, setExpandedActionsOrderId] = useState<string | null>(null);
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [bowlModalItem, setBowlModalItem] = useState<MenuItem | null>(null);
@@ -237,6 +239,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
   };
 
   const startEditingOrder = (order: Order) => {
+    setExpandedActionsOrderId(null);
     setEditingOrder({
       orderId: order.id,
       items: order.items.map((cartItem) => ({
@@ -445,11 +448,30 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     }
   };
 
-  const openPaymentModal = (order: Order) => {
-    if (isOrderPaid(order)) {
+  const openPaymentModal = (
+    order: Order,
+    options?: {
+      force?: boolean;
+      overrideItems?: CartItem[];
+      overrideTotal?: number;
+    }
+  ) => {
+    const shouldForce = options?.force ?? false;
+
+    if (!shouldForce && isOrderPaid(order)) {
       return;
     }
-    setPaymentOrder(order);
+
+    const orderForPayment = options?.overrideItems
+      ? {
+          ...order,
+          items: options.overrideItems,
+          total: options.overrideTotal ?? calculateCartTotal(options.overrideItems),
+        }
+      : order;
+
+    setExpandedActionsOrderId(null);
+    setPaymentOrder(orderForPayment);
   };
 
   const handlePaymentModalClose = () => {
@@ -475,6 +497,23 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     }
   };
 
+  const handleAssignCredit = async () => {
+    if (!paymentOrder) {
+      return;
+    }
+
+    try {
+      setIsRecordingPayment(true);
+      await onAssignOrderCredit(paymentOrder);
+      setPaymentOrder(null);
+    } catch (error) {
+      console.error('Error al asignar la comanda a crédito de empleados:', error);
+      alert('No se pudo asignar el crédito. Inténtalo nuevamente.');
+    } finally {
+      setIsRecordingPayment(false);
+    }
+  };
+
   const handleDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
     setSelectedDateKey(value || getDateKey(new Date()));
@@ -493,6 +532,10 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     setCurrentPage(page);
   };
 
+  const toggleOrderActions = (orderId: string) => {
+    setExpandedActionsOrderId(prev => (prev === orderId ? null : orderId));
+  };
+
   const filteredMenuItems = menuItems.filter(item => {
     const query = searchQuery.toLowerCase();
     const matchesSearch =
@@ -507,7 +550,10 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     const allocations = getOrderAllocations(order);
     const paymentSummary = formatPaymentSummary(allocations, formatCOP);
     const paid = isOrderPaid(order);
+    const canModifyOrder = paid;
+    const showPaymentResetNotice = paid && isAdmin;
     const isDeleting = deletingOrderId === order.id;
+    const isActionsExpanded = expandedActionsOrderId === order.id;
 
     return (
       <div
@@ -526,6 +572,22 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
               {getStatusIcon(order.estado)}
               <span className="hidden lg:inline">{order.estado}</span>
             </span>
+            {order.estado === 'entregado' && canModifyOrder && editingOrder?.orderId !== order.id && (
+              <button
+                type="button"
+                onClick={() => toggleOrderActions(order.id)}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs lg:text-sm font-medium border transition-colors shadow-sm ${
+                  isActionsExpanded
+                    ? 'bg-blue-600 border-blue-600 text-white hover:bg-blue-700'
+                    : 'text-blue-600 border-blue-200 hover:border-blue-600 hover:bg-blue-600 hover:text-white'
+                }`}
+                title={isActionsExpanded ? 'Ocultar acciones' : 'Editar comanda'}
+                aria-pressed={isActionsExpanded}
+              >
+                <Edit3 size={14} />
+                <span className="hidden sm:inline">Editar</span>
+              </button>
+            )}
             {isAdmin && (
               <button
                 type="button"
@@ -676,23 +738,44 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
                 </span>
               </div>
 
-              <div className="flex gap-2">
-                <button
-                  onClick={saveOrderChanges}
-                  disabled={isSavingOrderChanges}
-                  className="flex-1 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Save size={14} />
-                  {isSavingOrderChanges ? 'Guardando...' : 'Guardar'}
-                </button>
-                <button
-                  onClick={cancelEditing}
-                  disabled={isSavingOrderChanges}
-                  className="flex-1 py-2 bg-gray-400 text-white rounded-lg text-sm font-medium hover:bg-gray-500 flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <X size={14} />
-                  Cancelar
-                </button>
+              <div className="flex flex-col gap-2">
+                {canModifyOrder && (
+                  <button
+                    onClick={() => openPaymentModal(order, {
+                      force: paid,
+                      overrideItems: editingOrder.items,
+                      overrideTotal: editingOrder.total,
+                    })}
+                    disabled={isSavingOrderChanges || (paid && !isAdmin)}
+                    className="w-full py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <CreditCard size={14} />
+                    {paid ? 'Modificar pago' : 'Registrar pago'}
+                  </button>
+                )}
+                {canModifyOrder && showPaymentResetNotice && (
+                  <p className="text-[11px] text-gray-500 text-center">
+                    Al guardar se restablecerá el estado del pago actual.
+                  </p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={saveOrderChanges}
+                    disabled={isSavingOrderChanges}
+                    className="flex-1 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Save size={14} />
+                    {isSavingOrderChanges ? 'Guardando...' : 'Guardar'}
+                  </button>
+                  <button
+                    onClick={cancelEditing}
+                    disabled={isSavingOrderChanges}
+                    className="flex-1 py-2 bg-gray-400 text-white rounded-lg text-sm font-medium hover:bg-gray-500 flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <X size={14} />
+                    Cancelar
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -748,26 +831,38 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
             <div className="space-y-2">
               {order.estado === 'entregado' ? (
                 <div className="space-y-2">
-                  {!paid ? (
-                    <>
-                      <button
-                        onClick={() => startEditingOrder(order)}
-                        className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm flex items-center justify-center gap-1"
-                      >
-                        <Edit3 size={14} />
-                        Modificar pedido
-                      </button>
-                      <button
-                        onClick={() => openPaymentModal(order)}
-                        className="w-full py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm"
-                      >
-                        Registrar pago
-                      </button>
-                    </>
+                  {paid ? (
+                    isActionsExpanded && (
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => startEditingOrder(order)}
+                          className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm"
+                        >
+                          Modificar pedido
+                        </button>
+                        <button
+                          onClick={() => openPaymentModal(order, { force: paid })}
+                          disabled={!isAdmin}
+                          className="w-full py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+                        >
+                          <CreditCard size={14} />
+                          Modificar pago
+                        </button>
+                        {showPaymentResetNotice && (
+                          <p className="text-[11px] text-gray-500 text-center">
+                            Al guardar los cambios se restablecerá el estado del pago.
+                          </p>
+                        )}
+                      </div>
+                    )
                   ) : (
-                    <p className="text-xs text-gray-500 text-center">
-                      Pago registrado. No es posible modificar la comanda.
-                    </p>
+                    <button
+                      onClick={() => openPaymentModal(order)}
+                      className="w-full py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm flex items-center justify-center gap-1"
+                    >
+                      <CreditCard size={14} />
+                      Registrar pago
+                    </button>
                   )}
                 </div>
               ) : (
@@ -922,6 +1017,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
           onSubmit={handleSubmitPayment}
           isSubmitting={isRecordingPayment}
           title="Gestionar pago"
+          onAssignCredit={handleAssignCredit}
         />
       )}
 

@@ -1,17 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { COLORS } from '../data/menu';
-import { CartItem, Order, PaymentAllocation, PaymentMethod } from '../types';
+import { CartItem, Empleado, Order, PaymentAllocation, PaymentMethod } from '../types';
 import {
   formatPaymentSummary,
   getAllocationsTotal,
   getOrderAllocations,
   mergeAllocations,
   PAYMENT_METHODS,
+  PAYMENT_METHOD_LABELS,
   sanitizeAllocations,
 } from '../utils/payments';
 import { formatCOP } from '../utils/format';
 import { getCartItemEffectiveUnitPrice } from '../utils/cart';
+import dataService, { EMPLOYEE_CREDIT_UPDATED_EVENT } from '../lib/dataService';
 
 interface PaymentModalProps {
   order: Order;
@@ -19,6 +21,7 @@ interface PaymentModalProps {
   onSubmit: (allocations: PaymentAllocation[]) => Promise<void> | void;
   isSubmitting?: boolean;
   title?: string;
+  onAssignCredit?: () => Promise<void> | void;
 }
 
 type PaymentMode = 'single' | 'split';
@@ -37,25 +40,22 @@ interface SplitPersonState {
   name: string;
   method: PaymentMethod;
   itemQuantities: Record<string, number>;
+  employeeId?: string;
 }
 
 const emptySelection = (): Record<PaymentMethod, boolean> => ({
   efectivo: false,
   tarjeta: false,
   nequi: false,
+  credito_empleados: false,
 });
 
 const emptyAmounts = (): Record<PaymentMethod, string> => ({
   efectivo: '',
   tarjeta: '',
   nequi: '',
+  credito_empleados: '',
 });
-
-const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
-  efectivo: 'Efectivo',
-  tarjeta: 'Tarjeta',
-  nequi: 'Nequi',
-};
 
 const toPositiveInteger = (value: string): number => {
   const numeric = Number(value);
@@ -146,7 +146,14 @@ const applySplitQuantityChange = (
   });
 };
 
-export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, title }: PaymentModalProps) {
+export function PaymentModal({
+  order,
+  onClose,
+  onSubmit,
+  isSubmitting = false,
+  title,
+  onAssignCredit,
+}: PaymentModalProps) {
   const total = useMemo(() => Math.round(order.total), [order.total]);
   const assignableItems = useMemo<AssignableItem[]>(() => {
     return order.items.map((cartItem, index) => {
@@ -171,15 +178,56 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
     }, {});
   }, [assignableItems]);
 
+  const [employees, setEmployees] = useState<Empleado[]>([]);
+  const [employeeCredits, setEmployeeCredits] = useState<Record<string, number>>({});
+  const [selectedCreditEmployeeId, setSelectedCreditEmployeeId] = useState<string>('');
+
+  const activeEmployees = useMemo(
+    () => employees.filter((employee) => employee.activo),
+    [employees]
+  );
+
+  const hasActiveEmployees = activeEmployees.length > 0;
+
+  const getEmployeeNameById = useCallback(
+    (employeeId?: string) => {
+      if (!employeeId) {
+        return '';
+      }
+      const match = activeEmployees.find((employee) => employee.id === employeeId);
+      return match ? match.nombre : '';
+    },
+    [activeEmployees]
+  );
+
+  const getEmployeeOptionLabel = useCallback(
+    (employee: Empleado) => {
+      const total = employeeCredits[employee.id] ?? 0;
+      if (total > 0) {
+        return `${employee.nombre} · ${formatCOP(total)} pendientes`;
+      }
+      return employee.nombre;
+    },
+    [employeeCredits]
+  );
+
   const personCounterRef = useRef(1);
   const createSplitPerson = useCallback(
-    (options?: { name?: string; method?: PaymentMethod; itemQuantities?: Record<string, number> }) => {
+    (
+      options?: {
+        name?: string;
+        method?: PaymentMethod;
+        itemQuantities?: Record<string, number>;
+        employeeId?: string;
+      }
+    ) => {
       const index = personCounterRef.current++;
       return {
         id: `persona-${index}`,
         name: options?.name ?? `Persona ${index}`,
         method: options?.method ?? 'efectivo',
         itemQuantities: options?.itemQuantities ?? {},
+        employeeId: options?.employeeId,
       };
     },
     []
@@ -187,9 +235,52 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
 
   const existingAllocations = useMemo(() => getOrderAllocations(order), [order]);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadEmployeeData = async () => {
+      try {
+        const [employeeData, creditData] = await Promise.all([
+          dataService.fetchEmpleados(),
+          dataService.fetchEmployeeCredits().catch(() => []),
+        ]);
+
+        if (!active) {
+          return;
+        }
+
+        setEmployees(employeeData);
+        const creditMap = (creditData ?? []).reduce<Record<string, number>>((map, entry) => {
+          map[entry.empleadoId] = Math.max(0, Math.round(entry.total));
+          return map;
+        }, {});
+        setEmployeeCredits(creditMap);
+      } catch (error) {
+        console.error('No se pudieron cargar los empleados o créditos.', error);
+      }
+    };
+
+    loadEmployeeData();
+
+    const handleCreditUpdate = () => {
+      loadEmployeeData();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener(EMPLOYEE_CREDIT_UPDATED_EVENT, handleCreditUpdate);
+    }
+
+    return () => {
+      active = false;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener(EMPLOYEE_CREDIT_UPDATED_EVENT, handleCreditUpdate);
+      }
+    };
+  }, []);
+
   const [mode, setMode] = useState<PaymentMode>('single');
-  const [selectedMethods, setSelectedMethods] = useState<Record<PaymentMethod, boolean>>(emptySelection);
-  const [methodAmounts, setMethodAmounts] = useState<Record<PaymentMethod, string>>(emptyAmounts);
+  const [selectedMethods, setSelectedMethods] = useState<Record<PaymentMethod, boolean>>(() => emptySelection());
+  const [methodAmounts, setMethodAmounts] = useState<Record<PaymentMethod, string>>(() => emptyAmounts());
   const [feedback, setFeedback] = useState<string | null>(null);
 
   const buildInitialSplitState = useCallback((): SplitPersonState[] => {
@@ -201,12 +292,29 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
       return map;
     }, {});
 
-    const primaryMethod = existingAllocations[0]?.metodo ?? 'efectivo';
-    const secondaryMethod = existingAllocations[1]?.metodo ?? primaryMethod;
+    const primaryAllocation = existingAllocations[0];
+    const secondaryAllocation = existingAllocations[1];
+
+    const primaryMethod = primaryAllocation?.metodo ?? 'efectivo';
+    const secondaryMethod = secondaryAllocation?.metodo ?? primaryMethod;
+
+    const primaryEmployeeId =
+      primaryAllocation?.metodo === 'credito_empleados' ? primaryAllocation.empleadoId : undefined;
+    const secondaryEmployeeId =
+      secondaryAllocation?.metodo === 'credito_empleados' ? secondaryAllocation.empleadoId : undefined;
 
     return [
-      createSplitPerson({ name: 'Persona 1', method: primaryMethod, itemQuantities: baseAssignments }),
-      createSplitPerson({ name: 'Persona 2', method: secondaryMethod }),
+      createSplitPerson({
+        name: 'Persona 1',
+        method: primaryMethod,
+        itemQuantities: baseAssignments,
+        employeeId: primaryEmployeeId,
+      }),
+      createSplitPerson({
+        name: 'Persona 2',
+        method: secondaryMethod,
+        employeeId: secondaryEmployeeId,
+      }),
     ];
   }, [assignableItems, createSplitPerson, existingAllocations]);
 
@@ -218,26 +326,93 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
 
   useEffect(() => {
     if (existingAllocations.length === 0) {
-      setSelectedMethods({ efectivo: true, tarjeta: false, nequi: false });
-      setMethodAmounts({
-        efectivo: total > 0 ? String(total) : '',
-        tarjeta: '',
-        nequi: '',
-      });
+      const baseSelected = emptySelection();
+      baseSelected.efectivo = true;
+      const baseAmounts = emptyAmounts();
+      baseAmounts.efectivo = total > 0 ? String(total) : '';
+      setSelectedMethods(baseSelected);
+      setMethodAmounts(baseAmounts);
+      setSelectedCreditEmployeeId('');
       setFeedback(null);
       return;
     }
 
     const nextSelected = emptySelection();
     const nextAmounts = emptyAmounts();
+    let creditEmployeeId: string | undefined;
     existingAllocations.forEach((allocation) => {
       nextSelected[allocation.metodo] = true;
       nextAmounts[allocation.metodo] = String(Math.round(allocation.monto));
+      if (allocation.metodo === 'credito_empleados' && allocation.empleadoId) {
+        creditEmployeeId = allocation.empleadoId;
+      }
     });
     setSelectedMethods(nextSelected);
     setMethodAmounts(nextAmounts);
+    setSelectedCreditEmployeeId(creditEmployeeId ?? '');
     setFeedback(null);
   }, [existingAllocations, total]);
+
+  useEffect(() => {
+    if (!selectedMethods['credito_empleados']) {
+      if (selectedCreditEmployeeId) {
+        setSelectedCreditEmployeeId('');
+      }
+      return;
+    }
+
+    if (!hasActiveEmployees) {
+      if (selectedCreditEmployeeId) {
+        setSelectedCreditEmployeeId('');
+      }
+      return;
+    }
+
+    if (
+      selectedCreditEmployeeId &&
+      activeEmployees.some((employee) => employee.id === selectedCreditEmployeeId)
+    ) {
+      return;
+    }
+
+    const fallbackId = activeEmployees[0]?.id ?? '';
+    setSelectedCreditEmployeeId(fallbackId);
+  }, [selectedMethods, selectedCreditEmployeeId, activeEmployees, hasActiveEmployees]);
+
+  useEffect(() => {
+    setSplitPersons((prev) => {
+      let hasChanges = false;
+      const next = prev.map((person) => {
+        if (person.method !== 'credito_empleados') {
+          if (person.employeeId !== undefined) {
+            hasChanges = true;
+            return { ...person, employeeId: undefined };
+          }
+          return person;
+        }
+
+        if (!hasActiveEmployees) {
+          if (person.employeeId !== undefined) {
+            hasChanges = true;
+            return { ...person, employeeId: undefined };
+          }
+          return person;
+        }
+
+        if (
+          person.employeeId &&
+          activeEmployees.some((employee) => employee.id === person.employeeId)
+        ) {
+          return person;
+        }
+
+        hasChanges = true;
+        return { ...person, employeeId: activeEmployees[0]?.id };
+      });
+
+      return hasChanges ? next : prev;
+    });
+  }, [activeEmployees, hasActiveEmployees]);
 
   const previousOrderIdRef = useRef(order.id);
   useEffect(() => {
@@ -260,11 +435,21 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
 
   const singleAllocations: PaymentAllocation[] = useMemo(
     () =>
-      selectedList.map((method) => ({
-        metodo: method,
-        monto: toPositiveInteger(methodAmounts[method]),
-      })),
-    [methodAmounts, selectedList]
+      selectedList.map((method) => {
+        const allocation: PaymentAllocation = {
+          metodo: method,
+          monto: toPositiveInteger(methodAmounts[method]),
+        };
+        if (method === 'credito_empleados' && selectedCreditEmployeeId) {
+          allocation.empleadoId = selectedCreditEmployeeId;
+          const employeeName = getEmployeeNameById(selectedCreditEmployeeId);
+          if (employeeName) {
+            allocation.empleadoNombre = employeeName;
+          }
+        }
+        return allocation;
+      }),
+    [methodAmounts, selectedList, selectedCreditEmployeeId, getEmployeeNameById]
   );
 
   const singlePaidTotal = useMemo(() => getAllocationsTotal(singleAllocations), [singleAllocations]);
@@ -272,7 +457,15 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
   const singleHasEmptyAmounts = singleAllocations.some((allocation) => allocation.monto <= 0);
   const singleHasSelection = selectedList.length > 0;
   const singleIsExactAmount = Math.abs(singleRemaining) <= 1;
-  const singleCanSubmit = singleHasSelection && !singleHasEmptyAmounts && singleIsExactAmount && total > 0;
+  const singleCreditMissingEmployee = selectedList.some(
+    (method) => method === 'credito_empleados' && !selectedCreditEmployeeId
+  );
+  const singleCanSubmit =
+    singleHasSelection &&
+    !singleHasEmptyAmounts &&
+    singleIsExactAmount &&
+    total > 0 &&
+    !singleCreditMissingEmployee;
 
   const splitItemStatus = useMemo(() => {
     return assignableItems.reduce<Record<string, { assigned: number; remaining: number }>>((acc, item) => {
@@ -303,10 +496,18 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
         if (amount <= 0) {
           return null;
         }
-        return { metodo: person.method, monto: amount } as PaymentAllocation;
+        const allocation: PaymentAllocation = { metodo: person.method, monto: amount };
+        if (person.method === 'credito_empleados' && person.employeeId) {
+          allocation.empleadoId = person.employeeId;
+          const employeeName = getEmployeeNameById(person.employeeId);
+          if (employeeName) {
+            allocation.empleadoNombre = employeeName;
+          }
+        }
+        return allocation;
       })
       .filter((entry): entry is PaymentAllocation => entry !== null);
-  }, [splitPersons, splitTotalsByPerson]);
+  }, [splitPersons, splitTotalsByPerson, getEmployeeNameById]);
 
   const splitPaidTotal = useMemo(() => getAllocationsTotal(splitAllocations), [splitAllocations]);
   const splitAllItemsAssigned = useMemo(
@@ -315,6 +516,10 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
   );
   const splitHasAssignments = splitAllocations.length > 0;
   const splitTotalsMatch = Math.abs(splitPaidTotal - total) <= 1;
+  const splitHasMissingEmployee = useMemo(
+    () => splitPersons.some((person) => person.method === 'credito_empleados' && !person.employeeId),
+    [splitPersons]
+  );
 
   const paidTotal = mode === 'split' ? splitPaidTotal : singlePaidTotal;
   const remaining = total - paidTotal;
@@ -324,10 +529,27 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
     [mode, singleAllocations, splitAllocations]
   );
 
+  const isCreditOrder = !!order.creditInfo;
+  const creditAmount = order.creditInfo?.amount ?? total;
+  const creditAssignedAtLabel = useMemo(() => {
+    if (!order.creditInfo) {
+      return '';
+    }
+    return order.creditInfo.assignedAt.toLocaleString('es-CO', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+  }, [order.creditInfo]);
+
   const handleToggleMethod = (method: PaymentMethod) => {
     setSelectedMethods((prevSelected) => {
-      const nextSelected = { ...prevSelected };
       const isCurrentlySelected = !!prevSelected[method];
+      if (!isCurrentlySelected && method === 'credito_empleados' && !hasActiveEmployees) {
+        setFeedback('No hay empleados activos para registrar créditos.');
+        return prevSelected;
+      }
+
+      const nextSelected = { ...prevSelected };
       nextSelected[method] = !isCurrentlySelected;
 
       setMethodAmounts((prevAmounts) => {
@@ -341,6 +563,19 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
         }
         return nextAmounts;
       });
+
+      if (!isCurrentlySelected && method === 'credito_empleados') {
+        if (
+          !selectedCreditEmployeeId ||
+          !activeEmployees.some((employee) => employee.id === selectedCreditEmployeeId)
+        ) {
+          setSelectedCreditEmployeeId(activeEmployees[0]?.id ?? '');
+        }
+      }
+
+      if (isCurrentlySelected && method === 'credito_empleados') {
+        setSelectedCreditEmployeeId('');
+      }
 
       setFeedback(null);
       return nextSelected;
@@ -394,8 +629,50 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
   };
 
   const handleSplitPersonMethodChange = (personId: string, method: PaymentMethod) => {
+    if (method === 'credito_empleados' && !hasActiveEmployees) {
+      setFeedback('No hay empleados activos para registrar créditos.');
+      return;
+    }
     setSplitPersons((prev) =>
-      prev.map((person) => (person.id === personId ? { ...person, method } : person))
+      prev.map((person) => {
+        if (person.id !== personId) {
+          return person;
+        }
+
+        if (method === 'credito_empleados') {
+          const validEmployeeId =
+            person.employeeId &&
+            activeEmployees.some((employee) => employee.id === person.employeeId)
+              ? person.employeeId
+              : activeEmployees[0]?.id;
+          return {
+            ...person,
+            method,
+            employeeId: validEmployeeId,
+          };
+        }
+
+        if (person.employeeId !== undefined) {
+          return { ...person, method, employeeId: undefined };
+        }
+
+        return { ...person, method };
+      })
+    );
+    setFeedback(null);
+  };
+
+  const handleSplitPersonEmployeeChange = (personId: string, employeeId: string) => {
+    setSplitPersons((prev) =>
+      prev.map((person) => {
+        if (person.id !== personId) {
+          return person;
+        }
+        return {
+          ...person,
+          employeeId: employeeId ? employeeId : undefined,
+        };
+      })
     );
     setFeedback(null);
   };
@@ -456,8 +733,16 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
         setFeedback('Los montos asignados no coinciden con el total del pedido.');
         return;
       }
+      if (splitHasMissingEmployee) {
+        setFeedback('Selecciona el empleado correspondiente para cada pago por crédito.');
+        return;
+      }
     } else if (!singleCanSubmit) {
-      setFeedback('Asegúrate de seleccionar al menos un método y que los montos sumen el total.');
+      if (singleCreditMissingEmployee) {
+        setFeedback('Selecciona el empleado al registrar un crédito.');
+      } else {
+        setFeedback('Asegúrate de seleccionar al menos un método y que los montos sumen el total.');
+      }
       return;
     }
 
@@ -471,6 +756,14 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
 
     setFeedback(null);
     await onSubmit(sanitized);
+  };
+
+  const handleAssignCredit = async () => {
+    if (!onAssignCredit || isSubmitting) {
+      return;
+    }
+    setFeedback(null);
+    await onAssignCredit();
   };
 
   return (
@@ -523,7 +816,7 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
                 <h4 className="text-sm font-semibold mb-2" style={{ color: COLORS.dark }}>
                   Selecciona los métodos de pago
                 </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                   {PAYMENT_METHODS.map((method) => {
                     const isActive = selectedMethods[method];
                     const label = PAYMENT_METHOD_LABELS[method];
@@ -543,6 +836,19 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
                       </button>
                     );
                   })}
+                  {onAssignCredit && !isCreditOrder && (
+                    <button
+                      type="button"
+                      onClick={handleAssignCredit}
+                      className="py-2 px-3 rounded-lg text-sm font-semibold transition-colors border border-yellow-200 text-yellow-900 bg-yellow-50 hover:bg-yellow-100 disabled:opacity-70 disabled:cursor-not-allowed"
+                      disabled={isSubmitting}
+                    >
+                      Crédito empleados
+                      <span className="block text-xs font-normal text-yellow-800">
+                        Lleva el pedido a crédito
+                      </span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -574,6 +880,33 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
                           style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
                           placeholder="Monto"
                         />
+                        {method === 'credito_empleados' && (
+                          <div className="flex flex-col gap-2">
+                            <label className="text-xs font-semibold text-gray-600" htmlFor={`credit-employee-${method}`}>
+                              Empleado
+                            </label>
+                            {hasActiveEmployees ? (
+                              <select
+                                id={`credit-employee-${method}`}
+                                value={selectedCreditEmployeeId}
+                                onChange={(event) => setSelectedCreditEmployeeId(event.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:border-transparent"
+                                style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+                              >
+                                <option value="">Selecciona un empleado</option>
+                                {activeEmployees.map((employee) => (
+                                  <option key={employee.id} value={employee.id}>
+                                    {getEmployeeOptionLabel(employee)}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <p className="text-xs text-red-600">
+                                No hay empleados activos disponibles para crédito.
+                              </p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -624,6 +957,7 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
                               </button>
                             )}
                           </div>
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:gap-3 gap-2">
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-semibold uppercase text-gray-500">Pago con</span>
                             <select
@@ -641,6 +975,33 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
                               ))}
                             </select>
                           </div>
+                          {person.method === 'credito_empleados' && (
+                            hasActiveEmployees ? (
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-semibold uppercase text-gray-500">Empleado</span>
+                                <select
+                                  value={person.employeeId ?? ''}
+                                  onChange={(event) =>
+                                    handleSplitPersonEmployeeChange(person.id, event.target.value)
+                                  }
+                                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:border-transparent"
+                                  style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+                                >
+                                  <option value="">Selecciona un empleado</option>
+                                  {activeEmployees.map((employee) => (
+                                    <option key={employee.id} value={employee.id}>
+                                      {getEmployeeOptionLabel(employee)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-red-600">
+                                No hay empleados activos
+                              </span>
+                            )
+                          )}
+                        </div>
                         </div>
                         <div className="text-sm text-gray-600">
                           Total asignado:{' '}
@@ -771,6 +1132,23 @@ export function PaymentModal({ order, onClose, onSubmit, isSubmitting = false, t
             <p className="text-xs text-gray-500">{summary}</p>
             {feedback && <p className="text-xs text-red-600">{feedback}</p>}
           </div>
+
+          {isCreditOrder ? (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+              <p className="font-semibold mb-1">Pedido asignado como crédito de empleados.</p>
+              <p>Monto pendiente: {formatCOP(Math.round(creditAmount))}</p>
+              <p>Asignado el: {creditAssignedAtLabel}</p>
+              <p className="mt-1">Registra el pago cuando el crédito sea cancelado para reflejarlo en el balance.</p>
+            </div>
+          ) : (
+            onAssignCredit && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800">
+                <p className="font-semibold mb-1">Crédito de empleados disponible.</p>
+                <p>Usa la opción "Crédito empleados" en los métodos de pago para enviar este pedido a crédito.</p>
+                <p className="mt-1">El monto no se sumará al balance hasta registrar el pago.</p>
+              </div>
+            )
+          )}
 
           <div className="flex gap-3 pt-2">
             <button

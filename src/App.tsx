@@ -11,6 +11,7 @@ import { Gastos } from './components/Gastos';
 import { Login } from './components/Login';
 import { Navigation } from './components/Navigation';
 import { Analitica } from './components/Analitica';
+import { CreditoClientes } from './components/CreditoClientes';
 import {
   ModuleType,
   User,
@@ -25,7 +26,7 @@ import { initializeLocalData } from './data/localData';
 import dataService from './lib/dataService';
 
 const SESSION_STORAGE_KEY = 'savia-user-session';
-const SESSION_DURATION_MS = 4 * 60 * 60 * 1000; // 4 horas
+const SESSION_DURATION_MS = 13 * 60 * 60 * 1000; // 13 horas
 
 interface StoredSession {
   user: User;
@@ -231,6 +232,20 @@ function App() {
     }
   };
 
+  const handleAssignOrderCredit = async (order: Order) => {
+    try {
+      const updatedOrder = await dataService.assignOrderCredit(order);
+      setOrders((prevOrders) =>
+        prevOrders.map((entry) =>
+          entry.id === updatedOrder.id ? updatedOrder : entry
+        )
+      );
+    } catch (error) {
+      console.error('Error asignando el pedido a crédito de empleados:', error);
+      throw error;
+    }
+  };
+
   const handleUpdateOrderStatus = async (targetOrder: Order, status: Order['estado']) => {
     try {
       const updatedOrder = await dataService.updateOrderStatus(targetOrder, status);
@@ -332,6 +347,7 @@ function App() {
             onModuleChange={handleModuleChange}
             onCreateOrder={handleCreateOrder}
             onRecordOrderPayment={handleRecordOrderPayment}
+            onAssignOrderCredit={handleAssignOrderCredit}
           />
         )}
         {module === 'comandas' && (
@@ -342,6 +358,7 @@ function App() {
             onRecordOrderPayment={handleRecordOrderPayment}
             onDeleteOrder={handleDeleteOrder}
             isAdmin={user.role === 'admin'}
+            onAssignOrderCredit={handleAssignOrderCredit}
           />
         )}
         {module === 'inventario' && (
@@ -368,6 +385,9 @@ function App() {
         )}
         {module === 'empleados' && <Empleados />}
         {module === 'gastos' && <Gastos />}
+        {module === 'creditoClientes' && (
+          <CreditoClientes orders={orders} />
+        )}
         {module === 'analitica' && user.role === 'admin' && (
           <Analitica orders={orders} />
         )}

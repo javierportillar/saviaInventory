@@ -1,6 +1,13 @@
 import { Order, PaymentAllocation, PaymentMethod, PaymentStatus } from '../types';
 
-export const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi'];
+export const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi', 'credito_empleados'];
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  efectivo: 'Efectivo',
+  tarjeta: 'Tarjeta',
+  nequi: 'Nequi',
+  credito_empleados: 'Crédito empleados',
+};
 
 const roundToCOP = (value: number): number => {
   if (!Number.isFinite(value)) {
@@ -24,18 +31,42 @@ export const sanitizeAllocations = (allocations?: PaymentAllocation[] | null): P
       if (amount <= 0) {
         return null;
       }
-      return { metodo: entry.metodo, monto: amount };
+      const allocation: PaymentAllocation = { metodo: entry.metodo, monto: amount };
+      if (entry.metodo === 'credito_empleados') {
+        if (!entry.empleadoId) {
+          return null;
+        }
+        allocation.empleadoId = entry.empleadoId;
+        if (entry.empleadoNombre) {
+          allocation.empleadoNombre = entry.empleadoNombre;
+        }
+      }
+      return allocation;
     })
     .filter((entry): entry is PaymentAllocation => entry !== null);
 };
 
 export const mergeAllocations = (allocations: PaymentAllocation[]): PaymentAllocation[] => {
-  const totals = new Map<PaymentMethod, number>();
+  const totals = new Map<string, PaymentAllocation>();
   allocations.forEach((entry) => {
-    const current = totals.get(entry.metodo) ?? 0;
-    totals.set(entry.metodo, current + entry.monto);
+    const key = entry.metodo === 'credito_empleados'
+      ? `${entry.metodo}:${entry.empleadoId ?? ''}`
+      : entry.metodo;
+    const existing = totals.get(key);
+    if (existing) {
+      existing.monto += entry.monto;
+      if (entry.empleadoNombre && !existing.empleadoNombre) {
+        existing.empleadoNombre = entry.empleadoNombre;
+      }
+    } else {
+      totals.set(key, { ...entry });
+    }
   });
-  return Array.from(totals.entries()).map(([metodo, monto]) => ({ metodo, monto: roundToCOP(monto) }));
+
+  return Array.from(totals.values()).map((entry) => ({
+    ...entry,
+    monto: roundToCOP(entry.monto),
+  }));
 };
 
 export const getAllocationsTotal = (allocations: PaymentAllocation[]): number => {
@@ -86,12 +117,10 @@ export const formatPaymentSummary = (
   }
 
   const parts = allocations.map((entry) => {
-    const label =
-      entry.metodo === 'efectivo'
-        ? 'Efectivo'
-        : entry.metodo === 'tarjeta'
-          ? 'Tarjeta'
-          : 'Nequi';
+    let label = PAYMENT_METHOD_LABELS[entry.metodo];
+    if (entry.metodo === 'credito_empleados' && entry.empleadoNombre) {
+      label = `${label} (${entry.empleadoNombre})`;
+    }
     return `${label}: ${formatCurrency(entry.monto)}`;
   });
 

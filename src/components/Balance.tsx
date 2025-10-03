@@ -19,9 +19,10 @@ const methodLabels: Record<PaymentMethod, string> = {
   efectivo: 'Efectivo',
   nequi: 'Nequi',
   tarjeta: 'Tarjeta',
+  credito_empleados: 'Crédito empleados',
 };
 
-const methodOrder: PaymentMethod[] = ['efectivo', 'nequi', 'tarjeta'];
+const methodOrder: PaymentMethod[] = ['efectivo', 'nequi', 'tarjeta', 'credito_empleados'];
 
 const valueColor = (value: number) => (value >= 0 ? 'text-green-600' : 'text-red-600');
 
@@ -45,6 +46,7 @@ const emptyMethodTotals = (): MethodTotalsDetail => ({
   efectivo: { ingresos: 0, egresos: 0 },
   nequi: { ingresos: 0, egresos: 0 },
   tarjeta: { ingresos: 0, egresos: 0 },
+  credito_empleados: { ingresos: 0, egresos: 0 },
 });
 
 const computeMethodTotals = (orders: Order[], gastos: Gasto[]): MethodTotalsDetail => {
@@ -182,7 +184,8 @@ export function Balance() {
   );
 
   const totals = useMemo(() => {
-    const ventas = filteredOrders.reduce((acc, order) => acc + order.total, 0);
+    const paidOrders = filteredOrders.filter(isOrderPaid);
+    const ventas = paidOrders.reduce((acc, order) => acc + order.total, 0);
     const gastosTotal = filteredGastos.reduce((acc, gasto) => acc + gasto.monto, 0);
 
     return {
@@ -193,7 +196,8 @@ export function Balance() {
   }, [filteredOrders, filteredGastos]);
 
   const overallTotals = useMemo(() => {
-    const ventas = orders.reduce((acc, order) => acc + order.total, 0);
+    const paidOrders = orders.filter(isOrderPaid);
+    const ventas = paidOrders.reduce((acc, order) => acc + order.total, 0);
     const gastosTotal = gastos.reduce((acc, gasto) => acc + gasto.monto, 0);
 
     return {

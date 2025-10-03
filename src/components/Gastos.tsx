@@ -34,7 +34,8 @@ export function Gastos() {
   const paymentLabels: Record<PaymentMethod, string> = {
     efectivo: 'Efectivo',
     tarjeta: 'Tarjeta',
-    nequi: 'Nequi'
+    nequi: 'Nequi',
+    credito_empleados: 'Crédito empleados'
   };
 
   const categorias = [
