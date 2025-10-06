@@ -66,72 +66,119 @@ export const checkDatabaseConnection = async (): Promise<DatabaseConnectionState
 
 const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi', 'credito_empleados'];
 
-const EMPLOYEE_CREDITS_STORAGE_KEY = 'savia-employee-credits';
 export const EMPLOYEE_CREDIT_UPDATED_EVENT = 'savia-employee-credit-updated';
 
-const generateLocalId = () => {
-  try {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID();
-    }
-  } catch (error) {
-    console.warn('[dataService] No se pudo generar un UUID con crypto.randomUUID.', error);
-  }
-  return `credit-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-};
-
-const normalizeCreditHistoryEntry = (entry: Partial<EmployeeCreditHistoryEntry>): EmployeeCreditHistoryEntry => ({
-  id: typeof entry.id === 'string' && entry.id.trim().length > 0 ? entry.id : generateLocalId(),
-  orderId: typeof entry.orderId === 'string' ? entry.orderId : undefined,
-  orderNumero: typeof entry.orderNumero === 'number' ? entry.orderNumero : undefined,
-  monto: Math.max(0, Math.round(Number(entry.monto) || 0)),
-  tipo: entry?.tipo === 'abono' ? 'abono' : 'cargo',
-  timestamp: typeof entry.timestamp === 'string' ? entry.timestamp : new Date().toISOString(),
-});
-
-const normalizeEmployeeCreditRecord = (record: any): EmployeeCreditRecord | null => {
-  if (!record || typeof record !== 'object') {
-    return null;
-  }
-
-  const empleadoId = typeof record.empleadoId === 'string' ? record.empleadoId : undefined;
-  if (!empleadoId) {
-    return null;
-  }
-
-  const total = Math.max(0, Math.round(Number(record.total) || 0));
-  const historySource = Array.isArray(record.history) ? record.history : [];
-  const history = historySource
-    .map((entry) => normalizeCreditHistoryEntry(entry))
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-  return {
-    empleadoId,
-    total,
-    history,
-  };
-};
-
-const loadEmployeeCredits = (): EmployeeCreditRecord[] => {
-  const raw = getLocalData<any[]>(EMPLOYEE_CREDITS_STORAGE_KEY, []);
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-
-  return raw
-    .map((entry) => normalizeEmployeeCreditRecord(entry))
-    .filter((entry): entry is EmployeeCreditRecord => entry !== null);
-};
-
-const persistEmployeeCredits = (records: EmployeeCreditRecord[]): void => {
-  setLocalData(EMPLOYEE_CREDITS_STORAGE_KEY, records);
+const notifyEmployeeCreditUpdate = () => {
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     window.dispatchEvent(new CustomEvent(EMPLOYEE_CREDIT_UPDATED_EVENT));
   }
 };
 
+const mapSupabaseCreditHistoryEntry = (record: any): EmployeeCreditHistoryEntry | null => {
+  if (!record || typeof record !== 'object') {
+    return null;
+  }
+
+  const id = typeof record.id === 'string' ? record.id : record.id?.toString?.();
+  const empleadoId =
+    typeof record.empleado_id === 'string'
+      ? record.empleado_id
+      : typeof record.empleadoId === 'string'
+        ? record.empleadoId
+        : undefined;
+
+  if (!id || !empleadoId) {
+    return null;
+  }
+
+  const rawTimestamp = record.timestamp ?? record.created_at ?? new Date().toISOString();
+  const timestamp = new Date(rawTimestamp).toISOString();
+  const monto = Math.max(0, Math.round(Number(record.monto) || 0));
+  const tipo: 'cargo' | 'abono' = record.tipo === 'abono' ? 'abono' : 'cargo';
+  const empleadoNombre =
+    record?.empleado?.nombre ?? record?.empleado_nombre ?? record?.empleadoNombre ?? undefined;
+  const orderId = typeof record.order_id === 'string' ? record.order_id : record.orderId;
+  const orderNumero =
+    typeof record.order_numero === 'number'
+      ? record.order_numero
+      : typeof record.orderNumero === 'number'
+        ? record.orderNumero
+        : undefined;
+
+  return {
+    id,
+    empleadoId,
+    empleadoNombre,
+    orderId: typeof orderId === 'string' ? orderId : undefined,
+    orderNumero,
+    monto,
+    tipo,
+    timestamp,
+  };
+};
+
 export const fetchEmployeeCredits = async (): Promise<EmployeeCreditRecord[]> => {
-  return loadEmployeeCredits();
+  if (!(await ensureSupabaseReady())) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('employee_credit_history')
+    .select(`
+      id,
+      empleado_id,
+      order_id,
+      order_numero,
+      monto,
+      tipo,
+      timestamp,
+      empleado:empleados ( id, nombre )
+    `)
+    .order('timestamp', { ascending: true });
+
+  if (error) {
+    console.error('[dataService] No se pudo obtener el historial de crédito de empleados.', error);
+    throw error;
+  }
+
+  const records = new Map<string, { empleadoId: string; empleadoNombre?: string; saldo: number; history: EmployeeCreditHistoryEntry[] }>();
+
+  for (const entry of data ?? []) {
+    const normalized = mapSupabaseCreditHistoryEntry(entry);
+    if (!normalized) {
+      continue;
+    }
+
+    const key = normalized.empleadoId;
+    let target = records.get(key);
+    if (!target) {
+      target = {
+        empleadoId: key,
+        empleadoNombre: normalized.empleadoNombre,
+        saldo: 0,
+        history: [],
+      };
+      records.set(key, target);
+    }
+
+    target.saldo += normalized.tipo === 'cargo' ? normalized.monto : -normalized.monto;
+    const balanceAfter = target.saldo;
+    target.history.push({ ...normalized, balanceAfter });
+    if (!target.empleadoNombre && normalized.empleadoNombre) {
+      target.empleadoNombre = normalized.empleadoNombre;
+    }
+  }
+
+  return Array.from(records.values())
+    .map((record) => ({
+      empleadoId: record.empleadoId,
+      empleadoNombre: record.empleadoNombre,
+      total: Math.round(record.saldo),
+      history: record.history
+        .slice()
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
+    }))
+    .sort((a, b) => b.total - a.total);
 };
 
 interface AddEmployeeCreditOptions {
@@ -147,29 +194,25 @@ export const addEmployeeCredit = async ({ empleadoId, monto, orderId, orderNumer
     return;
   }
 
-  const records = loadEmployeeCredits();
-  const entryIndex = records.findIndex((record) => record.empleadoId === empleadoId);
-  const historyEntry = normalizeCreditHistoryEntry({
-    orderId,
-    orderNumero,
-    monto: amount,
-    tipo: 'cargo',
-  });
-
-  if (entryIndex !== -1) {
-    const target = { ...records[entryIndex] };
-    target.total = Math.max(0, Math.round(target.total + amount));
-    target.history = [historyEntry, ...target.history];
-    records[entryIndex] = target;
-  } else {
-    records.push({
-      empleadoId,
-      total: amount,
-      history: [historyEntry],
-    });
+  if (!(await ensureSupabaseReady())) {
+    throw new Error('No se pudo registrar el crédito de empleado porque la base de datos no está disponible.');
   }
 
-  persistEmployeeCredits(records);
+  const payload = {
+    empleado_id: empleadoId,
+    order_id: orderId ?? null,
+    order_numero: orderNumero ?? null,
+    monto: amount,
+    tipo: 'cargo' as const,
+  };
+
+  const { error } = await supabase.from('employee_credit_history').insert(payload);
+  if (error) {
+    console.error('[dataService] Error registrando crédito de empleado.', error);
+    throw error;
+  }
+
+  notifyEmployeeCreditUpdate();
 };
 
 interface SettleEmployeeCreditBalanceOptions {
@@ -185,24 +228,25 @@ const settleEmployeeCreditBalance = async ({ empleadoId, monto, orderId, orderNu
     return;
   }
 
-  const records = loadEmployeeCredits();
-  const entryIndex = records.findIndex((record) => record.empleadoId === empleadoId);
-  if (entryIndex === -1) {
-    return;
+  if (!(await ensureSupabaseReady())) {
+    throw new Error('No se pudo registrar el abono del crédito porque la base de datos no está disponible.');
   }
 
-  const target = { ...records[entryIndex] };
-  target.total = Math.max(0, Math.round(target.total - amount));
-  const historyEntry = normalizeCreditHistoryEntry({
-    orderId,
-    orderNumero,
+  const payload = {
+    empleado_id: empleadoId,
+    order_id: orderId ?? null,
+    order_numero: orderNumero ?? null,
     monto: amount,
-    tipo: 'abono',
-  });
-  target.history = [historyEntry, ...target.history];
-  records[entryIndex] = target;
+    tipo: 'abono' as const,
+  };
 
-  persistEmployeeCredits(records);
+  const { error } = await supabase.from('employee_credit_history').insert(payload);
+  if (error) {
+    console.error('[dataService] Error registrando abono de crédito de empleado.', error);
+    throw error;
+  }
+
+  notifyEmployeeCreditUpdate();
 };
 
 const toOptionalPaymentMethod = (method?: string | null): PaymentMethod | undefined => {
@@ -1201,14 +1245,30 @@ export const assignOrderCredit = async (
   return updatedOrder;
 };
 
-export const settleOrderEmployeeCredit = async (order: Order): Promise<Order> => {
+type SettlementPaymentMethod = Extract<PaymentMethod, 'efectivo' | 'nequi' | 'tarjeta'>;
+
+const normalizeSettlementMethod = (method: PaymentMethod): SettlementPaymentMethod => {
+  if (['nequi', 'tarjeta'].includes(method)) {
+    return method as SettlementPaymentMethod;
+  }
+  return 'efectivo';
+};
+
+interface SettleOrderCreditOptions {
+  metodo: PaymentMethod;
+}
+
+export const settleOrderEmployeeCredit = async (
+  order: Order,
+  options: SettleOrderCreditOptions
+): Promise<Order> => {
   if (!order.creditInfo) {
     throw new Error('La orden no tiene un crédito de empleados pendiente.');
   }
 
   const amount = Math.max(0, Math.round(order.creditInfo.amount ?? order.total));
   const employeeId = order.creditInfo.employeeId;
-  const employeeName = order.creditInfo.employeeName;
+  const metodo = normalizeSettlementMethod(options.metodo);
 
   if (employeeId && amount > 0) {
     await settleEmployeeCreditBalance({
@@ -1219,44 +1279,38 @@ export const settleOrderEmployeeCredit = async (order: Order): Promise<Order> =>
     });
   }
 
+  const paymentAllocations: PaymentAllocation[] = amount > 0
+    ? [{ metodo, monto: amount }]
+    : [];
+
   if (await ensureSupabaseReady()) {
     try {
+      const updatePayload = {
+        estado: 'entregado',
+        ...buildSupabaseOrderPaymentPayload(paymentAllocations),
+      };
       const { error } = await supabase
         .from('orders')
-        .update({ estado: 'entregado' })
+        .update(updatePayload)
         .eq('id', order.id);
       if (error) throw error;
     } catch (error) {
-      console.warn('Supabase no disponible al cerrar crédito, se usará caché local:', error);
+      console.warn('Supabase no disponible al registrar el pago del crédito, se usará caché local:', error);
     }
   }
 
   mergeOrderMetadata(order.id, {
     paymentStatus: 'pagado',
-    paymentAllocations: employeeId
-      ? [{
-          metodo: 'credito_empleados',
-          monto: amount,
-          empleadoId,
-          empleadoNombre: employeeName,
-        }]
-      : [],
+    paymentAllocations,
     credit: null,
   });
 
   const updatedOrder: Order = {
     ...order,
     estado: 'entregado',
-    metodoPago: 'credito_empleados',
+    metodoPago: metodo,
     paymentStatus: 'pagado',
-    paymentAllocations: employeeId
-      ? [{
-          metodo: 'credito_empleados',
-          monto: amount,
-          empleadoId,
-          empleadoNombre: employeeName,
-        }]
-      : [],
+    paymentAllocations,
     creditInfo: undefined,
   };
 

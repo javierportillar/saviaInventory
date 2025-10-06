@@ -43,7 +43,8 @@ ALTER TYPE "public"."inventario_tipo_type" OWNER TO "postgres";
 CREATE TYPE "public"."metodo_pago_type" AS ENUM (
     'efectivo',
     'tarjeta',
-    'transferencia'
+    'transferencia',
+    'credito_empleados'
 );
 
 
@@ -69,6 +70,19 @@ CREATE TYPE "public"."unidad_medida_type" AS ENUM (
 
 
 ALTER TYPE "public"."unidad_medida_type" OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."calc_total_pago"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  NEW.total := COALESCE(NEW.pago_efectivo,0) + COALESCE(NEW.pago_nequi,0) + COALESCE(NEW.pago_tarjeta,0);
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."calc_total_pago"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."generate_order_number"() RETURNS integer
@@ -126,6 +140,43 @@ $$;
 
 
 ALTER FUNCTION "public"."insertar_ingreso_desde_order"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."insertar_ingreso_desde_order_multi"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  IF COALESCE(NEW.pago_efectivo, 0) > 0 THEN
+    INSERT INTO caja_movimientos (tipo, concepto, monto, fecha, metodoPago, order_id)
+    VALUES ('INGRESO', 'Venta #' || NEW.numero, NEW.pago_efectivo, NEW.timestamp::date, 'efectivo', NEW.id);
+  END IF;
+  IF COALESCE(NEW.pago_nequi, 0) > 0 THEN
+    INSERT INTO caja_movimientos (tipo, concepto, monto, fecha, metodoPago, order_id)
+    VALUES ('INGRESO', 'Venta #' || NEW.numero, NEW.pago_nequi, NEW.timestamp::date, 'nequi', NEW.id);
+  END IF;
+  IF COALESCE(NEW.pago_tarjeta, 0) > 0 THEN
+    INSERT INTO caja_movimientos (tipo, concepto, monto, fecha, metodoPago, order_id)
+    VALUES ('INGRESO', 'Venta #' || NEW.numero, NEW.pago_tarjeta, NEW.timestamp::date, 'tarjeta', NEW.id);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."insertar_ingreso_desde_order_multi"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."update_employee_weekly_hours_updated_at"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."update_employee_weekly_hours_updated_at"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."update_updated_at_column"() RETURNS "trigger"
@@ -252,11 +303,54 @@ CREATE TABLE IF NOT EXISTS "public"."empleados" (
     "salario_hora" numeric DEFAULT 0,
     "activo" boolean DEFAULT true,
     "created_at" timestamp with time zone DEFAULT "now"(),
-    "updated_at" timestamp with time zone DEFAULT "now"()
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "horario_base" "jsonb"
 );
 
 
 ALTER TABLE "public"."empleados" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."employee_credit_history" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "empleado_id" "uuid" NOT NULL,
+    "order_id" "uuid",
+    "order_numero" integer,
+    "monto" numeric NOT NULL,
+    "tipo" "text" NOT NULL,
+    "timestamp" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "employee_credit_history_tipo_check" CHECK (("tipo" = ANY (ARRAY['cargo'::"text", 'abono'::"text"])))
+);
+
+
+ALTER TABLE "public"."employee_credit_history" OWNER TO "postgres";
+
+
+CREATE OR REPLACE VIEW "public"."employee_credit_totals" AS
+ SELECT "empleado_id",
+    "sum"(
+        CASE
+            WHEN ("tipo" = 'cargo'::"text") THEN "monto"
+            ELSE (- "monto")
+        END) AS "total"
+   FROM "public"."employee_credit_history"
+  GROUP BY "empleado_id";
+
+
+ALTER VIEW "public"."employee_credit_totals" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."employee_weekly_hours" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "empleado_id" "uuid" NOT NULL,
+    "week_key" "text" NOT NULL,
+    "horas" "jsonb" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."employee_weekly_hours" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."gastos" (
@@ -311,8 +405,9 @@ CREATE TABLE IF NOT EXISTS "public"."orders" (
     "estado" "text" NOT NULL,
     "timestamp" timestamp with time zone DEFAULT "now"() NOT NULL,
     "cliente_id" "uuid",
-    "metodopago" "text" DEFAULT 'efectivo'::"text" NOT NULL,
-    CONSTRAINT "orders_metodopago_check" CHECK (("metodopago" = ANY (ARRAY['efectivo'::"text", 'tarjeta'::"text", 'nequi'::"text"])))
+    "pago_efectivo" numeric DEFAULT 0 NOT NULL,
+    "pago_nequi" numeric DEFAULT 0 NOT NULL,
+    "pago_tarjeta" numeric DEFAULT 0 NOT NULL
 );
 
 
@@ -342,6 +437,21 @@ ALTER TABLE ONLY "public"."customers"
 
 ALTER TABLE ONLY "public"."empleados"
     ADD CONSTRAINT "empleados_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."employee_credit_history"
+    ADD CONSTRAINT "employee_credit_history_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."employee_weekly_hours"
+    ADD CONSTRAINT "employee_weekly_hours_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."employee_weekly_hours"
+    ADD CONSTRAINT "employee_weekly_hours_unique" UNIQUE ("empleado_id", "week_key");
 
 
 
@@ -389,11 +499,19 @@ CREATE OR REPLACE TRIGGER "trg_gasto_to_caja" AFTER INSERT ON "public"."gastos" 
 
 
 
-CREATE OR REPLACE TRIGGER "trg_order_to_caja" AFTER INSERT ON "public"."orders" FOR EACH ROW EXECUTE FUNCTION "public"."insertar_ingreso_desde_order"();
+CREATE OR REPLACE TRIGGER "trg_order_to_caja" AFTER INSERT ON "public"."orders" FOR EACH ROW EXECUTE FUNCTION "public"."insertar_ingreso_desde_order_multi"();
+
+
+
+CREATE OR REPLACE TRIGGER "trg_update_employee_weekly_hours_updated_at" BEFORE UPDATE ON "public"."employee_weekly_hours" FOR EACH ROW EXECUTE FUNCTION "public"."update_employee_weekly_hours_updated_at"();
 
 
 
 CREATE OR REPLACE TRIGGER "update_empleados_updated_at" BEFORE UPDATE ON "public"."empleados" FOR EACH ROW EXECUTE FUNCTION "public"."update_updated_at_column"();
+
+
+
+CREATE OR REPLACE TRIGGER "update_total_pago" BEFORE INSERT OR UPDATE ON "public"."orders" FOR EACH ROW EXECUTE FUNCTION "public"."calc_total_pago"();
 
 
 
@@ -404,6 +522,21 @@ ALTER TABLE ONLY "public"."caja_movimientos"
 
 ALTER TABLE ONLY "public"."caja_movimientos"
     ADD CONSTRAINT "caja_movimientos_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."employee_credit_history"
+    ADD CONSTRAINT "employee_credit_history_empleado_id_fkey" FOREIGN KEY ("empleado_id") REFERENCES "public"."empleados"("id");
+
+
+
+ALTER TABLE ONLY "public"."employee_credit_history"
+    ADD CONSTRAINT "employee_credit_history_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id");
+
+
+
+ALTER TABLE ONLY "public"."employee_weekly_hours"
+    ADD CONSTRAINT "employee_weekly_hours_empleado_id_fkey" FOREIGN KEY ("empleado_id") REFERENCES "public"."empleados"("id") ON DELETE CASCADE;
 
 
 
@@ -497,6 +630,12 @@ GRANT USAGE ON SCHEMA "public" TO "service_role";
 
 
 
+GRANT ALL ON FUNCTION "public"."calc_total_pago"() TO "anon";
+GRANT ALL ON FUNCTION "public"."calc_total_pago"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."calc_total_pago"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."generate_order_number"() TO "anon";
 GRANT ALL ON FUNCTION "public"."generate_order_number"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."generate_order_number"() TO "service_role";
@@ -512,6 +651,18 @@ GRANT ALL ON FUNCTION "public"."insertar_egreso_desde_gasto"() TO "service_role"
 GRANT ALL ON FUNCTION "public"."insertar_ingreso_desde_order"() TO "anon";
 GRANT ALL ON FUNCTION "public"."insertar_ingreso_desde_order"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."insertar_ingreso_desde_order"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."insertar_ingreso_desde_order_multi"() TO "anon";
+GRANT ALL ON FUNCTION "public"."insertar_ingreso_desde_order_multi"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."insertar_ingreso_desde_order_multi"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."update_employee_weekly_hours_updated_at"() TO "anon";
+GRANT ALL ON FUNCTION "public"."update_employee_weekly_hours_updated_at"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."update_employee_weekly_hours_updated_at"() TO "service_role";
 
 
 
@@ -542,6 +693,24 @@ GRANT ALL ON TABLE "public"."customers" TO "service_role";
 GRANT ALL ON TABLE "public"."empleados" TO "anon";
 GRANT ALL ON TABLE "public"."empleados" TO "authenticated";
 GRANT ALL ON TABLE "public"."empleados" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."employee_credit_history" TO "anon";
+GRANT ALL ON TABLE "public"."employee_credit_history" TO "authenticated";
+GRANT ALL ON TABLE "public"."employee_credit_history" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."employee_credit_totals" TO "anon";
+GRANT ALL ON TABLE "public"."employee_credit_totals" TO "authenticated";
+GRANT ALL ON TABLE "public"."employee_credit_totals" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."employee_weekly_hours" TO "anon";
+GRANT ALL ON TABLE "public"."employee_weekly_hours" TO "authenticated";
+GRANT ALL ON TABLE "public"."employee_weekly_hours" TO "service_role";
 
 
 

@@ -21,6 +21,7 @@ import {
   CartItem,
   PaymentAllocation,
   DatabaseConnectionState,
+  PaymentMethod,
 } from './types';
 import { initializeLocalData } from './data/localData';
 import dataService from './lib/dataService';
@@ -249,9 +250,9 @@ function App() {
     }
   };
 
-  const handleSettleOrderCredit = async (order: Order) => {
+  const handleSettleOrderCredit = async (order: Order, options: { metodo: PaymentMethod }) => {
     try {
-      const updatedOrder = await dataService.settleOrderEmployeeCredit(order);
+      const updatedOrder = await dataService.settleOrderEmployeeCredit(order, options);
       setOrders((prevOrders) =>
         prevOrders.map((entry) =>
           entry.id === updatedOrder.id ? updatedOrder : entry

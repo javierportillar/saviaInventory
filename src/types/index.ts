@@ -93,15 +93,19 @@ export interface Empleado {
 
 export interface EmployeeCreditHistoryEntry {
   id: string;
+  empleadoId: string;
+  empleadoNombre?: string;
   orderId?: string;
   orderNumero?: number;
   monto: number;
   tipo: 'cargo' | 'abono';
   timestamp: string;
+  balanceAfter?: number;
 }
 
 export interface EmployeeCreditRecord {
   empleadoId: string;
+  empleadoNombre?: string;
   total: number;
   history: EmployeeCreditHistoryEntry[];
 }
