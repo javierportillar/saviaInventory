@@ -48,7 +48,7 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
   const allowedModules =
     user.role === 'admin'
       ? modules
-      : modules.filter(m => ['caja', 'comandas', 'cocina', 'clientes', 'gastos', 'inventario', 'novedades', 'creditoEmpleados'].includes(m.id));
+      : modules.filter(m => ['caja', 'comandas', 'cocina', 'clientes', 'gastos', 'inventario'].includes(m.id));
 
   const statusConfig: Record<DatabaseConnectionState, { label: string; dotClass: string; textClass: string }> = {
     checking: {
