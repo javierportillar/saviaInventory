@@ -43,6 +43,11 @@ interface SplitPersonState {
   employeeId?: string;
 }
 
+interface DragState {
+  personId: string;
+  personName: string;
+}
+
 const emptySelection = (): Record<PaymentMethod, boolean> => ({
   efectivo: false,
   tarjeta: false,
@@ -282,15 +287,11 @@ export function PaymentModal({
   const [selectedMethods, setSelectedMethods] = useState<Record<PaymentMethod, boolean>>(() => emptySelection());
   const [methodAmounts, setMethodAmounts] = useState<Record<PaymentMethod, string>>(() => emptyAmounts());
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [draggedItem, setDraggedItem] = useState<DragState | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   const buildInitialSplitState = useCallback((): SplitPersonState[] => {
     personCounterRef.current = 1;
-    const baseAssignments = assignableItems.reduce<Record<string, number>>((map, item) => {
-      if (item.quantity > 0) {
-        map[item.key] = item.quantity;
-      }
-      return map;
-    }, {});
 
     const primaryAllocation = existingAllocations[0];
     const secondaryAllocation = existingAllocations[1];
@@ -307,16 +308,17 @@ export function PaymentModal({
       createSplitPerson({
         name: 'Persona 1',
         method: primaryMethod,
-        itemQuantities: baseAssignments,
+        itemQuantities: {},
         employeeId: primaryEmployeeId,
       }),
       createSplitPerson({
         name: 'Persona 2',
         method: secondaryMethod,
+        itemQuantities: {},
         employeeId: secondaryEmployeeId,
       }),
     ];
-  }, [assignableItems, createSplitPerson, existingAllocations]);
+  }, [createSplitPerson, existingAllocations]);
 
   const [splitPersons, setSplitPersons] = useState<SplitPersonState[]>(buildInitialSplitState);
 
@@ -744,6 +746,71 @@ export function PaymentModal({
     setFeedback(null);
   };
 
+  const handlePersonDragStart = (personId: string, personName: string) => {
+    setDraggedItem({ personId, personName });
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+    setDropTarget(null);
+  };
+
+  const handleItemDragOver = (event: React.DragEvent, itemKey: string) => {
+    event.preventDefault();
+    if (!draggedItem) {
+      return;
+    }
+    const status = splitItemStatus[itemKey];
+    const remaining = status?.remaining ?? 0;
+    if (remaining > 0) {
+      setDropTarget(itemKey);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDropTarget(null);
+  };
+
+  const handleItemDrop = (event: React.DragEvent, itemKey: string) => {
+    event.preventDefault();
+    if (!draggedItem) {
+      return;
+    }
+
+    const item = assignableItemsByKey[itemKey];
+    if (!item) {
+      setDraggedItem(null);
+      setDropTarget(null);
+      return;
+    }
+
+    const status = splitItemStatus[itemKey];
+    const remaining = status?.remaining ?? 0;
+
+    if (remaining <= 0) {
+      setFeedback(`No hay unidades pendientes de ${item.label} para asignar.`);
+      setDraggedItem(null);
+      setDropTarget(null);
+      return;
+    }
+
+    setSplitPersons((prev) => {
+      const person = prev.find((p) => p.id === draggedItem.personId);
+      if (!person) {
+        return prev;
+      }
+
+      const currentQuantity = person.itemQuantities[itemKey] ?? 0;
+      const newQuantity = currentQuantity + 1;
+
+      return applySplitQuantityChange(prev, draggedItem.personId, itemKey, newQuantity, assignableItemsByKey);
+    });
+
+    setDraggedItem(null);
+    setDropTarget(null);
+    setFeedback(null);
+  };
+
   const assignCredit = async (options: { employeeId: string; amount: number; employeeName?: string }) => {
     if (!onAssignCredit || isSubmitting) {
       return;
@@ -986,7 +1053,10 @@ export function PaymentModal({
                     return (
                       <div
                         key={person.id}
-                        className="border border-gray-200 rounded-lg bg-gray-50 p-3 space-y-3"
+                        draggable={true}
+                        onDragStart={() => handlePersonDragStart(person.id, displayName)}
+                        onDragEnd={handleDragEnd}
+                        className="border border-gray-200 rounded-lg bg-gray-50 p-3 space-y-3 cursor-grab active:cursor-grabbing hover:shadow-md transition-all"
                       >
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                           <div className="flex-1 flex items-center gap-2">
@@ -1075,13 +1145,37 @@ export function PaymentModal({
                     const status = splitItemStatus[item.key];
                     const assigned = status?.assigned ?? 0;
                     const remainingQty = status?.remaining ?? 0;
+                    const canReceiveDrop = remainingQty > 0;
+                    const isDropTarget = dropTarget === item.key;
                     return (
-                      <div key={item.key} className="border border-gray-200 rounded-lg p-3 space-y-3">
+                      <div
+                        key={item.key}
+                        onDragOver={(e) => handleItemDragOver(e, item.key)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleItemDrop(e, item.key)}
+                        className={`border rounded-lg p-3 space-y-3 transition-all ${
+                          isDropTarget && canReceiveDrop
+                            ? 'border-2 border-green-500 bg-green-50 shadow-lg'
+                            : 'border-gray-200'
+                        }`}
+                      >
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-medium" style={{ color: COLORS.dark }}>
-                              {item.label}
-                            </p>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium" style={{ color: COLORS.dark }}>
+                                {item.label}
+                              </p>
+                              {canReceiveDrop && (
+                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                                  Suelta persona aquí
+                                </span>
+                              )}
+                              {isDropTarget && draggedItem && (
+                                <span className="text-xs bg-green-500 text-white px-2 py-1 rounded font-medium animate-pulse">
+                                  Asignar a {draggedItem.personName}
+                                </span>
+                              )}
+                            </div>
                             <p className="text-xs text-gray-500">
                               Cantidad: {item.quantity} · Precio unidad: {formatCOP(item.unitPrice)} · Subtotal:{' '}
                               {formatCOP(item.subtotal)}
@@ -1097,66 +1191,36 @@ export function PaymentModal({
                             {remainingQty > 0 && <span className="text-red-600"> · Pendiente: {remainingQty}</span>}
                           </div>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        <div className="flex flex-wrap gap-2">
                           {splitPersons.map((person, index) => {
                             const personAssigned = person.itemQuantities[item.key] ?? 0;
-                            const statusForItem = splitItemStatus[item.key];
-                            const assignedForItem = statusForItem?.assigned ?? 0;
-                            const othersAssigned = Math.max(0, assignedForItem - personAssigned);
-                            const maxForPerson = Math.max(0, item.quantity - othersAssigned);
+                            if (personAssigned === 0) {
+                              return null;
+                            }
                             const amount = personAssigned * item.unitPrice;
                             const displayName = person.name.trim() ? person.name : `Persona ${index + 1}`;
-                            const remainingQuantity = statusForItem?.remaining ?? 0;
-                            const canTakeRemaining = remainingQuantity > 0 || maxForPerson > personAssigned;
                             return (
                               <div
                                 key={person.id}
-                                className="flex flex-col border border-gray-200 rounded-md p-2 gap-2 bg-white"
+                                className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-full"
                               >
-                                <div className="flex items-center justify-between text-xs font-semibold text-gray-600">
-                                  <span className="truncate">{displayName}</span>
-                                  <span>{formatCOP(amount)}</span>
-                                </div>
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <div className="flex items-center border border-gray-300 rounded-md overflow-hidden">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSplitQuantityAdjust(person.id, item.key, -1)}
-                                      className="px-2 py-1 text-sm text-gray-600 hover:text-gray-900"
-                                    >
-                                      −
-                                    </button>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      max={maxForPerson}
-                                      value={personAssigned}
-                                      onChange={(event) =>
-                                        handleSplitQuantityInputChange(person.id, item.key, event.target.value)
-                                      }
-                                      className="w-16 px-2 py-1 text-center text-sm border-l border-r border-gray-300 focus:outline-none focus:ring-1"
-                                      style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSplitQuantityAdjust(person.id, item.key, 1)}
-                                      className="px-2 py-1 text-sm text-gray-600 hover:text-gray-900"
-                                    >
-                                      +
-                                    </button>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSplitAssignRemaining(person.id, item.key)}
-                                    className="text-xs text-gray-600 hover:text-gray-900 disabled:text-gray-400 disabled:cursor-not-allowed"
-                                    disabled={!canTakeRemaining}
-                                  >
-                                    Tomar restante
-                                  </button>
-                                </div>
+                                <span className="text-sm font-medium text-blue-900">{displayName}</span>
+                                <span className="text-xs text-blue-700">×{personAssigned}</span>
+                                <span className="text-xs text-blue-600">({formatCOP(amount)})</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSplitQuantityAdjust(person.id, item.key, -personAssigned)}
+                                  className="ml-1 text-blue-600 hover:text-blue-800 focus:outline-none"
+                                  title="Quitar asignación"
+                                >
+                                  ×
+                                </button>
                               </div>
                             );
                           })}
+                          {assigned === 0 && (
+                            <span className="text-xs text-gray-400 italic py-1.5">Sin asignar - arrastra una persona aquí</span>
+                          )}
                         </div>
                       </div>
                     );
