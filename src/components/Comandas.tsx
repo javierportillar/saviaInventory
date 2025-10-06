@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Order, MenuItem, CartItem, PaymentAllocation } from '../types';
+import { Order, MenuItem, CartItem, PaymentAllocation, FocusDateRequest } from '../types';
 import { Clock, Check, CheckCircle, User, CreditCard, Edit3, Plus, Minus, Trash2, Save, X, Loader2 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, formatDateTime, formatDate } from '../utils/format';
@@ -8,6 +8,7 @@ import {
   getCartItemBaseUnitPrice,
   getCartItemEffectiveUnitPrice,
   getCartItemSubtotal,
+  normalizeCartTotal,
   isSandwichItem,
   STUDENT_DISCOUNT_NOTE,
 } from '../utils/cart';
@@ -47,6 +48,7 @@ interface ComandasProps {
   onDeleteOrder: (orderId: string) => Promise<void>;
   isAdmin: boolean;
   onAssignOrderCredit: (order: Order, options: { employeeId: string; amount: number; employeeName?: string }) => Promise<void>;
+  focusRequest?: FocusDateRequest | null;
 }
 
 interface EditingOrder {
@@ -55,7 +57,7 @@ interface EditingOrder {
   total: number;
 }
 
-export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRecordOrderPayment, onDeleteOrder, isAdmin, onAssignOrderCredit }: ComandasProps) {
+export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRecordOrderPayment, onDeleteOrder, isAdmin, onAssignOrderCredit, focusRequest }: ComandasProps) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [editingOrder, setEditingOrder] = useState<EditingOrder | null>(null);
   const [expandedActionsOrderId, setExpandedActionsOrderId] = useState<string | null>(null);
@@ -71,6 +73,20 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
   const [isSavingOrderChanges, setIsSavingOrderChanges] = useState(false);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!focusRequest) {
+      return;
+    }
+
+    const { dateKey } = focusRequest;
+    if (!dateKey) {
+      return;
+    }
+
+    setSelectedDateKey(dateKey);
+    setCurrentPage(1);
+  }, [focusRequest]);
 
   const sortedOrders = useMemo(
     () => [...orders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),

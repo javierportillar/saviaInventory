@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Empleado, DayKey, DaySchedule, WeeklySchedule, WeeklyHours, DAY_KEYS } from '../types';
+import { Empleado, DayKey, DaySchedule, WeeklySchedule, WeeklyHours } from '../types';
 import {
   Users,
   Edit3,
@@ -10,110 +10,39 @@ import {
   CalendarDays,
   RefreshCcw,
   X,
-  CreditCard
+  CreditCard,
+  History
 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
+import {
+  DAY_ORDER,
+  DAY_LABELS,
+  calculateIsoWeekKey,
+  getCurrentWeekKey,
+  getStartOfWeek,
+  formatWeekRange,
+  schedulesAreEqual,
+  ensureSchedule,
+  buildWeeklyHoursFromBase,
+  sumWeeklyHours,
+  formatHours,
+  formatDifference
+} from '../utils/employeeHours';
 import dataService, { EMPLOYEE_CREDIT_UPDATED_EVENT } from '../lib/dataService';
+import { HistoricoEmpleados } from './HistoricoEmpleados';
 
 type EmployeeWeeklyRecords = Record<string, WeeklyHours>;
-
-const DAY_ORDER: DayKey[] = [...DAY_KEYS];
-
-const DAY_LABELS: Record<DayKey, string> = {
-  monday: 'Lunes',
-  tuesday: 'Martes',
-  wednesday: 'Miércoles',
-  thursday: 'Jueves',
-  friday: 'Viernes',
-  saturday: 'Sábado',
-  sunday: 'Domingo'
+type HistoryState = {
+  expanded: boolean;
+  loading: boolean;
+  loaded: boolean;
+  error: string | null;
 };
 
-const calculateIsoWeekKey = (date: Date): string => {
-  const tmp = new Date(date.getTime());
-  tmp.setHours(0, 0, 0, 0);
-  const dayNum = tmp.getDay() || 7;
-  tmp.setDate(tmp.getDate() + 4 - dayNum);
-  const yearStart = new Date(tmp.getFullYear(), 0, 1);
-  const weekNo = Math.ceil(((tmp.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-  return `${tmp.getFullYear()}-W${weekNo.toString().padStart(2, '0')}`;
-};
+const createHistoryState = (): HistoryState => ({ expanded: false, loading: false, loaded: false, error: null });
 
-const getCurrentWeekKey = () => calculateIsoWeekKey(new Date());
-
-const getStartOfWeek = (weekKey: string): Date => {
-  const [yearStr, weekStr] = weekKey.split('-W');
-  const year = Number(yearStr);
-  const week = Number(weekStr);
-  const simple = new Date(year, 0, 4);
-  const day = simple.getDay() || 7;
-  const monday = new Date(simple);
-  monday.setDate(simple.getDate() + (week - 1) * 7 - (day - 1));
-  monday.setHours(0, 0, 0, 0);
-  return monday;
-};
-
-const getEndOfWeek = (start: Date): Date => {
-  const end = new Date(start);
-  end.setDate(end.getDate() + 6);
-  return end;
-};
-
-const formatWeekRange = (weekKey: string): string => {
-  try {
-    const start = getStartOfWeek(weekKey);
-    const end = getEndOfWeek(start);
-    const formatter = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short' });
-    return `${formatter.format(start)} - ${formatter.format(end)}`;
-  } catch (error) {
-    console.warn('No se pudo formatear la semana seleccionada', error);
-    return weekKey;
-  }
-};
-
-const schedulesAreEqual = (a: WeeklySchedule, b: WeeklySchedule) =>
-  DAY_ORDER.every(day => a[day]?.active === b[day]?.active && Number(a[day]?.hours ?? 0) === Number(b[day]?.hours ?? 0));
-
-const buildDefaultSchedule = (empleado: Empleado): WeeklySchedule => {
-  const schedule = {} as WeeklySchedule;
-  DAY_ORDER.forEach((day, index) => {
-    const active = index < empleado.dias_semana;
-    schedule[day] = {
-      active,
-      hours: active ? empleado.horas_dia : 0
-    };
-  });
-  return schedule;
-};
-
-const ensureSchedule = (empleado: Empleado, stored?: WeeklySchedule): WeeklySchedule => {
-  const base = buildDefaultSchedule(empleado);
-  if (!stored) return base;
-  const ensured = {} as WeeklySchedule;
-  DAY_ORDER.forEach(day => {
-    const existing = stored[day];
-    if (existing) {
-      ensured[day] = {
-        active: Boolean(existing.active),
-        hours: existing.active ? Math.max(0, Number(existing.hours) || 0) : 0
-      };
-    } else {
-      ensured[day] = base[day];
-    }
-  });
-  return ensured;
-};
-
-const buildWeeklyHoursFromBase = (schedule: WeeklySchedule): WeeklyHours => {
-  const hours = {} as WeeklyHours;
-  DAY_ORDER.forEach(day => {
-    hours[day] = schedule[day].active ? schedule[day].hours : 0;
-  });
-  return hours;
-};
-
-const sumWeeklyHours = (hours: WeeklyHours) => DAY_ORDER.reduce((acc, day) => acc + (Number(hours[day]) || 0), 0);
+const compareWeeksDesc = (a: string, b: string) => getStartOfWeek(b).getTime() - getStartOfWeek(a).getTime();
 
 export function Empleados() {
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
@@ -135,7 +64,9 @@ export function Empleados() {
   const [modalBaseSchedule, setModalBaseSchedule] = useState<WeeklySchedule | null>(null);
   const [modalWeeklyHours, setModalWeeklyHours] = useState<WeeklyHours | null>(null);
   const [employeeCredits, setEmployeeCredits] = useState<Record<string, number>>({});
+  const [historyState, setHistoryState] = useState<Record<string, HistoryState>>({});
   const loadedWeeksRef = useRef<Set<string>>(new Set());
+  const [showGeneralHistory, setShowGeneralHistory] = useState(false);
 
   const refreshEmployeeCredits = useCallback(async () => {
     try {
@@ -306,6 +237,23 @@ export function Empleados() {
     });
   }, [empleados]);
 
+  useEffect(() => {
+    setHistoryState(prev => {
+      const updated = { ...prev };
+      const validIds = new Set(empleados.map(emp => emp.id));
+      let changed = false;
+
+      Object.keys(updated).forEach(id => {
+        if (!validIds.has(id)) {
+          delete updated[id];
+          changed = true;
+        }
+      });
+
+      return changed ? updated : prev;
+    });
+  }, [empleados]);
+
   const fetchEmpleados = async () => {
     const data = await dataService.fetchEmpleados();
     setEmpleados(data);
@@ -384,9 +332,16 @@ export function Empleados() {
     return hours;
   };
 
-  const openScheduleModal = async (empleado: Empleado) => {
+  const updateHistoryState = useCallback((empleadoId: string, updater: (prev: HistoryState) => HistoryState) => {
+    setHistoryState(prev => {
+      const previous = prev[empleadoId] ?? createHistoryState();
+      return { ...prev, [empleadoId]: updater(previous) };
+    });
+  }, []);
+
+  const openScheduleModal = async (empleado: Empleado, targetWeek?: string) => {
     const baseSchedule = ensureSchedule(empleado, horariosBase[empleado.id]);
-    const currentWeek = getCurrentWeekKey();
+    const currentWeek = targetWeek || getCurrentWeekKey();
     setScheduleEmpleado(empleado);
     setScheduleWeek(currentWeek);
     setModalBaseSchedule(baseSchedule);
@@ -490,22 +445,6 @@ export function Empleados() {
     setModalWeeklyHours(buildWeeklyHoursFromBase(modalBaseSchedule));
   };
 
-  const formatHours = (hours: number) => {
-    const normalized = Number.isNaN(hours) ? 0 : hours;
-    if (Math.abs(normalized % 1) < 0.01) {
-      return `${Math.round(normalized)}`;
-    }
-    return normalized.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
-  };
-
-  const formatDifference = (value: number) => {
-    if (Math.abs(value) < 0.01) {
-      return 'Sin variación';
-    }
-    const formatted = formatHours(Math.abs(value));
-    return `${value > 0 ? '+' : '-'}${formatted} h vs base`;
-  };
-
   const handleSaveBaseSchedule = async () => {
     if (!scheduleEmpleado || !modalBaseSchedule) return;
     const empleadoId = scheduleEmpleado.id;
@@ -557,6 +496,47 @@ export function Empleados() {
     closeScheduleModal();
   };
 
+  const handleToggleHistory = useCallback(
+    async (empleado: Empleado) => {
+      const empleadoId = empleado.id;
+      const current = historyState[empleadoId] ?? createHistoryState();
+      const willExpand = !current.expanded;
+
+      if (!willExpand) {
+        updateHistoryState(empleadoId, prev => ({ ...prev, expanded: false }));
+        return;
+      }
+
+      updateHistoryState(empleadoId, prev => ({ ...prev, expanded: true, error: null }));
+
+      if (current.loaded) {
+        return;
+      }
+
+      updateHistoryState(empleadoId, prev => ({ ...prev, loading: true, expanded: true, error: null }));
+
+      try {
+        const history = await dataService.fetchEmployeeWeeklyHoursHistory(empleadoId);
+        setHorariosSemanales(prev => {
+          const updated: Record<string, EmployeeWeeklyRecords> = { ...prev };
+          const employeeWeeks = { ...(updated[empleadoId] || {}) };
+          Object.entries(history).forEach(([weekKey, value]) => {
+            employeeWeeks[weekKey] = value;
+            loadedWeeksRef.current.add(weekKey);
+          });
+          updated[empleadoId] = employeeWeeks;
+          return updated;
+        });
+
+        updateHistoryState(empleadoId, prev => ({ ...prev, loading: false, loaded: true, expanded: true, error: null }));
+      } catch (error) {
+        console.error('Error cargando histórico de horas del empleado:', error);
+        updateHistoryState(empleadoId, prev => ({ ...prev, loading: false, expanded: true, error: 'No se pudo cargar el histórico' }));
+      }
+    },
+    [historyState, updateHistoryState]
+  );
+
   const calcularHorasSemana = (schedule: WeeklySchedule) => sumWeeklyHours(buildWeeklyHoursFromBase(schedule));
 
   const calcularHorasMes = (schedule: WeeklySchedule) => calcularHorasSemana(schedule) * 4.33; // Promedio de semanas por mes
@@ -572,23 +552,45 @@ export function Empleados() {
 
   return (
     <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Users size={24} style={{ color: COLORS.dark }} />
           <h2 className="text-xl lg:text-2xl font-bold" style={{ color: COLORS.dark }}>
             Gestión de Empleados
           </h2>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-1 lg:gap-2 px-3 lg:px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
-          style={{ backgroundColor: COLORS.dark }}
-        >
-          <Plus size={16} />
-          <span className="hidden lg:inline">Agregar Empleado</span>
-          <span className="lg:hidden">Agregar</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowGeneralHistory(prev => !prev)}
+            className={`flex items-center gap-1 lg:gap-2 px-3 lg:px-4 py-2 rounded-lg border text-sm font-medium transition-all duration-200 ${
+              showGeneralHistory
+                ? 'text-white shadow-md'
+                : 'text-gray-700 hover:bg-gray-100'
+            }`}
+            style={{ backgroundColor: showGeneralHistory ? COLORS.dark : 'transparent', borderColor: showGeneralHistory ? COLORS.dark : '#E5E7EB' }}
+          >
+            <History size={16} />
+            <span className="hidden md:inline">{showGeneralHistory ? 'Ocultar histórico' : 'Histórico semanal'}</span>
+            <span className="md:hidden">{showGeneralHistory ? 'Ocultar' : 'Histórico'}</span>
+          </button>
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-1 lg:gap-2 px-3 lg:px-4 py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
+            style={{ backgroundColor: COLORS.dark }}
+          >
+            <Plus size={16} />
+            <span className="hidden lg:inline">Agregar Empleado</span>
+            <span className="lg:hidden">Agregar</span>
+          </button>
+        </div>
       </div>
+
+      {showGeneralHistory && (
+        <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
+          <HistoricoEmpleados />
+        </div>
+      )}
 
       {/* Formulario */}
       {showForm && (
@@ -882,6 +884,14 @@ export function Empleados() {
           const diff = workedWeeklyHours - baseWeeklyHours;
           const diffClass = Math.abs(diff) < 0.01 ? 'text-gray-500' : diff > 0 ? 'text-green-600' : 'text-orange-500';
           const weekLabel = formatWeekRange(currentWeekKey);
+          const historyStatus = historyState[empleado.id] ?? createHistoryState();
+          const savedRecords = horariosSemanales[empleado.id] || {};
+          const historyRecords: Record<string, WeeklyHours> = { ...savedRecords };
+          if (!historyRecords[currentWeekKey]) {
+            historyRecords[currentWeekKey] = weeklyHoursRecord;
+          }
+          const sortedHistoryEntries = Object.entries(historyRecords).sort((a, b) => compareWeeksDesc(a[0], b[0]));
+          const hasStoredWeeks = Object.keys(savedRecords).length > 0;
 
           return (
             <div
@@ -1021,6 +1031,97 @@ export function Empleados() {
                   <p className="mt-1 text-xs text-gray-500">
                     Registra abonos desde la caja con el método "Crédito empleados".
                   </p>
+                </div>
+                <div className="mt-4 rounded-lg border border-gray-100 bg-white/60 p-4">
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleHistory(empleado)}
+                    className="flex w-full items-center justify-between text-left text-sm font-medium text-gray-700"
+                  >
+                    <span className="flex items-center gap-2">
+                      <History size={16} className="text-gray-500" />
+                      Histórico de horas trabajadas
+                    </span>
+                    <span className="text-xs font-semibold text-gray-500">
+                      {historyStatus.expanded ? 'Ocultar' : 'Ver historial'}
+                    </span>
+                  </button>
+
+                  {historyStatus.expanded && (
+                    <div className="mt-3 space-y-3">
+                      {historyStatus.error && (
+                        <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-600">
+                          {historyStatus.error}
+                        </div>
+                      )}
+
+                      {historyStatus.loading ? (
+                        <p className="text-xs text-gray-500">Cargando histórico...</p>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          {sortedHistoryEntries.length === 0 ? (
+                            <p className="text-xs text-gray-500">Aún no hay semanas registradas.</p>
+                          ) : (
+                            <table className="w-full min-w-[400px] text-xs">
+                              <thead>
+                                <tr className="text-left text-[11px] uppercase tracking-wide text-gray-500">
+                                  <th className="px-3 py-2 font-semibold">Semana</th>
+                                  <th className="px-3 py-2 font-semibold">Horas trabajadas</th>
+                                  <th className="px-3 py-2 font-semibold">Variación</th>
+                                  <th className="px-3 py-2 font-semibold text-right">Acciones</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100">
+                                {sortedHistoryEntries.map(([weekKey, hours]) => {
+                                  const totalHours = sumWeeklyHours(hours);
+                                  const diffVsBase = totalHours - baseWeeklyHours;
+                                  const isCurrentWeek = weekKey === currentWeekKey;
+                                  return (
+                                    <tr key={weekKey} className={isCurrentWeek ? 'bg-gray-50' : undefined}>
+                                      <td className="px-3 py-2">
+                                        <div className="flex flex-col">
+                                          <span className="font-semibold text-gray-700">{formatWeekRange(weekKey)}</span>
+                                          {isCurrentWeek && <span className="text-[11px] text-gray-500">Semana actual</span>}
+                                        </div>
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <span className="font-medium text-gray-700">{formatHours(totalHours)} h</span>
+                                      </td>
+                                      <td className={`px-3 py-2 font-medium text-[11px] ${
+                                        Math.abs(diffVsBase) < 0.01
+                                          ? 'text-gray-500'
+                                          : diffVsBase > 0
+                                            ? 'text-green-600'
+                                            : 'text-orange-500'
+                                      }`}>
+                                        {formatDifference(diffVsBase)}
+                                      </td>
+                                      <td className="px-3 py-2 text-right">
+                                        <button
+                                          type="button"
+                                          onClick={() => void openScheduleModal(empleado, weekKey)}
+                                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 transition hover:bg-gray-100"
+                                        >
+                                          <Edit3 size={14} />
+                                          Ajustar
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      )}
+
+                      {!historyStatus.loading && !hasStoredWeeks && (
+                        <p className="text-[11px] text-gray-500">
+                          Los registros guardados aparecerán aquí. Usa "Gestionar semana" para almacenar ajustes.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

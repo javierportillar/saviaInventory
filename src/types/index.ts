@@ -31,6 +31,11 @@ export interface PaymentAllocation {
   empleadoNombre?: string;
 }
 
+export interface FocusDateRequest {
+  dateKey: string;
+  requestId: number;
+}
+
 export type PaymentStatus = 'pendiente' | 'pagado';
 
 export type DatabaseConnectionState = 'checking' | 'online' | 'local';
@@ -171,6 +176,7 @@ export type ModuleType =
   | 'clientes'
   | 'empleados'
   | 'gastos'
+  | 'novedades'
   | 'creditoEmpleados'
   | 'analitica';
 

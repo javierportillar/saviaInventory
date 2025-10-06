@@ -23,6 +23,8 @@ import { slugify, generateMenuItemCode } from '../utils/strings';
 import {
   buildNotesWithStudentDiscount,
   extractStudentDiscountFromNotes,
+  getCartItemSubtotal,
+  normalizeCartTotal,
 } from '../utils/cart';
 import {
   determinePaymentStatus,
@@ -763,22 +765,24 @@ const mapOrderRecord = (record: any): Order => {
     sanitizeAllocations(extractSupabasePaymentAllocations(record))
   );
 
-  const itemsTotal = Math.round(
-    items.reduce((sum, cartItem) => {
-      const unitPrice = typeof cartItem.precioUnitario === 'number'
-        ? cartItem.precioUnitario
-        : cartItem.item.precio;
-      return sum + unitPrice * cartItem.cantidad;
-    }, 0)
-  );
-  const rawTotal = Number(record?.total ?? 0);
-  const baseTotal = Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : itemsTotal;
+  const rawComputedTotal = items.reduce((sum, cartItem) => {
+    return sum + getCartItemSubtotal(cartItem);
+  }, 0);
+  const normalizedComputedTotal = normalizeCartTotal(rawComputedTotal);
+  const rawStoredTotal = Number(record?.total ?? 0);
+  const hasStoredTotal = Number.isFinite(rawStoredTotal) && rawStoredTotal > 0;
+
+  const finalTotal = rawComputedTotal > 0
+    ? normalizedComputedTotal
+    : hasStoredTotal
+      ? normalizeCartTotal(rawStoredTotal)
+      : 0;
 
   const baseOrder: Order = {
     id,
     numero: typeof record?.numero === 'number' ? record.numero : Number(record?.numero ?? 0),
     items,
-    total: baseTotal > 0 ? baseTotal : rawTotal,
+    total: finalTotal,
     estado: (record?.estado as Order['estado']) ?? 'pendiente',
     timestamp,
     cliente_id: record?.cliente_id ?? record?.clienteId ?? undefined,
@@ -1845,6 +1849,53 @@ export const fetchEmployeeWeeklyHours = async (
   return normalizeWeeklyHours(local?.[empleadoId]?.[weekKey]);
 };
 
+export const fetchEmployeeWeeklyHoursHistory = async (
+  empleadoId: string
+): Promise<Record<string, WeeklyHours>> => {
+  if (await ensureSupabaseReady()) {
+    try {
+      const { data, error } = await supabase
+        .from('employee_weekly_hours')
+        .select('week_key, horas')
+        .eq('empleado_id', empleadoId)
+        .order('week_key', { ascending: false });
+
+      if (error) throw error;
+
+      const result: Record<string, WeeklyHours> = {};
+      for (const record of data ?? []) {
+        const weekKey = typeof record?.week_key === 'string' ? record.week_key : undefined;
+        if (!weekKey) continue;
+        const normalized = normalizeWeeklyHours(record?.horas);
+        if (normalized) {
+          result[weekKey] = normalized;
+        }
+      }
+
+      if (Object.keys(result).length > 0) {
+        return result;
+      }
+    } catch (error) {
+      console.warn('Supabase not available, using local data:', error);
+    }
+  }
+
+  const local = readLocalWeeklyHours();
+  const history = local?.[empleadoId];
+  if (!history) {
+    return {};
+  }
+
+  const sanitized: Record<string, WeeklyHours> = {};
+  Object.entries(history).forEach(([weekKey, value]) => {
+    const normalized = normalizeWeeklyHours(value);
+    if (normalized) {
+      sanitized[weekKey] = normalized;
+    }
+  });
+  return sanitized;
+};
+
 export const saveEmployeeWeeklyHours = async (
   empleadoId: string,
   weekKey: string,
@@ -2030,6 +2081,7 @@ export const dataService = {
   saveEmployeeBaseSchedule,
   fetchEmployeeWeeklyHours,
   fetchEmployeeWeeklyHoursForWeek,
+  fetchEmployeeWeeklyHoursHistory,
   saveEmployeeWeeklyHours,
   fetchEmployeeCredits,
   fetchGastos,

@@ -31,8 +31,20 @@ export const getCartItemSubtotal = (cartItem: CartItem): number => {
   return getCartItemEffectiveUnitPrice(cartItem) * cartItem.cantidad;
 };
 
+export const normalizeCartTotal = (value: number): number => {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  const rounded = Math.round(value);
+  if (rounded % 100 === 50) {
+    return rounded + 50;
+  }
+  return rounded;
+};
+
 export const calculateCartTotal = (cart: CartItem[]): number => {
-  return cart.reduce((sum, cartItem) => sum + getCartItemSubtotal(cartItem), 0);
+const sum = cart.reduce((total, cartItem) => total + getCartItemSubtotal(cartItem), 0);
+  return normalizeCartTotal(sum);
 };
 
 interface NotesExtractionResult {

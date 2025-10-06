@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Gasto, PaymentMethod } from '../types';
+import { Gasto, PaymentMethod, FocusDateRequest } from '../types';
 import { Receipt, Plus, Edit3, Trash2, Calendar, TrendingDown, Filter } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import {
@@ -10,7 +10,11 @@ import {
 } from '../utils/format';
 import dataService from '../lib/dataService';
 
-export function Gastos() {
+interface GastosProps {
+  focusRequest?: FocusDateRequest | null;
+}
+
+export function Gastos({ focusRequest }: GastosProps) {
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -53,6 +57,20 @@ export function Gastos() {
   useEffect(() => {
     fetchGastos();
   }, []);
+
+  useEffect(() => {
+    if (!focusRequest) {
+      return;
+    }
+
+    const { dateKey } = focusRequest;
+    if (!dateKey) {
+      return;
+    }
+
+    setViewMode('diario');
+    setSelectedDate(dateKey);
+  }, [focusRequest]);
 
   const fetchGastos = async () => {
     const data = await dataService.fetchGastos();

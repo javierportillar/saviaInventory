@@ -12,6 +12,7 @@ import { Login } from './components/Login';
 import { Navigation } from './components/Navigation';
 import { Analitica } from './components/Analitica';
 import { CreditoEmpleados } from './components/CreditoEmpleados';
+import { Novedades } from './components/Novedades';
 import {
   ModuleType,
   User,
@@ -22,6 +23,7 @@ import {
   PaymentAllocation,
   DatabaseConnectionState,
   PaymentMethod,
+  FocusDateRequest,
 } from './types';
 import { initializeLocalData } from './data/localData';
 import dataService from './lib/dataService';
@@ -46,6 +48,8 @@ function App() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<DatabaseConnectionState>('checking');
+  const [comandasFocus, setComandasFocus] = useState<FocusDateRequest | null>(null);
+  const [gastosFocus, setGastosFocus] = useState<FocusDateRequest | null>(null);
 
   useEffect(() => {
     initializeLocalData();
@@ -195,6 +199,21 @@ function App() {
       return;
     }
     setModule(module);
+  };
+
+  const createFocusRequest = (dateKey: string): FocusDateRequest => ({
+    dateKey,
+    requestId: Date.now(),
+  });
+
+  const handleNavigateToComandasFromNovedades = (dateKey: string) => {
+    setComandasFocus(createFocusRequest(dateKey));
+    setModule('comandas');
+  };
+
+  const handleNavigateToGastosFromNovedades = (dateKey: string) => {
+    setGastosFocus(createFocusRequest(dateKey));
+    setModule('gastos');
   };
 
   const handleCreateMenuItem = async (newItem: MenuItem) => {
@@ -377,6 +396,7 @@ function App() {
             onDeleteOrder={handleDeleteOrder}
             isAdmin={user.role === 'admin'}
             onAssignOrderCredit={handleAssignOrderCredit}
+            focusRequest={comandasFocus}
           />
         )}
         {module === 'inventario' && (
@@ -402,7 +422,13 @@ function App() {
           />
         )}
         {module === 'empleados' && <Empleados />}
-        {module === 'gastos' && <Gastos />}
+        {module === 'gastos' && <Gastos focusRequest={gastosFocus} />}
+        {module === 'novedades' && (
+          <Novedades
+            onNavigateToComandas={handleNavigateToComandasFromNovedades}
+            onNavigateToGastos={handleNavigateToGastosFromNovedades}
+          />
+        )}
         {module === 'creditoEmpleados' && (
           <CreditoEmpleados
             orders={orders}
