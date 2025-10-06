@@ -12,6 +12,9 @@ import {
   DatabaseConnectionState,
   EmployeeCreditRecord,
   EmployeeCreditHistoryEntry,
+  WeeklySchedule,
+  WeeklyHours,
+  DAY_KEYS,
 } from '../types';
 import { supabase } from './supabaseClient';
 import { getLocalData, setLocalData } from '../data/localData';
@@ -68,10 +71,141 @@ const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi', 'credi
 
 export const EMPLOYEE_CREDIT_UPDATED_EVENT = 'savia-employee-credit-updated';
 
+const BASE_SCHEDULE_STORAGE_KEY = 'savia-horarios-base';
+const WEEKLY_HOURS_STORAGE_KEY = 'savia-horarios-semanales';
+
 const notifyEmployeeCreditUpdate = () => {
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     window.dispatchEvent(new CustomEvent(EMPLOYEE_CREDIT_UPDATED_EVENT));
   }
+};
+
+type EmployeeWeeklyRecords = Record<string, WeeklyHours>;
+
+const normalizeWeeklySchedule = (value: unknown): WeeklySchedule | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const input = value as Record<string, unknown>;
+  const sanitized: Partial<WeeklySchedule> = {};
+  let hasValidEntry = false;
+
+  DAY_KEYS.forEach(day => {
+    const rawDay = input[day];
+    if (rawDay && typeof rawDay === 'object') {
+      hasValidEntry = true;
+      const dayData = rawDay as Record<string, unknown>;
+      const active = Boolean(dayData.active);
+      const hoursValue = Number(dayData.hours);
+      const hours = active ? (Number.isFinite(hoursValue) ? Math.max(0, hoursValue) : 0) : 0;
+      sanitized[day] = { active, hours };
+    } else {
+      sanitized[day] = { active: false, hours: 0 };
+    }
+  });
+
+  if (!hasValidEntry) {
+    return null;
+  }
+
+  return sanitized as WeeklySchedule;
+};
+
+const normalizeWeeklyHours = (value: unknown): WeeklyHours | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const input = value as Record<string, unknown>;
+  const sanitized: Partial<WeeklyHours> = {};
+  let hasValidEntry = false;
+
+  DAY_KEYS.forEach(day => {
+    const rawValue = input[day];
+    if (rawValue !== undefined && rawValue !== null) {
+      hasValidEntry = true;
+    }
+    const numericValue = Number(rawValue);
+    sanitized[day] = Number.isFinite(numericValue) ? Math.max(0, numericValue) : 0;
+  });
+
+  if (!hasValidEntry) {
+    return null;
+  }
+
+  return sanitized as WeeklyHours;
+};
+
+const ensureWeeklyScheduleShape = (schedule: WeeklySchedule): WeeklySchedule => {
+  const normalized: Partial<WeeklySchedule> = {};
+  DAY_KEYS.forEach(day => {
+    const entry = schedule[day];
+    const active = Boolean(entry?.active);
+    const hoursValue = Number(entry?.hours);
+    normalized[day] = {
+      active,
+      hours: active ? (Number.isFinite(hoursValue) ? Math.max(0, hoursValue) : 0) : 0,
+    };
+  });
+  return normalized as WeeklySchedule;
+};
+
+const ensureWeeklyHoursShape = (hours: WeeklyHours): WeeklyHours => {
+  const normalized: Partial<WeeklyHours> = {};
+  DAY_KEYS.forEach(day => {
+    const value = Number(hours?.[day]);
+    normalized[day] = Number.isFinite(value) ? Math.max(0, value) : 0;
+  });
+  return normalized as WeeklyHours;
+};
+
+const readLocalBaseSchedules = (): Record<string, WeeklySchedule> => {
+  const stored = getLocalData<Record<string, WeeklySchedule>>(BASE_SCHEDULE_STORAGE_KEY, {});
+  const sanitized: Record<string, WeeklySchedule> = {};
+  Object.entries(stored || {}).forEach(([empleadoId, schedule]) => {
+    const normalized = normalizeWeeklySchedule(schedule);
+    if (normalized) {
+      sanitized[empleadoId] = normalized;
+    }
+  });
+  return sanitized;
+};
+
+const persistLocalBaseSchedule = (empleadoId: string, schedule: WeeklySchedule) => {
+  const current = readLocalBaseSchedules();
+  current[empleadoId] = ensureWeeklyScheduleShape(schedule);
+  setLocalData(BASE_SCHEDULE_STORAGE_KEY, current);
+};
+
+const readLocalWeeklyHours = (): Record<string, EmployeeWeeklyRecords> => {
+  const stored = getLocalData<Record<string, EmployeeWeeklyRecords>>(WEEKLY_HOURS_STORAGE_KEY, {});
+  const sanitized: Record<string, EmployeeWeeklyRecords> = {};
+
+  Object.entries(stored || {}).forEach(([empleadoId, weeks]) => {
+    const sanitizedWeeks: EmployeeWeeklyRecords = {};
+    Object.entries(weeks || {}).forEach(([weekKey, value]) => {
+      const normalized = normalizeWeeklyHours(value);
+      if (normalized) {
+        sanitizedWeeks[weekKey] = normalized;
+      }
+    });
+    if (Object.keys(sanitizedWeeks).length > 0) {
+      sanitized[empleadoId] = sanitizedWeeks;
+    }
+  });
+
+  return sanitized;
+};
+
+const persistLocalWeeklyHours = (empleadoId: string, weekKey: string, hours: WeeklyHours) => {
+  const current = readLocalWeeklyHours();
+  const employeeWeeks: EmployeeWeeklyRecords = {
+    ...(current[empleadoId] || {}),
+    [weekKey]: ensureWeeklyHoursShape(hours),
+  };
+  current[empleadoId] = employeeWeeks;
+  setLocalData(WEEKLY_HOURS_STORAGE_KEY, current);
 };
 
 const mapSupabaseCreditHistoryEntry = (record: any): EmployeeCreditHistoryEntry | null => {
@@ -1590,6 +1724,161 @@ export const deleteEmpleado = async (id: string): Promise<void> => {
   setLocalData('savia-empleados', filteredEmpleados);
 };
 
+export const fetchEmployeeBaseSchedules = async (): Promise<Record<string, WeeklySchedule>> => {
+  if (await ensureSupabaseReady()) {
+    try {
+      const { data, error } = await supabase.from('empleados').select('id, horario_base');
+      if (error) throw error;
+
+      const result: Record<string, WeeklySchedule> = {};
+      for (const record of data ?? []) {
+        const empleadoId = typeof record?.id === 'string' ? record.id : undefined;
+        if (!empleadoId) continue;
+        const normalized = normalizeWeeklySchedule(record?.horario_base);
+        if (normalized) {
+          result[empleadoId] = normalized;
+        }
+      }
+
+      if (Object.keys(result).length > 0) {
+        return result;
+      }
+    } catch (error) {
+      console.warn('Supabase not available, using local data:', error);
+    }
+  }
+
+  return readLocalBaseSchedules();
+};
+
+export const saveEmployeeBaseSchedule = async (
+  empleadoId: string,
+  schedule: WeeklySchedule
+): Promise<void> => {
+  const sanitized = ensureWeeklyScheduleShape(schedule);
+  let lastError: unknown = null;
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const { error } = await supabase
+        .from('empleados')
+        .update({ horario_base: sanitized })
+        .eq('id', empleadoId);
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error updating employee base schedule in Supabase:', error);
+      lastError = error;
+    }
+  }
+
+  persistLocalBaseSchedule(empleadoId, sanitized);
+
+  if (lastError) {
+    throw lastError;
+  }
+};
+
+export const fetchEmployeeWeeklyHoursForWeek = async (
+  weekKey: string
+): Promise<Record<string, WeeklyHours>> => {
+  if (await ensureSupabaseReady()) {
+    try {
+      const { data, error } = await supabase
+        .from('employee_weekly_hours')
+        .select('empleado_id, week_key, horas')
+        .eq('week_key', weekKey);
+      if (error) throw error;
+
+      const result: Record<string, WeeklyHours> = {};
+      for (const record of data ?? []) {
+        const empleadoId = typeof record?.empleado_id === 'string' ? record.empleado_id : undefined;
+        const recordWeek = typeof record?.week_key === 'string' ? record.week_key : undefined;
+        if (!empleadoId || recordWeek !== weekKey) continue;
+        const normalized = normalizeWeeklyHours(record?.horas);
+        if (normalized) {
+          result[empleadoId] = normalized;
+        }
+      }
+
+      if (Object.keys(result).length > 0) {
+        return result;
+      }
+    } catch (error) {
+      console.warn('Supabase not available, using local data:', error);
+    }
+  }
+
+  const local = readLocalWeeklyHours();
+  const fallback: Record<string, WeeklyHours> = {};
+  Object.entries(local).forEach(([empleadoId, weeks]) => {
+    const normalized = normalizeWeeklyHours(weeks?.[weekKey]);
+    if (normalized) {
+      fallback[empleadoId] = normalized;
+    }
+  });
+  return fallback;
+};
+
+export const fetchEmployeeWeeklyHours = async (
+  empleadoId: string,
+  weekKey: string
+): Promise<WeeklyHours | null> => {
+  if (await ensureSupabaseReady()) {
+    try {
+      const { data, error } = await supabase
+        .from('employee_weekly_hours')
+        .select('horas')
+        .eq('empleado_id', empleadoId)
+        .eq('week_key', weekKey)
+        .maybeSingle();
+      if (error) throw error;
+      const normalized = normalizeWeeklyHours(data?.horas);
+      if (normalized) {
+        return normalized;
+      }
+    } catch (error) {
+      console.warn('Supabase not available, using local data:', error);
+    }
+  }
+
+  const local = readLocalWeeklyHours();
+  return normalizeWeeklyHours(local?.[empleadoId]?.[weekKey]);
+};
+
+export const saveEmployeeWeeklyHours = async (
+  empleadoId: string,
+  weekKey: string,
+  hours: WeeklyHours
+): Promise<void> => {
+  const sanitized = ensureWeeklyHoursShape(hours);
+  let lastError: unknown = null;
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const { error } = await supabase
+        .from('employee_weekly_hours')
+        .upsert(
+          {
+            empleado_id: empleadoId,
+            week_key: weekKey,
+            horas: sanitized,
+          },
+          { onConflict: 'empleado_id,week_key' }
+        );
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error saving weekly hours in Supabase:', error);
+      lastError = error;
+    }
+  }
+
+  persistLocalWeeklyHours(empleadoId, weekKey, sanitized);
+
+  if (lastError) {
+    throw lastError;
+  }
+};
+
 // GASTOS
 export const fetchGastos = async (): Promise<Gasto[]> => {
   if (await ensureSupabaseReady()) {
@@ -1737,6 +2026,11 @@ export const dataService = {
   createEmpleado,
   updateEmpleado,
   deleteEmpleado,
+  fetchEmployeeBaseSchedules,
+  saveEmployeeBaseSchedule,
+  fetchEmployeeWeeklyHours,
+  fetchEmployeeWeeklyHoursForWeek,
+  saveEmployeeWeeklyHours,
   fetchEmployeeCredits,
   fetchGastos,
   createGasto,

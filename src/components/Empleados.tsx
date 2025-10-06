@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Empleado } from '../types';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Empleado, DayKey, DaySchedule, WeeklySchedule, WeeklyHours, DAY_KEYS } from '../types';
 import {
   Users,
   Edit3,
@@ -16,18 +16,9 @@ import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
 import dataService, { EMPLOYEE_CREDIT_UPDATED_EVENT } from '../lib/dataService';
 
-type DayKey = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
-
-interface DaySchedule {
-  active: boolean;
-  hours: number;
-}
-
-type WeeklySchedule = Record<DayKey, DaySchedule>;
-type WeeklyHours = Record<DayKey, number>;
 type EmployeeWeeklyRecords = Record<string, WeeklyHours>;
 
-const DAY_ORDER: DayKey[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const DAY_ORDER: DayKey[] = [...DAY_KEYS];
 
 const DAY_LABELS: Record<DayKey, string> = {
   monday: 'Lunes',
@@ -38,9 +29,6 @@ const DAY_LABELS: Record<DayKey, string> = {
   saturday: 'Sábado',
   sunday: 'Domingo'
 };
-
-const BASE_SCHEDULE_STORAGE_KEY = 'savia-horarios-base';
-const WEEKLY_SCHEDULE_STORAGE_KEY = 'savia-horarios-semanales';
 
 const calculateIsoWeekKey = (date: Date): string => {
   const tmp = new Date(date.getTime());
@@ -127,24 +115,6 @@ const buildWeeklyHoursFromBase = (schedule: WeeklySchedule): WeeklyHours => {
 
 const sumWeeklyHours = (hours: WeeklyHours) => DAY_ORDER.reduce((acc, day) => acc + (Number(hours[day]) || 0), 0);
 
-const persistBaseSchedules = (schedules: Record<string, WeeklySchedule>) => {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(BASE_SCHEDULE_STORAGE_KEY, JSON.stringify(schedules));
-  } catch (error) {
-    console.warn('No se pudieron guardar los horarios base', error);
-  }
-};
-
-const persistWeeklySchedules = (records: Record<string, EmployeeWeeklyRecords>) => {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(WEEKLY_SCHEDULE_STORAGE_KEY, JSON.stringify(records));
-  } catch (error) {
-    console.warn('No se pudieron guardar los registros semanales', error);
-  }
-};
-
 export function Empleados() {
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -165,6 +135,7 @@ export function Empleados() {
   const [modalBaseSchedule, setModalBaseSchedule] = useState<WeeklySchedule | null>(null);
   const [modalWeeklyHours, setModalWeeklyHours] = useState<WeeklyHours | null>(null);
   const [employeeCredits, setEmployeeCredits] = useState<Record<string, number>>({});
+  const loadedWeeksRef = useRef<Set<string>>(new Set());
 
   const refreshEmployeeCredits = useCallback(async () => {
     try {
@@ -201,28 +172,93 @@ export function Empleados() {
     };
   }, [refreshEmployeeCredits]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
+  const loadBaseSchedules = useCallback(async (employeeList: Empleado[]) => {
     try {
-      const storedBase = localStorage.getItem(BASE_SCHEDULE_STORAGE_KEY);
-      if (storedBase) {
-        const parsed = JSON.parse(storedBase) as Record<string, WeeklySchedule>;
-        setHorariosBase(parsed);
-      }
-    } catch (error) {
-      console.warn('No se pudieron cargar los horarios base', error);
-    }
+      const baseSchedules = await dataService.fetchEmployeeBaseSchedules();
+      setHorariosBase(prev => {
+        const updated: Record<string, WeeklySchedule> = { ...prev };
+        const validIds = new Set(employeeList.map(emp => emp.id));
+        let changed = false;
 
-    try {
-      const storedWeekly = localStorage.getItem(WEEKLY_SCHEDULE_STORAGE_KEY);
-      if (storedWeekly) {
-        const parsed = JSON.parse(storedWeekly) as Record<string, EmployeeWeeklyRecords>;
-        setHorariosSemanales(parsed);
-      }
+        Object.keys(updated).forEach(id => {
+          if (!validIds.has(id)) {
+            delete updated[id];
+            changed = true;
+          }
+        });
+
+        employeeList.forEach(empleado => {
+          const schedule = baseSchedules[empleado.id];
+          if (schedule) {
+            if (!updated[empleado.id] || !schedulesAreEqual(updated[empleado.id], schedule)) {
+              updated[empleado.id] = schedule;
+              changed = true;
+            }
+          } else if (updated[empleado.id]) {
+            delete updated[empleado.id];
+            changed = true;
+          }
+        });
+
+        return changed ? updated : prev;
+      });
     } catch (error) {
-      console.warn('No se pudieron cargar los registros semanales', error);
+      console.error('Error cargando horarios base de empleados:', error);
     }
   }, []);
+
+  const loadWeeklyHoursForWeek = useCallback(
+    async (weekKey: string): Promise<Record<string, WeeklyHours>> => {
+      if (!weekKey) return {};
+
+      if (loadedWeeksRef.current.has(weekKey)) {
+        const existing: Record<string, WeeklyHours> = {};
+        Object.entries(horariosSemanales).forEach(([empleadoId, weeks]) => {
+          const record = weeks?.[weekKey];
+          if (record) {
+            existing[empleadoId] = record;
+          }
+        });
+        return existing;
+      }
+
+      try {
+        const records = await dataService.fetchEmployeeWeeklyHoursForWeek(weekKey);
+        loadedWeeksRef.current.add(weekKey);
+        setHorariosSemanales(prev => {
+          const updated: Record<string, EmployeeWeeklyRecords> = { ...prev };
+          Object.entries(records).forEach(([empleadoId, hours]) => {
+            updated[empleadoId] = { ...(updated[empleadoId] || {}), [weekKey]: hours };
+          });
+          return updated;
+        });
+        return records;
+      } catch (error) {
+        console.error('Error cargando horas semanales:', error);
+        return {};
+      }
+    },
+    [horariosSemanales]
+  );
+
+  const ensureEmployeeWeekLoaded = useCallback(
+    async (empleadoId: string, weekKey: string): Promise<WeeklyHours | undefined> => {
+      const existing = horariosSemanales[empleadoId]?.[weekKey];
+      if (existing) {
+        return existing;
+      }
+
+      const records = await loadWeeklyHoursForWeek(weekKey);
+      return records[empleadoId] ?? horariosSemanales[empleadoId]?.[weekKey];
+    },
+    [horariosSemanales, loadWeeklyHoursForWeek]
+  );
+
+  useEffect(() => {
+    if (empleados.length === 0) return;
+    loadBaseSchedules(empleados);
+    void loadWeeklyHoursForWeek(getCurrentWeekKey());
+  }, [empleados, loadBaseSchedules, loadWeeklyHoursForWeek]);
 
   useEffect(() => {
     if (empleados.length === 0) return;
@@ -249,12 +285,7 @@ export function Empleados() {
         }
       });
 
-      if (changed) {
-        persistBaseSchedules(updated);
-        return updated;
-      }
-
-      return prev;
+      return changed ? updated : prev;
     });
   }, [empleados]);
 
@@ -271,12 +302,7 @@ export function Empleados() {
         }
       });
 
-      if (changed) {
-        persistWeeklySchedules(updated);
-        return updated;
-      }
-
-      return prev;
+      return changed ? updated : prev;
     });
   }, [empleados]);
 
@@ -337,16 +363,18 @@ export function Empleados() {
 
   const getBaseScheduleForEmpleado = (empleado: Empleado) => ensureSchedule(empleado, horariosBase[empleado.id]);
 
-  const getWeeklyHoursForEmpleado = (empleadoId: string, weekKey: string, base: WeeklySchedule): WeeklyHours => {
-    const weeklyRecords = horariosSemanales[empleadoId];
-    if (!weeklyRecords) {
-      return buildWeeklyHoursFromBase(base);
-    }
-    const stored = weeklyRecords[weekKey];
-    if (!stored) {
-      return buildWeeklyHoursFromBase(base);
-    }
+  const getWeeklyHoursForEmpleado = (
+    empleadoId: string,
+    weekKey: string,
+    base: WeeklySchedule,
+    override?: WeeklyHours | null
+  ): WeeklyHours => {
     const hours = buildWeeklyHoursFromBase(base);
+    const weeklyRecords = horariosSemanales[empleadoId];
+    const stored = override ?? weeklyRecords?.[weekKey];
+    if (!stored) {
+      return hours;
+    }
     DAY_ORDER.forEach(day => {
       const value = stored[day];
       if (typeof value === 'number' && !Number.isNaN(value)) {
@@ -356,13 +384,14 @@ export function Empleados() {
     return hours;
   };
 
-  const openScheduleModal = (empleado: Empleado) => {
+  const openScheduleModal = async (empleado: Empleado) => {
     const baseSchedule = ensureSchedule(empleado, horariosBase[empleado.id]);
     const currentWeek = getCurrentWeekKey();
     setScheduleEmpleado(empleado);
     setScheduleWeek(currentWeek);
     setModalBaseSchedule(baseSchedule);
-    setModalWeeklyHours(getWeeklyHoursForEmpleado(empleado.id, currentWeek, baseSchedule));
+    const override = await ensureEmployeeWeekLoaded(empleado.id, currentWeek);
+    setModalWeeklyHours(getWeeklyHoursForEmpleado(empleado.id, currentWeek, baseSchedule, override));
   };
 
   const closeScheduleModal = () => {
@@ -371,11 +400,17 @@ export function Empleados() {
     setModalWeeklyHours(null);
   };
 
-  const handleScheduleWeekChange = (value: string) => {
+  const handleScheduleWeekChange = async (value: string) => {
     if (!value) return;
     setScheduleWeek(value);
     if (!scheduleEmpleado || !modalBaseSchedule) return;
-    setModalWeeklyHours(getWeeklyHoursForEmpleado(scheduleEmpleado.id, value, modalBaseSchedule));
+    const empleadoId = scheduleEmpleado.id;
+    const baseSchedule = modalBaseSchedule;
+    const override = await ensureEmployeeWeekLoaded(empleadoId, value);
+    if (!scheduleEmpleado || scheduleEmpleado.id !== empleadoId || !modalBaseSchedule) {
+      return;
+    }
+    setModalWeeklyHours(getWeeklyHoursForEmpleado(empleadoId, value, baseSchedule, override));
   };
 
   const updateDayInWeeklyHours = (day: DayKey, updater: (previous: number) => number) => {
@@ -471,8 +506,9 @@ export function Empleados() {
     return `${value > 0 ? '+' : '-'}${formatted} h vs base`;
   };
 
-  const handleSaveBaseSchedule = () => {
+  const handleSaveBaseSchedule = async () => {
     if (!scheduleEmpleado || !modalBaseSchedule) return;
+    const empleadoId = scheduleEmpleado.id;
     const sanitized = {} as WeeklySchedule;
     DAY_ORDER.forEach(day => {
       const data = modalBaseSchedule[day];
@@ -481,29 +517,42 @@ export function Empleados() {
         hours: data.active ? Math.max(0, Number(data.hours) || 0) : 0
       };
     });
-    setHorariosBase(prev => {
-      const updated = { ...prev, [scheduleEmpleado.id]: sanitized };
-      persistBaseSchedules(updated);
-      return updated;
-    });
+
+    try {
+      await dataService.saveEmployeeBaseSchedule(empleadoId, sanitized);
+    } catch (error) {
+      console.error('No se pudo guardar el horario base del empleado:', error);
+    }
+
+    setHorariosBase(prev => ({ ...prev, [empleadoId]: sanitized }));
+    setModalBaseSchedule(prev => (prev ? sanitized : prev));
   };
 
-  const handleSaveWeeklyHours = () => {
+  const handleSaveWeeklyHours = async () => {
     if (!scheduleEmpleado || !modalWeeklyHours) return;
+    const empleadoId = scheduleEmpleado.id;
+    const weekKey = scheduleWeek;
     const sanitized = {} as WeeklyHours;
     DAY_ORDER.forEach(day => {
       sanitized[day] = Math.max(0, Number(modalWeeklyHours[day]) || 0);
     });
 
+    try {
+      await dataService.saveEmployeeWeeklyHours(empleadoId, weekKey, sanitized);
+      loadedWeeksRef.current.add(weekKey);
+    } catch (error) {
+      console.error('No se pudieron guardar las horas semanales del empleado:', error);
+    }
+
     setHorariosSemanales(prev => {
       const employeeWeeks: EmployeeWeeklyRecords = {
-        ...(prev[scheduleEmpleado.id] || {})
+        ...(prev[empleadoId] || {})
       };
-      employeeWeeks[scheduleWeek] = sanitized;
-      const updated = { ...prev, [scheduleEmpleado.id]: employeeWeeks };
-      persistWeeklySchedules(updated);
-      return updated;
+      employeeWeeks[weekKey] = sanitized;
+      return { ...prev, [empleadoId]: employeeWeeks };
     });
+
+    setModalWeeklyHours(sanitized);
 
     closeScheduleModal();
   };
@@ -685,7 +734,7 @@ export function Empleados() {
                 <input
                   type="week"
                   value={scheduleWeek}
-                  onChange={(e) => handleScheduleWeekChange(e.target.value)}
+                  onChange={(e) => void handleScheduleWeekChange(e.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-transparent focus:ring-2 sm:w-auto"
                   style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
                 />
@@ -803,14 +852,14 @@ export function Empleados() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleSaveBaseSchedule}
+                  onClick={() => void handleSaveBaseSchedule()}
                   className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100"
                 >
                   Guardar horario base
                 </button>
                 <button
                   type="button"
-                  onClick={handleSaveWeeklyHours}
+                  onClick={() => void handleSaveWeeklyHours()}
                   className="rounded-lg px-3 py-2 text-sm font-semibold text-white transition hover:opacity-90"
                   style={{ backgroundColor: COLORS.dark }}
                 >
@@ -893,7 +942,7 @@ export function Empleados() {
                       </div>
                     </div>
                     <button
-                      onClick={() => openScheduleModal(empleado)}
+                      onClick={() => void openScheduleModal(empleado)}
                       className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-100"
                     >
                       <Clock size={16} />

@@ -78,6 +78,26 @@ export interface Customer {
   telefono: string;
 }
 
+export type DayKey =
+  | 'monday'
+  | 'tuesday'
+  | 'wednesday'
+  | 'thursday'
+  | 'friday'
+  | 'saturday'
+  | 'sunday';
+
+export const DAY_KEYS: DayKey[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
+export interface DaySchedule {
+  active: boolean;
+  hours: number;
+}
+
+export type WeeklySchedule = Record<DayKey, DaySchedule>;
+
+export type WeeklyHours = Record<DayKey, number>;
+
 export interface Empleado {
   id: string;
   nombre: string;
@@ -89,6 +109,7 @@ export interface Empleado {
   activo: boolean;
   created_at?: Date;
   updated_at?: Date;
+  horario_base?: WeeklySchedule | null;
 }
 
 export interface EmployeeCreditHistoryEntry {
