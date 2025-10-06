@@ -562,7 +562,9 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
       ? `Crédito empleados pendiente${employeeCreditLabel}`
       : formatPaymentSummary(allocations, formatCOP);
     const paid = isOrderPaid(order);
-    const canModifyOrder = paid || (isEmployeeCredit && isAdmin);
+    const canEditOrder = order.estado === 'entregado' && (paid || !isEmployeeCredit || isAdmin);
+    const canManagePaymentActions = paid || !isEmployeeCredit || isAdmin;
+    const showEditActionsToggle = paid || (isEmployeeCredit && isAdmin);
     const showPaymentResetNotice = paid && isAdmin;
     const isDeleting = deletingOrderId === order.id;
     const isActionsExpanded = expandedActionsOrderId === order.id;
@@ -584,7 +586,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
               {getStatusIcon(order.estado)}
               <span className="hidden lg:inline">{order.estado}</span>
             </span>
-            {order.estado === 'entregado' && canModifyOrder && editingOrder?.orderId !== order.id && (
+            {order.estado === 'entregado' && showEditActionsToggle && editingOrder?.orderId !== order.id && (
               <button
                 type="button"
                 onClick={() => toggleOrderActions(order.id)}
@@ -751,7 +753,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
               </div>
 
               <div className="flex flex-col gap-2">
-                {canModifyOrder && (
+                {canManagePaymentActions && (
                   <button
                     onClick={() => openPaymentModal(order, {
                       force: paid,
@@ -765,7 +767,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
                     {paid ? 'Modificar pago' : 'Registrar pago'}
                   </button>
                 )}
-                {canModifyOrder && showPaymentResetNotice && (
+                {canManagePaymentActions && showPaymentResetNotice && (
                   <p className="text-[11px] text-gray-500 text-center">
                     Al guardar se restablecerá el estado del pago actual.
                   </p>
@@ -888,13 +890,23 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
                       )}
                     </div>
                   ) : (
-                    <button
-                      onClick={() => openPaymentModal(order)}
-                      className="w-full py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm flex items-center justify-center gap-1"
-                    >
-                      <CreditCard size={14} />
-                      Registrar pago
-                    </button>
+                    <div className="space-y-2">
+                      {canEditOrder && (
+                        <button
+                          onClick={() => startEditingOrder(order)}
+                          className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm"
+                        >
+                          Modificar pedido
+                        </button>
+                      )}
+                      <button
+                        onClick={() => openPaymentModal(order)}
+                        className="w-full py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm flex items-center justify-center gap-1"
+                      >
+                        <CreditCard size={14} />
+                        Registrar pago
+                      </button>
+                    </div>
                   )}
                 </div>
               ) : (
