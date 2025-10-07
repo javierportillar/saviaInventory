@@ -178,7 +178,7 @@ export function Gastos({ focusRequest }: GastosProps) {
   }, {} as Record<string, number>);
 
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
+    <section className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Receipt size={24} style={{ color: COLORS.dark }} />
@@ -197,8 +197,7 @@ export function Gastos({ focusRequest }: GastosProps) {
         </button>
       </div>
 
-      {/* Filtros y vista */}
-      <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
+      <div className="ui-card ui-card-pad">
         <div className="flex flex-col lg:flex-row gap-4 items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
@@ -358,7 +357,7 @@ export function Gastos({ focusRequest }: GastosProps) {
 
       {/* Resumen por categorías */}
       {Object.keys(gastosPorCategoria).length > 0 && (
-        <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
+        <div className="ui-card ui-card-pad">
           <h3 className="text-lg font-semibold mb-4" style={{ color: COLORS.dark }}>
             Gastos por categoría
           </h3>
@@ -376,9 +375,9 @@ export function Gastos({ focusRequest }: GastosProps) {
       )}
 
       {/* Lista de gastos */}
-      <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
+      <div className="ui-card">
+        <div className="ui-card-pad ui-table-wrapper">
+          <table className="ui-table">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -457,6 +456,6 @@ export function Gastos({ focusRequest }: GastosProps) {
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }

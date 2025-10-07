@@ -42,7 +42,7 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
+    <section className="space-y-4 sm:space-y-6">
       <div className="flex items-center gap-2">
         <Users size={24} style={{ color: COLORS.dark }} />
         <h2 className="text-xl lg:text-2xl font-bold" style={{ color: COLORS.dark }}>
@@ -50,7 +50,7 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
         </h2>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-4 items-end">
+      <div className="flex flex-col lg:flex-row gap-4 items-stretch">
         <div className="flex-1">
           <input
             type="text"
@@ -71,63 +71,67 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
             style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
           />
         </div>
-        <button
-          onClick={handleSubmit}
-          className="px-3 lg:px-4 py-2 rounded-lg text-white font-medium text-sm w-full lg:w-auto"
-          style={{ backgroundColor: COLORS.dark }}
-        >
-          {editingId ? 'Actualizar' : 'Agregar'}
-        </button>
-        {editingId && (
+        <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
           <button
-            onClick={cancelEdit}
-            className="px-3 lg:px-4 py-2 rounded-lg border border-gray-300 text-sm w-full lg:w-auto"
+            onClick={handleSubmit}
+            className="px-3 lg:px-4 py-2 rounded-lg text-white font-medium text-sm w-full"
+            style={{ backgroundColor: COLORS.dark }}
           >
-            Cancelar
+            {editingId ? 'Actualizar' : 'Agregar'}
           </button>
-        )}
+          {editingId && (
+            <button
+              onClick={cancelEdit}
+              className="px-3 lg:px-4 py-2 rounded-lg border border-gray-300 text-sm w-full"
+            >
+              Cancelar
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="min-w-full bg-white border border-gray-200 rounded-lg">
-          <thead>
-            <tr className="bg-gray-50">
-              <th className="px-3 lg:px-4 py-2 text-left text-sm font-semibold text-gray-700">Nombre</th>
-              <th className="px-3 lg:px-4 py-2 text-left text-sm font-semibold text-gray-700">Teléfono</th>
-              <th className="px-3 lg:px-4 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {customers.map((c) => (
-              <tr key={c.id} className="border-t">
-                <td className="px-3 lg:px-4 py-2 text-sm">{c.nombre}</td>
-                <td className="px-3 lg:px-4 py-2 text-sm">{c.telefono}</td>
-                <td className="px-3 lg:px-4 py-2 flex gap-2">
-                  <button
-                    onClick={() => startEdit(c)}
-                    className="p-1 rounded hover:bg-gray-100"
-                  >
-                    <Edit3 size={16} />
-                  </button>
-                  <button
-                    onClick={() => onDeleteCustomer(c.id)}
-                    className="p-1 rounded hover:bg-gray-100 text-red-600"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </td>
+      <div className="ui-card">
+        <div className="ui-card-pad ui-table-wrapper">
+          <table className="ui-table border border-gray-200 rounded-lg">
+            <thead>
+              <tr className="bg-gray-50">
+                <th className="px-3 lg:px-4 py-2 text-left text-sm font-semibold text-gray-700">Nombre</th>
+                <th className="px-3 lg:px-4 py-2 text-left text-sm font-semibold text-gray-700">Teléfono</th>
+                <th className="px-3 lg:px-4 py-2"></th>
               </tr>
-            ))}
-            {customers.length === 0 && (
-              <tr>
-                <td colSpan={3} className="px-3 lg:px-4 py-4 text-center text-gray-500 text-sm">
-                  No hay clientes registrados
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {customers.map((c) => (
+                <tr key={c.id} className="border-t">
+                  <td className="px-3 lg:px-4 py-2 text-sm">{c.nombre}</td>
+                  <td className="px-3 lg:px-4 py-2 text-sm">{c.telefono}</td>
+                  <td className="px-3 lg:px-4 py-2 flex gap-2">
+                    <button
+                      onClick={() => startEdit(c)}
+                      className="p-1 rounded hover:bg-gray-100"
+                    >
+                      <Edit3 size={16} />
+                    </button>
+                    <button
+                      onClick={() => onDeleteCustomer(c.id)}
+                      className="p-1 rounded hover:bg-gray-100 text-red-600"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {customers.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-3 lg:px-4 py-4 text-center text-gray-500 text-sm">
+                    No hay clientes registrados
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }

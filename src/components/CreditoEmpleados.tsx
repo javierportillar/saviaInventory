@@ -360,7 +360,7 @@ export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosPro
     }
   };
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-6">
+    <section className="space-y-6">
       <header className="space-y-2">
         <h2 className="text-2xl font-bold" style={{ color: COLORS.dark }}>
           Crédito empleados
@@ -376,7 +376,7 @@ export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosPro
       </header>
 
       <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
+        <div className="ui-card ui-card-pad space-y-3">
           <div className="flex items-center gap-2 text-sm text-gray-600 font-medium">
             <CalendarRange size={18} />
             <span>Rango de fechas</span>
@@ -423,7 +423,7 @@ export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosPro
           )}
         </div>
 
-        <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
+        <div className="ui-card ui-card-pad space-y-3">
           <div className="flex items-center gap-2 text-sm text-gray-600 font-medium">
             <Users size={18} />
             <span>Filtrar resultados</span>
@@ -455,7 +455,7 @@ export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosPro
           </div>
         </div>
 
-        <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
+        <div className="ui-card ui-card-pad space-y-3">
           <div className="flex items-center gap-2 text-sm text-gray-600 font-medium">
             <ClipboardList size={18} />
             <span>Resumen del período</span>
@@ -505,7 +505,7 @@ export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosPro
       </section>
 
       <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="xl:col-span-2 bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="xl:col-span-2 ui-card">
           <div className="px-4 py-3 border-b border-gray-100">
             <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
               Créditos pendientes por pedido
@@ -514,8 +514,8 @@ export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosPro
               Pedidos asignados como crédito de empleados dentro del filtro seleccionado.
             </p>
           </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
+          <div className="ui-card-pad ui-table-wrapper">
+            <table className="ui-table">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -595,7 +595,7 @@ export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosPro
           </div>
         </div>
 
-        <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="ui-card">
           <div className="px-4 py-3 border-b border-gray-100">
             <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
               Saldo por empleado
@@ -621,7 +621,7 @@ export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosPro
           </div>
         </div>
       </section>
-      <section className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <section className="ui-card">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
           <div>
             <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
@@ -633,8 +633,8 @@ export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosPro
           </div>
           <History size={18} className="text-gray-400" />
         </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
+        <div className="ui-card-pad ui-table-wrapper">
+          <table className="ui-table">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -715,7 +715,7 @@ export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosPro
 
       {settlementOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg lg:rounded-xl p-5 w-full max-w-lg shadow-xl">
+          <div className="ui-card ui-card-pad w-full max-w-lg shadow-xl">
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
@@ -816,6 +816,6 @@ export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosPro
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }

@@ -1,3 +1,37 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+  .ui-page {
+    @apply w-full max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 xl:px-10;
+  }
+
+  .ui-page-stack {
+    @apply space-y-6 sm:space-y-8;
+  }
+
+  .ui-card {
+    @apply bg-white border border-gray-100 rounded-xl shadow-sm;
+  }
+
+  .ui-card-pad {
+    @apply p-4 sm:p-6;
+  }
+
+  .ui-section-title {
+    @apply text-lg sm:text-xl font-semibold text-gray-800;
+  }
+
+  .ui-table-wrapper {
+    @apply overflow-x-auto;
+  }
+
+  .ui-table {
+    @apply min-w-full text-sm;
+  }
+
+  .ui-badge {
+    @apply inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium;
+  }
+}

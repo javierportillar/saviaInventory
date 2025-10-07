@@ -289,6 +289,8 @@ export function PaymentModal({
   const [feedback, setFeedback] = useState<string | null>(null);
   const [draggedItem, setDraggedItem] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [cashReceivedInput, setCashReceivedInput] = useState<string>('');
+  const hasEditedCashReceivedRef = useRef(false);
 
   const buildInitialSplitState = useCallback((): SplitPersonState[] => {
     personCounterRef.current = 1;
@@ -526,6 +528,26 @@ export function PaymentModal({
   const paidTotal = mode === 'split' ? splitPaidTotal : singlePaidTotal;
   const remaining = total - paidTotal;
 
+  const efectivoSelected = selectedMethods['efectivo'];
+  const efectivoAmount = toPositiveInteger(methodAmounts['efectivo']);
+  const parsedCashReceived = cashReceivedInput.trim() === ''
+    ? efectivoAmount
+    : toPositiveInteger(cashReceivedInput);
+  const cashChange = Math.max(0, parsedCashReceived - efectivoAmount);
+  const cashShortage = Math.max(0, efectivoAmount - parsedCashReceived);
+
+  useEffect(() => {
+    if (!efectivoSelected) {
+      hasEditedCashReceivedRef.current = false;
+      setCashReceivedInput('');
+      return;
+    }
+
+    if (!hasEditedCashReceivedRef.current) {
+      setCashReceivedInput(methodAmounts['efectivo'] ?? '');
+    }
+  }, [efectivoSelected, methodAmounts['efectivo']]);
+
   const summary = useMemo(
     () => formatPaymentSummary(mode === 'split' ? splitAllocations : singleAllocations, formatCOP),
     [mode, singleAllocations, splitAllocations]
@@ -598,8 +620,15 @@ export function PaymentModal({
           const used = computeSelectedTotal(prevSelected, prevAmounts);
           const available = Math.max(0, total - used);
           nextAmounts[method] = available > 0 ? String(available) : '';
+          if (method === 'efectivo') {
+            hasEditedCashReceivedRef.current = false;
+          }
         } else {
           nextAmounts[method] = '';
+          if (method === 'efectivo') {
+            hasEditedCashReceivedRef.current = false;
+            setCashReceivedInput('');
+          }
         }
         return nextAmounts;
       });
@@ -620,6 +649,14 @@ export function PaymentModal({
     setFeedback(null);
   };
 
+  const handleCashReceivedChange = (value: string) => {
+    if (!/^[0-9]*$/.test(value)) {
+      return;
+    }
+    hasEditedCashReceivedRef.current = true;
+    setCashReceivedInput(value);
+  };
+
   const applyRemainingToMethod = (method: PaymentMethod) => {
     const usedByOthers = selectedList
       .filter((entry) => entry !== method)
@@ -630,6 +667,9 @@ export function PaymentModal({
       ...prev,
       [method]: available > 0 ? String(available) : '',
     }));
+    if (method === 'efectivo') {
+      hasEditedCashReceivedRef.current = false;
+    }
     setFeedback(null);
   };
 
@@ -893,7 +933,7 @@ export function PaymentModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+      <div className="ui-card ui-card-pad w-full max-w-4xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-start justify-between mb-4">
           <div>
             <h3 className="text-lg lg:text-xl font-bold" style={{ color: COLORS.dark }}>
@@ -998,6 +1038,38 @@ export function PaymentModal({
                           style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
                           placeholder="Monto"
                         />
+                        {method === 'efectivo' && (
+                          <div className="space-y-1">
+                            <label
+                              className="text-xs font-semibold text-gray-600"
+                              htmlFor={`cash-received-${order.id}`}
+                            >
+                              Monto recibido
+                            </label>
+                            <input
+                              id={`cash-received-${order.id}`}
+                              type="number"
+                              min="0"
+                              step="100"
+                              value={cashReceivedInput}
+                              onChange={(event) => handleCashReceivedChange(event.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
+                              style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+                              placeholder="¿Con cuánto paga la persona?"
+                            />
+                            {efectivoAmount > 0 && (
+                              <p className={`text-xs font-semibold ${
+                                cashShortage > 0 ? 'text-red-600' : cashChange > 0 ? 'text-green-600' : 'text-gray-600'
+                              }`}>
+                                {cashShortage > 0
+                                  ? `Faltan ${formatCOP(cashShortage)} por recibir`
+                                  : cashChange > 0
+                                  ? `Cambio ${formatCOP(cashChange)}`
+                                  : 'Sin cambio'}
+                              </p>
+                            )}
+                          </div>
+                        )}
                         {method === 'credito_empleados' && (
                           <div className="flex flex-col gap-2">
                             <label className="text-xs font-semibold text-gray-600" htmlFor={`credit-employee-${method}`}>

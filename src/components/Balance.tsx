@@ -287,8 +287,8 @@ export function Balance() {
   );
 
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
-      <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+    <section className="space-y-4 sm:space-y-6">
+      <div className="ui-card ui-card-pad flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold" style={{ color: COLORS.dark }}>
             Balance de Caja
@@ -354,13 +354,13 @@ export function Balance() {
       </div>
 
       {loading && (
-        <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 text-center text-gray-500 text-sm">
+        <div className="ui-card ui-card-pad text-center text-gray-500 text-sm">
           Cargando balance...
         </div>
       )}
 
       {!loading && !hasAnyData && (
-        <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 text-center text-gray-500 text-sm">
+        <div className="ui-card ui-card-pad text-center text-gray-500 text-sm">
           Aún no hay movimientos registrados en la caja.
         </div>
       )}
@@ -368,7 +368,7 @@ export function Balance() {
       {!loading && hasAnyData && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-            <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-5 shadow-sm border border-gray-100">
+            <div className="ui-card p-3 sm:p-4 lg:p-5">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-xs lg:text-sm font-medium text-gray-600">Ventas</p>
                 <TrendingUp className="text-green-600" size={20} />
@@ -377,7 +377,7 @@ export function Balance() {
                 {formatCOP(totals.ventas)}
               </p>
             </div>
-            <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-5 shadow-sm border border-gray-100">
+            <div className="ui-card p-3 sm:p-4 lg:p-5">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-xs lg:text-sm font-medium text-gray-600">Gastos</p>
                 <TrendingDown className="text-red-600" size={20} />
@@ -386,7 +386,7 @@ export function Balance() {
                 {formatCOP(totals.gastos)}
               </p>
             </div>
-            <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-5 shadow-sm border border-gray-100">
+            <div className="ui-card p-3 sm:p-4 lg:p-5">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-xs lg:text-sm font-medium text-gray-600">Balance</p>
                 <Wallet className={valueColor(totals.balance)} size={20} />
@@ -395,7 +395,7 @@ export function Balance() {
                 {formatCOP(totals.balance)}
               </p>
             </div>
-            <div className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-5 shadow-sm border border-gray-100 col-span-2 lg:col-span-1">
+            <div className="ui-card p-3 sm:p-4 lg:p-5 col-span-2 lg:col-span-1">
               <div className="flex items-center justify-between mb-1">
                 <p className="text-xs lg:text-sm font-medium text-gray-600">Histórico</p>
                 <PiggyBank className="text-indigo-600" size={20} />
@@ -411,7 +411,7 @@ export function Balance() {
           {methodBreakdown.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {methodBreakdown.map((method) => (
-                <div key={method.id} className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-5 shadow-sm border border-gray-100">
+                <div key={method.id} className="ui-card p-4 lg:p-5">
                   <p className="text-sm font-medium text-gray-600 mb-1">{method.label}</p>
                   <p className="text-xs text-gray-500">Ventas en el período</p>
                   <p className="text-base lg:text-xl font-semibold" style={{ color: COLORS.dark }}>
@@ -434,7 +434,7 @@ export function Balance() {
           )}
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
-            <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="ui-card">
               <div className="px-4 py-4 border-b border-gray-100">
                 <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
                   Ventas por comanda
@@ -443,8 +443,8 @@ export function Balance() {
                   Detalle de cada comanda registrada en el período seleccionado.
                 </p>
               </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full">
+              <div className="ui-card-pad ui-table-wrapper">
+                <table className="ui-table">
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -510,7 +510,7 @@ export function Balance() {
               </div>
             </div>
 
-            <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="ui-card">
               <div className="px-4 py-4 border-b border-gray-100">
                 <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
                   Gastos del período
@@ -519,8 +519,8 @@ export function Balance() {
                   Desglose de cada gasto registrado en el período seleccionado.
                 </p>
               </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full">
+              <div className="ui-card-pad ui-table-wrapper">
+                <table className="ui-table">
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -577,6 +577,6 @@ export function Balance() {
           </div>
         </>
       )}
-    </div>
+    </section>
   );
 }

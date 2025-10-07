@@ -588,7 +588,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     return (
       <div
         key={order.id}
-        className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200"
+        className="ui-card ui-card-pad hover:shadow-md transition-shadow duration-200"
       >
         <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start mb-4 space-y-2 lg:space-y-0">
           <div className="flex-1">
@@ -963,7 +963,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
+    <section className="space-y-4 sm:space-y-6">
       <div className="text-center">
         <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold mb-2" style={{ color: COLORS.dark }}>
           Gestión de Comandas
@@ -974,7 +974,7 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
       </div>
 
       {orders.length === 0 ? (
-        <div className="bg-white rounded-lg lg:rounded-xl p-8 lg:p-12 text-center shadow-sm border border-gray-100">
+        <div className="ui-card ui-card-pad text-center">
           <Clock size={48} className="mx-auto text-gray-400 mb-4" />
           <h3 className="text-lg lg:text-xl font-semibold text-gray-600 mb-2">No hay comandas</h3>
           <p className="text-sm lg:text-base text-gray-500">Los pedidos aparecerán aquí cuando se procesen desde caja</p>
@@ -1014,12 +1014,12 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
           </div>
 
           {selectedDateOrders.length === 0 ? (
-            <div className="bg-white rounded-lg lg:rounded-xl p-8 text-center shadow-sm border border-gray-100 text-gray-500">
+            <div className="ui-card ui-card-pad text-center text-gray-500">
               No hay comandas registradas para esta fecha.
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6">
                 {paginatedOrders.map(renderOrderCard)}
 
               </div>
@@ -1277,6 +1277,6 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }

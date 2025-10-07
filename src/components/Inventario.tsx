@@ -117,7 +117,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
   const renderItemCard = (item: MenuItem) => (
     <div
       key={item.id}
-      className={`bg-white rounded-xl p-6 shadow-sm border transition-all duration-200 hover:shadow-md ${
+      className={`ui-card ui-card-pad transition-all duration-200 hover:shadow-md border ${
         item.stock === 0 ? 'border-red-200' :
         item.stock < 10 ? 'border-yellow-200' :
         'border-gray-100'
@@ -296,7 +296,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
   );
 
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
+    <section className="space-y-4 sm:space-y-6">
       <datalist id="inventariable-category-options">
         {inventariableCategories.map(category => (
           <option key={`inventariable-${category}`} value={category} />
@@ -307,7 +307,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
           <option key={`non-inventariable-${category}`} value={category} />
         ))}
       </datalist>
-      <div className="text-center">
+      <div className="text-center px-2 sm:px-0">
         <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold mb-2" style={{ color: COLORS.dark }}>
           Control de Inventario
         </h2>
@@ -315,7 +315,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
       </div>
 
       {(lowStockItems.length > 0 || outOfStockItems.length > 0) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {outOfStockItems.length > 0 && (
             <div className="bg-red-50 border border-red-200 rounded-lg lg:rounded-xl p-3 lg:p-4">
               <div className="flex items-center gap-2 mb-3">
@@ -356,53 +356,8 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
       )}
 
       {/* Filtros */}
-      <div className="bg-white rounded-lg lg:rounded-xl p-3 lg:p-4 shadow-sm border border-gray-100">
-        <div className="flex flex-col lg:flex-row gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-            <input
-              type="text"
-              placeholder="Buscar productos..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
-              style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
-            />
-          </div>
-          
-          <div className="flex gap-4">
-            <div className="flex items-center gap-2">
-              <Filter size={16} className="text-gray-500" />
-              <span className="text-sm font-medium whitespace-nowrap">Tipo:</span>
-            </div>
-            <select
-              value={inventoryFilter}
-              onChange={(e) => setInventoryFilter(e.target.value as 'all' | 'inventariables' | 'no-inventariables')}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm w-full lg:w-auto"
-              style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
-            >
-              <option value="all">Todos</option>
-              <option value="inventariables">Inventariables</option>
-              <option value="no-inventariables">No inventariables</option>
-            </select>
-            
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm w-full lg:w-auto"
-              style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
-            >
-              <option value="">Todas las categorías</option>
-              {nonInventariableCategories.map(category => (
-                <option key={category} value={category}>{category}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col lg:flex-row gap-4 lg:justify-end">
-        <div className="relative flex-1">
+      <div className="ui-card ui-card-pad space-y-4">
+        <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
           <input
             type="text"
@@ -413,29 +368,63 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
             style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
           />
         </div>
-        <button
-          onClick={() =>
-            setNewItem({
-              nombre: '',
-              precio: null,
-              categoria: '',
-              inventarioCategoria: 'No inventariables',
-              inventarioTipo: 'cantidad',
-              unidadMedida: 'kg',
-              stock: null,
-              descripcion: '',
-            })
-          }
-          className="flex items-center gap-1 px-4 py-2 rounded-lg text-white hover:opacity-90 text-sm lg:ml-2 justify-center"
-          style={{ backgroundColor: COLORS.accent }}
-        >
-          <Plus size={16} /> Agregar producto
-        </button>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="inline-flex items-center gap-2 text-sm font-medium text-gray-600">
+            <Filter size={16} className="text-gray-500" />
+            <span>Tipo:</span>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 w-full sm:w-auto">
+            <select
+              value={inventoryFilter}
+              onChange={(e) => setInventoryFilter(e.target.value as 'all' | 'inventariables' | 'no-inventariables')}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm w-full sm:w-auto"
+              style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+            >
+              <option value="all">Todos</option>
+              <option value="inventariables">Inventariables</option>
+              <option value="no-inventariables">No inventariables</option>
+            </select>
+
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm w-full sm:w-auto"
+              style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+            >
+              <option value="">Todas las categorías</option>
+              {nonInventariableCategories.map(category => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sm:ml-auto w-full sm:w-auto">
+            <button
+              onClick={() =>
+                setNewItem({
+                  nombre: '',
+                  precio: null,
+                  categoria: '',
+                  inventarioCategoria: 'No inventariables',
+                  inventarioTipo: 'cantidad',
+                  unidadMedida: 'kg',
+                  stock: null,
+                  descripcion: '',
+                })
+              }
+              className="flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium shadow-sm"
+              style={{ backgroundColor: COLORS.accent }}
+            >
+              <Plus size={16} /> Agregar producto
+            </button>
+          </div>
+        </div>
       </div>
 
       {newItem && (
-        <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="ui-card ui-card-pad">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <input
               className="border border-gray-300 rounded px-3 py-2" placeholder="Nombre"
               value={newItem.nombre}
@@ -541,7 +530,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
             <h3 className="text-xl font-semibold mb-4" style={{ color: COLORS.dark }}>
               Inventariables ({inventariableItems.length})
             </h3>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {inventariableItems.map(renderItemCard)}
             </div>
           </div>
@@ -560,7 +549,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
                   <h4 className="text-lg font-medium mb-3 text-gray-700 border-b border-gray-200 pb-2">
                     {categoria} ({itemsInCategory.length})
                   </h4>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {itemsInCategory.map(renderItemCard)}
                   </div>
                 </div>
@@ -581,6 +570,6 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }

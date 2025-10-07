@@ -62,8 +62,8 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
   ];
 
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-6 lg:space-y-8">
-      <div className="text-center">
+    <section className="space-y-6 sm:space-y-8">
+      <div className="text-center px-2 sm:px-0">
         <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold mb-2" style={{ color: COLORS.dark }}>
           Dashboard SAVIA
         </h2>
@@ -72,14 +72,14 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
         </p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
             <button
               key={stat.label}
               onClick={stat.onClick}
-              className="bg-white rounded-lg lg:rounded-xl p-3 sm:p-4 lg:p-6 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200 hover:scale-105 text-left"
+              className="ui-card ui-card-pad hover:shadow-md transition-all duration-200 hover:scale-[1.02] text-left"
             >
               <div className="flex items-center justify-between">
                 <div>
@@ -102,7 +102,7 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
         {/* Últimos pedidos */}
-        <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
+        <div className="ui-card ui-card-pad">
           <h3 className="text-lg lg:text-xl font-semibold mb-4" style={{ color: COLORS.dark }}>
             Últimos pedidos
           </h3>
@@ -130,7 +130,7 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
         </div>
 
         {/* Productos con stock bajo */}
-        <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
+        <div className="ui-card ui-card-pad">
           <h3 className="text-lg lg:text-xl font-semibold mb-4" style={{ color: COLORS.dark }}>
             Alertas de inventario
           </h3>
@@ -154,6 +154,6 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
           </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

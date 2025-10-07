@@ -551,7 +551,7 @@ export function Empleados() {
   const modalDiffClass = Math.abs(modalWeekDiff) < 0.01 ? 'text-gray-600' : modalWeekDiff > 0 ? 'text-green-600' : 'text-orange-500';
 
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
+    <section className="space-y-4 sm:space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Users size={24} style={{ color: COLORS.dark }} />
@@ -587,7 +587,7 @@ export function Empleados() {
       </div>
 
       {showGeneralHistory && (
-        <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <div className="ui-card ui-card-pad">
           <HistoricoEmpleados />
         </div>
       )}
@@ -595,7 +595,7 @@ export function Empleados() {
       {/* Formulario */}
       {showForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+          <div className="ui-card ui-card-pad w-full max-w-md max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-bold mb-4" style={{ color: COLORS.dark }}>
               {editingId ? 'Editar Empleado' : 'Nuevo Empleado'}
             </h3>
@@ -1136,6 +1136,6 @@ export function Empleados() {
           <p className="text-gray-500">Agrega tu primer empleado para comenzar</p>
         </div>
       )}
-    </div>
+    </section>
   );
 }

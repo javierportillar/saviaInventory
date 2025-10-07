@@ -448,7 +448,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6">
+    <section className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
         {/* Panel de productos */}
         <div className="order-2 lg:order-1 lg:col-span-2 space-y-6">
@@ -508,7 +508,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
               return (
                 <div
                   key={item.id}
-                  className={`relative rounded-lg lg:rounded-xl p-3 lg:p-4 shadow-sm hover:shadow-md transition-all duration-200 border ${
+                  className={`relative ui-card ui-card-pad hover:shadow-md transition-all duration-200 border ${
                     isSelected ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'
                   }`}
                 >
@@ -553,7 +553,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
 
         {/* Panel del carrito */}
         <div className="order-1 lg:order-2 space-y-6">
-          <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 lg:sticky lg:top-24">
+          <div className="ui-card ui-card-pad lg:sticky lg:top-24">
             <div className="flex items-center gap-2 mb-4">
               <ShoppingCart size={24} style={{ color: COLORS.dark }} />
               <h3 className="text-lg lg:text-xl font-bold" style={{ color: COLORS.dark }}>
@@ -666,7 +666,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
         </div>
 
         {pendingPaymentOrders.length > 0 && (
-          <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 space-y-4">
+          <div className="ui-card ui-card-pad space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-lg lg:text-xl font-bold" style={{ color: COLORS.dark }}>
@@ -991,6 +991,6 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
           onAssignCredit={handleAssignCredit}
         />
       )}
-    </div>
+    </section>
   );
 }

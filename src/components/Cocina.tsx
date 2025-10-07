@@ -32,7 +32,7 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-4 lg:space-y-6">
+    <section className="space-y-4 sm:space-y-6">
       <div className="text-center">
         <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold mb-2" style={{ color: COLORS.dark }}>
           Módulo de Cocina
@@ -45,7 +45,7 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
         {/* Pedidos pendientes */}
         <div className="xl:col-span-2 space-y-6">
-          <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
+          <div className="ui-card ui-card-pad">
             <div className="flex items-center gap-2 mb-4">
               <ChefHat size={24} style={{ color: COLORS.dark }} />
               <h3 className="text-lg lg:text-xl font-bold" style={{ color: COLORS.dark }}>
@@ -138,7 +138,7 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
 
         {/* Pedidos listos */}
         <div className="space-y-6">
-          <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
+          <div className="ui-card ui-card-pad">
             <div className="flex items-center gap-2 mb-4">
               <CheckCircle size={24} className="text-green-600" />
               <h3 className="text-lg lg:text-xl font-bold" style={{ color: COLORS.dark }}>
@@ -176,6 +176,6 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
           </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

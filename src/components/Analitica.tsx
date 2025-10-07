@@ -704,7 +704,7 @@ export function Analitica({ orders }: AnaliticaProps) {
   ];
 
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 space-y-6 lg:space-y-8">
+    <section className="space-y-6 sm:space-y-8">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <h2
@@ -717,7 +717,7 @@ export function Analitica({ orders }: AnaliticaProps) {
             Analiza el desempeño histórico y descubre tendencias por rangos personalizados o fechas específicas.
           </p>
         </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm text-right">
+        <div className="ui-card p-3 text-right">
           <p className="text-xs uppercase tracking-wide text-gray-500">Total histórico registrado</p>
           <p className="text-lg font-semibold mt-1" style={{ color: COLORS.dark }}>
             {formatCOP(historicalTotal)}
@@ -725,7 +725,7 @@ export function Analitica({ orders }: AnaliticaProps) {
         </div>
       </div>
 
-      <section className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100 space-y-4">
+      <section className="ui-card ui-card-pad space-y-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="inline-flex bg-gray-100 rounded-lg p-1">
             <button
@@ -832,7 +832,7 @@ export function Analitica({ orders }: AnaliticaProps) {
         {infoCards.map(({ label, value, description, icon: Icon }) => (
           <div
             key={label}
-            className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100"
+            className="ui-card p-4 lg:p-6"
           >
             <div className="flex items-center justify-between mb-3">
               <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
@@ -849,7 +849,7 @@ export function Analitica({ orders }: AnaliticaProps) {
       </section>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <section className="xl:col-span-2 bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
+        <section className="xl:col-span-2 ui-card ui-card-pad">
           <h3 className="text-lg font-semibold mb-4" style={{ color: COLORS.dark }}>
             Desempeño diario
           </h3>
@@ -881,7 +881,7 @@ export function Analitica({ orders }: AnaliticaProps) {
           )}
         </section>
 
-        <section className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
+        <section className="ui-card ui-card-pad">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.dark }}>
             <PieChart size={18} /> Distribución por método de pago
           </h3>
@@ -912,7 +912,7 @@ export function Analitica({ orders }: AnaliticaProps) {
         </section>
       </div>
 
-      <section className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
+      <section className="ui-card ui-card-pad">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-6">
           <div>
             <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
@@ -983,7 +983,7 @@ export function Analitica({ orders }: AnaliticaProps) {
         )}
       </section>
 
-      <section className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
+      <section className="ui-card ui-card-pad">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-6">
           <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
             Comportamiento por hora
@@ -1075,7 +1075,7 @@ export function Analitica({ orders }: AnaliticaProps) {
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <section className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
+        <section className="ui-card ui-card-pad">
           <h3 className="text-lg font-semibold mb-4" style={{ color: COLORS.dark }}>
             Productos más vendidos
           </h3>
@@ -1098,7 +1098,7 @@ export function Analitica({ orders }: AnaliticaProps) {
           )}
         </section>
 
-        <section className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 shadow-sm border border-gray-100">
+        <section className="ui-card ui-card-pad">
           <h3 className="text-lg font-semibold mb-4" style={{ color: COLORS.dark }}>
             Pedidos del periodo
           </h3>
@@ -1133,6 +1133,6 @@ export function Analitica({ orders }: AnaliticaProps) {
           )}
         </section>
       </div>
-    </div>
+    </section>
   );
 }

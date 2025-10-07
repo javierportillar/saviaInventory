@@ -368,76 +368,77 @@ function App() {
         onLogout={handleLogout}
         connectionStatus={connectionStatus}
       />
-      
-      <main className="w-full">
-        {module === 'dashboard' && (
-          <Dashboard
-            orders={orders}
-            menuItems={menuItems}
-            onModuleChange={handleModuleChange}
-          />
-        )}
-        {module === 'balance' && <Balance />}
-        {module === 'caja' && (
-          <Caja
-            orders={orders}
-            onModuleChange={handleModuleChange}
-            onCreateOrder={handleCreateOrder}
-            onRecordOrderPayment={handleRecordOrderPayment}
-            onAssignOrderCredit={handleAssignOrderCredit}
-          />
-        )}
-        {module === 'comandas' && (
-          <Comandas
-            orders={orders}
-            onUpdateOrderStatus={handleUpdateOrderStatus}
-            onSaveOrderChanges={handleSaveOrderChanges}
-            onRecordOrderPayment={handleRecordOrderPayment}
-            onDeleteOrder={handleDeleteOrder}
-            isAdmin={user.role === 'admin'}
-            onAssignOrderCredit={handleAssignOrderCredit}
-            focusRequest={comandasFocus}
-          />
-        )}
-        {module === 'inventario' && (
-          <Inventario
-            menuItems={menuItems}
-            onUpdateMenuItem={handleUpdateMenuItem}
-            onCreateMenuItem={handleCreateMenuItem}
-            onDeleteMenuItem={handleDeleteMenuItem}
-          />
-        )}
-        {module === 'cocina' && (
-          <Cocina 
-            orders={orders} 
-            onUpdateOrderStatus={handleUpdateOrderStatus}
-          />
-        )}
-        {module === 'clientes' && (
-          <Clientes
-            customers={customers}
-            onAddCustomer={handleAddCustomer}
-            onUpdateCustomer={handleUpdateCustomer}
-            onDeleteCustomer={handleDeleteCustomer}
-          />
-        )}
-        {module === 'empleados' && <Empleados />}
-        {module === 'gastos' && <Gastos focusRequest={gastosFocus} />}
-        {module === 'novedades' && (
-          <Novedades
-            onNavigateToComandas={handleNavigateToComandasFromNovedades}
-            onNavigateToGastos={handleNavigateToGastosFromNovedades}
-          />
-        )}
-        {module === 'creditoEmpleados' && (
-          <CreditoEmpleados
-            orders={orders}
-            onSettleCredit={handleSettleOrderCredit}
-          />
-        )}
-        {module === 'analitica' && user.role === 'admin' && (
-          <Analitica orders={orders} />
-        )}
+      <main className="ui-page py-6">
+        <div className="ui-page-stack">
+          {module === 'dashboard' && (
+            <Dashboard
+              orders={orders}
+              menuItems={menuItems}
+              onModuleChange={handleModuleChange}
+            />
+          )}
+          {module === 'balance' && <Balance />}
+          {module === 'caja' && (
+            <Caja
+              orders={orders}
+              onModuleChange={handleModuleChange}
+              onCreateOrder={handleCreateOrder}
+              onRecordOrderPayment={handleRecordOrderPayment}
+              onAssignOrderCredit={handleAssignOrderCredit}
+            />
+          )}
+          {module === 'comandas' && (
+            <Comandas
+              orders={orders}
+              onUpdateOrderStatus={handleUpdateOrderStatus}
+              onSaveOrderChanges={handleSaveOrderChanges}
+              onRecordOrderPayment={handleRecordOrderPayment}
+              onDeleteOrder={handleDeleteOrder}
+              isAdmin={user.role === 'admin'}
+              onAssignOrderCredit={handleAssignOrderCredit}
+              focusRequest={comandasFocus}
+            />
+          )}
+          {module === 'inventario' && (
+            <Inventario
+              menuItems={menuItems}
+              onUpdateMenuItem={handleUpdateMenuItem}
+              onCreateMenuItem={handleCreateMenuItem}
+              onDeleteMenuItem={handleDeleteMenuItem}
+            />
+          )}
+          {module === 'cocina' && (
+            <Cocina 
+              orders={orders} 
+              onUpdateOrderStatus={handleUpdateOrderStatus}
+            />
+          )}
+          {module === 'clientes' && (
+            <Clientes
+              customers={customers}
+              onAddCustomer={handleAddCustomer}
+              onUpdateCustomer={handleUpdateCustomer}
+              onDeleteCustomer={handleDeleteCustomer}
+            />
+          )}
+          {module === 'empleados' && <Empleados />}
+          {module === 'gastos' && <Gastos focusRequest={gastosFocus} />}
+          {module === 'novedades' && (
+            <Novedades
+              onNavigateToComandas={handleNavigateToComandasFromNovedades}
+              onNavigateToGastos={handleNavigateToGastosFromNovedades}
+            />
+          )}
+          {module === 'creditoEmpleados' && (
+            <CreditoEmpleados
+              orders={orders}
+              onSettleCredit={handleSettleOrderCredit}
+            />
+          )}
+          {module === 'analitica' && user.role === 'admin' && (
+            <Analitica orders={orders} />
+          )}
+        </div>
       </main>
     </div>
   );
