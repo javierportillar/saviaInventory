@@ -23,7 +23,7 @@ import {
   BOWL_TOPPING_OPTIONS,
   isBowlSalado,
 } from '../constants/bowl';
-import { formatPaymentSummary, getOrderAllocations, isOrderPaid } from '../utils/payments';
+import { formatPaymentSummary, getOrderAllocations, isOrderPaid, isOrderPaymentHandled } from '../utils/payments';
 import { PaymentModal } from './PaymentModal';
 
 const ITEMS_PER_PAGE = 30;
@@ -79,14 +79,39 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
       return;
     }
 
-    const { dateKey } = focusRequest;
-    if (!dateKey) {
-      return;
+    const { dateKey, orderId } = focusRequest;
+
+    if (orderId) {
+      const targetOrder = orders.find(order => order.id === orderId);
+      if (targetOrder) {
+        const targetDateKey = getDateKey(targetOrder.timestamp);
+        setSelectedDateKey(targetDateKey);
+
+        const dateOrders = orders
+          .filter(order => getDateKey(order.timestamp) === targetDateKey)
+          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+        const orderIndex = dateOrders.findIndex(order => order.id === orderId);
+        if (orderIndex >= 0) {
+          const page = Math.floor(orderIndex / ITEMS_PER_PAGE) + 1;
+          setCurrentPage(page);
+        } else {
+          setCurrentPage(1);
+        }
+        setExpandedActionsOrderId(orderId);
+        setEditingOrder(null);
+        setShowAddProduct(false);
+        return;
+      }
     }
 
-    setSelectedDateKey(dateKey);
-    setCurrentPage(1);
-  }, [focusRequest]);
+    if (dateKey) {
+      setSelectedDateKey(dateKey);
+      setCurrentPage(1);
+      if (orderId) {
+        setExpandedActionsOrderId(orderId);
+      }
+    }
+  }, [focusRequest, orders]);
 
   const sortedOrders = useMemo(
     () => [...orders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
@@ -574,10 +599,17 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
         employeeCreditLabel = ` · Empleado ${order.creditInfo.employeeId}`;
       }
     }
+    const creditAmount = isEmployeeCredit
+      ? Math.max(0, Math.round(order.creditInfo?.amount ?? order.total))
+      : 0;
     const paymentSummary = isEmployeeCredit
-      ? `Crédito empleados pendiente${employeeCreditLabel}`
+      ? `Crédito empleados${employeeCreditLabel} · ${formatCOP(creditAmount || order.total)}`
       : formatPaymentSummary(allocations, formatCOP);
     const paid = isOrderPaid(order);
+    const paymentHandled = isOrderPaymentHandled(order);
+    const paymentStatusLabel = paymentHandled
+      ? (paid ? 'Pago registrado' : 'Pago gestionado')
+      : 'Pago pendiente';
     const canEditOrder = order.estado === 'entregado' && (paid || !isEmployeeCredit || isAdmin);
     const canManagePaymentActions = paid || !isEmployeeCredit || isAdmin;
     const showEditActionsToggle = paid || (isEmployeeCredit && isAdmin);
@@ -646,8 +678,8 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
               <CreditCard size={14} />
               <span className="text-left">{paymentSummary}</span>
             </div>
-            <span className={`px-2 py-1 rounded-full font-medium ${paid ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-800'}`}>
-              {paid ? 'Pago registrado' : 'Pago pendiente'}
+            <span className={`px-2 py-1 rounded-full font-medium ${paymentHandled ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-800'}`}>
+              {paymentStatusLabel}
             </span>
           </div>
         </div>
@@ -889,10 +921,10 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
                     <div className="space-y-2">
                       <div className="px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-lg text-xs text-yellow-800">
                         <p className="font-semibold">
-                          Crédito de empleados pendiente{employeeCreditLabel}
+                          Crédito de empleados en seguimiento{employeeCreditLabel}
                         </p>
                         <p className="mt-1 text-[11px] text-yellow-700">
-                          Gestiona el pago desde el módulo Crédito empleados cuando el colaborador pague.
+                          Gestiona el cobro desde el módulo Crédito empleados cuando el colaborador realice el pago.
                         </p>
                       </div>
                       {isAdmin && (

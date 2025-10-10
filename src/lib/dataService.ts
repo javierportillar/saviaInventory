@@ -30,6 +30,7 @@ import {
   determinePaymentStatus,
   getAllocationsTotal,
   getOrderAllocations,
+  getOrderPaymentDate,
   getPrimaryMethodFromAllocations,
   mergeAllocations,
   sanitizeAllocations,
@@ -477,6 +478,7 @@ interface OrderCreditMetadata {
 interface OrderMetadata {
   paymentStatus?: PaymentStatus;
   paymentAllocations?: PaymentAllocation[];
+  paymentRegisteredAt?: string;
   credit?: OrderCreditMetadata;
 }
 
@@ -513,6 +515,12 @@ const mergeOrderMetadata = (
     next.paymentAllocations = sanitizeAllocations(updates.paymentAllocations ?? []);
   }
 
+  if (typeof updates.paymentRegisteredAt === 'string') {
+    next.paymentRegisteredAt = updates.paymentRegisteredAt;
+  } else if ('paymentRegisteredAt' in updates && updates.paymentRegisteredAt === undefined) {
+    delete next.paymentRegisteredAt;
+  }
+
   if ('credit' in updates) {
     if (updates.credit) {
       next.credit = updates.credit;
@@ -521,7 +529,10 @@ const mergeOrderMetadata = (
     }
   }
 
-  const hasPaymentInfo = !!next.paymentStatus || (next.paymentAllocations && next.paymentAllocations.length > 0);
+  const hasPaymentInfo =
+    !!next.paymentStatus ||
+    (next.paymentAllocations && next.paymentAllocations.length > 0) ||
+    !!next.paymentRegisteredAt;
   const hasCreditInfo = !!next.credit;
 
   if (!hasPaymentInfo && !hasCreditInfo) {
@@ -546,6 +557,9 @@ const syncOrderMetadata = (order: Order): void => {
   const updates: Partial<OrderMetadata> & { credit?: OrderCreditMetadata | null } = {
     paymentStatus: order.paymentStatus,
     paymentAllocations: order.paymentAllocations ?? [],
+    paymentRegisteredAt: order.paymentRegisteredAt
+      ? order.paymentRegisteredAt.toISOString()
+      : undefined,
   };
   if (order.creditInfo) {
     updates.credit = {
@@ -814,6 +828,21 @@ const mapOrderRecord = (record: any): Order => {
       ? 'pagado'
       : 'pendiente');
 
+  let paymentRegisteredAt: Date | undefined;
+  const rawPaidAt = metadata?.paymentRegisteredAt
+    ?? (typeof record?.paymentRegisteredAt === 'string' ? record.paymentRegisteredAt : undefined)
+    ?? (typeof record?.paid_at === 'string' ? record.paid_at : undefined);
+  if (rawPaidAt) {
+    const parsed = new Date(rawPaidAt);
+    if (!Number.isNaN(parsed.getTime())) {
+      paymentRegisteredAt = parsed;
+    }
+  }
+
+  if (!paymentRegisteredAt && paymentStatus === 'pagado') {
+    paymentRegisteredAt = new Date(timestamp);
+  }
+
   let creditInfo: OrderCreditInfo | undefined;
   const creditMeta = metadata?.credit;
   if (creditMeta && creditMeta.type === 'empleados') {
@@ -836,6 +865,7 @@ const mapOrderRecord = (record: any): Order => {
     paymentStatus,
     creditInfo,
     metodoPago: derivedMetodoPago,
+    paymentRegisteredAt,
   };
 };
 
@@ -915,6 +945,147 @@ interface DailyAccumulator {
   egresosPorMetodo: MethodTotals;
 }
 
+interface SupabaseCreditHistoryRow {
+  order_id?: string | null;
+  order_numero?: number | null;
+  monto?: number | null;
+  tipo?: 'cargo' | 'abono' | null;
+  timestamp?: string | null;
+  empleado_id?: string | null;
+  empleado?: { id?: string | null; nombre?: string | null } | null;
+  empleado_nombre?: string | null;
+}
+
+interface OutstandingCreditInfo {
+  amount: number;
+  assignedAt?: string;
+  employeeId?: string;
+  employeeName?: string;
+}
+
+const buildOutstandingCreditMap = (rows: SupabaseCreditHistoryRow[]): Map<string, OutstandingCreditInfo> => {
+  const credits = new Map<string, OutstandingCreditInfo>();
+
+  rows.forEach((row) => {
+    const orderId = typeof row.order_id === 'string' ? row.order_id : undefined;
+    if (!orderId) {
+      return;
+    }
+    const amount = Math.max(0, Math.round(Number(row.monto) || 0));
+    if (amount <= 0) {
+      return;
+    }
+
+    let record = credits.get(orderId);
+    if (!record) {
+      record = { amount: 0 };
+      credits.set(orderId, record);
+    }
+
+    if (row.tipo === 'cargo') {
+      record.amount += amount;
+      const ts = typeof row.timestamp === 'string' ? row.timestamp : undefined;
+      if (ts) {
+        const currentTs = record.assignedAt ? new Date(record.assignedAt).getTime() : Number.NEGATIVE_INFINITY;
+        const nextTs = new Date(ts).getTime();
+        if (!Number.isNaN(nextTs) && nextTs >= currentTs) {
+          record.assignedAt = ts;
+        }
+      }
+      const employeeId = typeof row.empleado_id === 'string' ? row.empleado_id : row.empleado?.id ?? undefined;
+      if (employeeId) {
+        record.employeeId = employeeId;
+      }
+      const employeeName = row.empleado?.nombre ?? row.empleado_nombre ?? undefined;
+      if (employeeName) {
+        record.employeeName = employeeName;
+      }
+    } else if (row.tipo === 'abono') {
+      record.amount -= amount;
+      if (record.amount < 0) {
+        record.amount = 0;
+      }
+    }
+  });
+
+  const outstanding = new Map<string, OutstandingCreditInfo>();
+  credits.forEach((record, orderId) => {
+    if (record.amount > 0) {
+      outstanding.set(orderId, record);
+    }
+  });
+  return outstanding;
+};
+
+const hydrateOrdersWithEmployeeCredit = async (orders: Order[]): Promise<Order[]> => {
+  if (orders.length === 0) {
+    return orders;
+  }
+
+  const orderIds = orders.map((order) => order.id).filter((id): id is string => typeof id === 'string' && id.length > 0);
+  if (orderIds.length === 0) {
+    return orders;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('employee_credit_history')
+      .select(`
+        order_id,
+        order_numero,
+        monto,
+        tipo,
+        timestamp,
+        empleado_id,
+        empleado:empleados ( id, nombre )
+      `)
+      .in('order_id', orderIds)
+      .order('timestamp', { ascending: true });
+    if (error) {
+      throw error;
+    }
+
+    const outstanding = buildOutstandingCreditMap(data ?? []);
+
+    return orders.map((order) => {
+      const credit = outstanding.get(order.id);
+      if (!credit) {
+        if (order.creditInfo && order.metodoPago === 'credito_empleados') {
+          return {
+            ...order,
+            creditInfo: undefined,
+            metodoPago: order.metodoPago === 'credito_empleados' && order.paymentAllocations?.length
+              ? getPrimaryMethodFromAllocations(order.paymentAllocations) ?? order.metodoPago
+              : order.metodoPago,
+          };
+        }
+        return order;
+      }
+
+      const assignedAt = credit.assignedAt ? new Date(credit.assignedAt) : order.timestamp;
+      const safeAssignedAt = Number.isNaN(assignedAt.getTime()) ? order.timestamp : assignedAt;
+
+      return {
+        ...order,
+        metodoPago: 'credito_empleados',
+        paymentStatus: 'pendiente',
+        paymentAllocations: [],
+        paymentRegisteredAt: undefined,
+        creditInfo: {
+          type: 'empleados',
+          amount: credit.amount,
+          assignedAt: safeAssignedAt,
+          employeeId: credit.employeeId,
+          employeeName: credit.employeeName,
+        },
+      };
+    });
+  } catch (error) {
+    console.warn('[dataService] No se pudo obtener el estado de créditos de empleados.', error);
+    return orders;
+  }
+};
+
 const computeLocalBalance = (orders: Order[], gastos: Gasto[]): BalanceResumen[] => {
   const accumulator = new Map<string, DailyAccumulator>();
 
@@ -937,7 +1108,7 @@ const computeLocalBalance = (orders: Order[], gastos: Gasto[]): BalanceResumen[]
       return;
     }
 
-    const date = new Date(order.timestamp);
+    const date = getOrderPaymentDate(order);
     if (Number.isNaN(date.getTime())) return;
     const key = toLocalDateKey(date);
     if (!key) return;
@@ -1152,7 +1323,8 @@ export const fetchOrders = async (): Promise<Order[]> => {
         .select(ORDER_SELECT_COLUMNS)
         .order('timestamp', { ascending: false });
       if (error) throw error;
-      const mapped = (data || []).map(mapOrderRecord);
+      let mapped = (data || []).map(mapOrderRecord);
+      mapped = await hydrateOrdersWithEmployeeCredit(mapped);
       persistLocalOrders(mapped);
       return mapped;
     } catch (error) {
@@ -1297,11 +1469,17 @@ export const recordOrderPayment = async (
     }
   }
 
+  const now = new Date();
+  const paymentRegisteredAt = paymentStatus === 'pagado'
+    ? now
+    : order.paymentRegisteredAt;
+
   const updatedOrder: Order = {
     ...order,
     metodoPago: primaryMethod,
     paymentAllocations: sanitizedAllocations,
     paymentStatus,
+    paymentRegisteredAt,
     creditInfo: paymentStatus === 'pagado' ? undefined : order.creditInfo,
   };
 
@@ -1361,6 +1539,7 @@ export const assignOrderCredit = async (
   mergeOrderMetadata(order.id, {
     paymentStatus: 'pendiente',
     paymentAllocations: [],
+    paymentRegisteredAt: undefined,
     credit: creditMetadata,
   });
 
@@ -1370,6 +1549,7 @@ export const assignOrderCredit = async (
     metodoPago: 'credito_empleados',
     paymentStatus: 'pendiente',
     paymentAllocations: [],
+    paymentRegisteredAt: undefined,
     creditInfo: {
       type: 'empleados',
       amount,
@@ -1421,6 +1601,8 @@ export const settleOrderEmployeeCredit = async (
     ? [{ metodo, monto: amount }]
     : [];
 
+  const now = new Date();
+
   if (await ensureSupabaseReady()) {
     try {
       const updatePayload = {
@@ -1440,6 +1622,7 @@ export const settleOrderEmployeeCredit = async (
   mergeOrderMetadata(order.id, {
     paymentStatus: 'pagado',
     paymentAllocations,
+    paymentRegisteredAt: now.toISOString(),
     credit: null,
   });
 
@@ -1449,6 +1632,7 @@ export const settleOrderEmployeeCredit = async (
     metodoPago: metodo,
     paymentStatus: 'pagado',
     paymentAllocations,
+    paymentRegisteredAt: now,
     creditInfo: undefined,
   };
 
@@ -1539,14 +1723,19 @@ export const updateOrder = async (orderId: string, updates: { items?: CartItem[]
           }));
           const { error: insertError } = await supabase.from('order_items').insert(orderItemsPayload);
           if (insertError) throw insertError;
+        }
       }
+
+      mergeOrderMetadata(orderId, {
+        paymentStatus: 'pendiente',
+        paymentAllocations: [],
+        paymentRegisteredAt: undefined,
+      });
+      return;
+    } catch (error) {
+      console.warn('Supabase not available, using local data:', error);
     }
-    mergeOrderMetadata(orderId, { paymentStatus: 'pendiente', paymentAllocations: [] });
-    return;
-  } catch (error) {
-    console.warn('Supabase not available, using local data:', error);
   }
-}
 
   // Local storage fallback
   const orders = getLocalData<Order[]>('savia-orders', []).map(mapOrderRecord);
@@ -1561,7 +1750,11 @@ export const updateOrder = async (orderId: string, updates: { items?: CartItem[]
     return order;
   });
   setLocalData('savia-orders', updatedOrders);
-  mergeOrderMetadata(orderId, { paymentStatus: 'pendiente', paymentAllocations: [] });
+  mergeOrderMetadata(orderId, {
+    paymentStatus: 'pendiente',
+    paymentAllocations: [],
+    paymentRegisteredAt: undefined,
+  });
 };
 
 export const deleteOrder = async (orderId: string): Promise<void> => {

@@ -34,6 +34,7 @@ export interface PaymentAllocation {
 export interface FocusDateRequest {
   dateKey: string;
   requestId: number;
+  orderId?: string;
 }
 
 export type PaymentStatus = 'pendiente' | 'pagado';
@@ -68,6 +69,7 @@ export interface Order {
   metodoPago?: PaymentMethod;
   paymentStatus?: PaymentStatus;
   paymentAllocations?: PaymentAllocation[];
+  paymentRegisteredAt?: Date;
   creditInfo?: OrderCreditInfo;
 }
 

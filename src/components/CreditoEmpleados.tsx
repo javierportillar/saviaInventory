@@ -27,6 +27,7 @@ const SETTLEMENT_METHODS: { value: SettlementPaymentMethod; label: string; descr
 interface CreditoEmpleadosProps {
   orders: Order[];
   onSettleCredit: (order: Order, options: { metodo: PaymentMethod }) => Promise<void>;
+  onViewOrder?: (order: Order) => void;
 }
 
 interface CreditOrderView {
@@ -81,7 +82,7 @@ const normalizeSettlementMethod = (method: SettlementPaymentMethod): SettlementP
   return 'efectivo';
 };
 
-export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosProps) {
+export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: CreditoEmpleadosProps) {
   const [creditRecords, setCreditRecords] = useState<EmployeeCreditRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState<boolean>(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -552,7 +553,7 @@ export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosPro
                 {filteredCreditOrders.map((entry) => {
                   const { order, assignedAt, amount, employeeLabel } = entry;
                   const paymentSummary = order.creditInfo
-                    ? 'Crédito empleados pendiente'
+                    ? 'Crédito empleados en seguimiento'
                     : formatPaymentSummary(getOrderAllocations(order), formatCOP);
                   const isSettling = settlingOrderId === order.id;
                   return (
@@ -573,19 +574,31 @@ export function CreditoEmpleados({ orders, onSettleCredit }: CreditoEmpleadosPro
                         {formatCOP(amount)}
                       </td>
                       <td className="px-3 lg:px-6 py-3 text-xs">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenSettlement(entry)}
-                          disabled={isSettling}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-green-600 text-white font-semibold hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          {isSettling ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : (
-                            <CheckCircle size={14} />
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2">
+                          {onViewOrder && (
+                            <button
+                              type="button"
+                              onClick={() => onViewOrder(order)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-blue-200 text-blue-600 hover:border-blue-600 hover:bg-blue-600 hover:text-white transition-colors"
+                            >
+                              <ClipboardList size={14} />
+                              Ver comanda
+                            </button>
                           )}
-                          {isSettling ? 'Procesando...' : 'Registrar pago'}
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenSettlement(entry)}
+                            disabled={isSettling}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-green-600 text-white font-semibold hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            {isSettling ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              <CheckCircle size={14} />
+                            )}
+                            {isSettling ? 'Procesando...' : 'Registrar pago'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

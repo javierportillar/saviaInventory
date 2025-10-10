@@ -201,13 +201,27 @@ function App() {
     setModule(module);
   };
 
-  const createFocusRequest = (dateKey: string): FocusDateRequest => ({
+  const getDateKey = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const createFocusRequest = (dateKey: string, orderId?: string): FocusDateRequest => ({
     dateKey,
+    orderId,
     requestId: Date.now(),
   });
 
   const handleNavigateToComandasFromNovedades = (dateKey: string) => {
     setComandasFocus(createFocusRequest(dateKey));
+    setModule('comandas');
+  };
+
+  const handleNavigateToComandasFromCredit = (order: Order) => {
+    const dateKey = getDateKey(order.timestamp);
+    setComandasFocus(createFocusRequest(dateKey, order.id));
     setModule('comandas');
   };
 
@@ -316,6 +330,7 @@ function App() {
                 total: updates.total,
                 paymentAllocations: [],
                 paymentStatus: 'pendiente',
+                paymentRegisteredAt: undefined,
               }
             : order
         )
@@ -433,6 +448,7 @@ function App() {
             <CreditoEmpleados
               orders={orders}
               onSettleCredit={handleSettleOrderCredit}
+              onViewOrder={handleNavigateToComandasFromCredit}
             />
           )}
           {module === 'analitica' && user.role === 'admin' && (

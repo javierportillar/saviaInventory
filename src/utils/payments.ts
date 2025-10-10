@@ -98,6 +98,21 @@ export const determinePaymentStatus = (order: Order): PaymentStatus => {
 
 export const isOrderPaid = (order: Order): boolean => determinePaymentStatus(order) === 'pagado';
 
+export const isOrderPaymentHandled = (order: Order): boolean => {
+  if (order.metodoPago === 'credito_empleados' && order.creditInfo?.type === 'empleados') {
+    return true;
+  }
+  return isOrderPaid(order);
+};
+
+export const getOrderPaymentDate = (order: Order): Date => {
+  const paidAt = order.paymentRegisteredAt;
+  if (paidAt instanceof Date && !Number.isNaN(paidAt.getTime())) {
+    return paidAt;
+  }
+  return order.timestamp;
+};
+
 export const getPrimaryMethodFromAllocations = (allocations: PaymentAllocation[]): PaymentMethod | undefined => {
   if (allocations.length === 0) {
     return undefined;

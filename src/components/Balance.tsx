@@ -4,7 +4,7 @@ import dataService from '../lib/dataService';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
 import { Wallet, TrendingUp, TrendingDown, CalendarDays, PiggyBank } from 'lucide-react';
-import { formatPaymentSummary, getOrderAllocations, isOrderPaid } from '../utils/payments';
+import { formatPaymentSummary, getOrderAllocations, getOrderPaymentDate, isOrderPaid } from '../utils/payments';
 
 type MethodSummary = {
   id: PaymentMethod;
@@ -175,7 +175,7 @@ export function Balance() {
   }, []);
 
   const filteredOrders = useMemo(
-    () => filterAndSortByDateRange(orders, startDate, endDate, (order) => order.timestamp),
+    () => filterAndSortByDateRange(orders, startDate, endDate, (order) => getOrderPaymentDate(order)),
     [orders, startDate, endDate],
   );
   const filteredGastos = useMemo(
@@ -483,7 +483,7 @@ export function Balance() {
                       return (
                         <tr key={order.id} className="hover:bg-gray-50">
                           <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-900">
-                            {formatDateTime(order.timestamp)}
+                            {formatDateTime(getOrderPaymentDate(order))}
                           </td>
                           <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs font-medium" style={{ color: COLORS.dark }}>
                             {order.numero ? `#${order.numero}` : order.id}

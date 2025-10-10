@@ -326,7 +326,11 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   );
 
   const pendingPaymentOrders = [...ordersForSelectedDate]
-    .filter(order => order.estado === 'entregado' && !isOrderPaid(order))
+    .filter(order =>
+      order.estado === 'entregado' &&
+      !isOrderPaid(order) &&
+      order.metodoPago !== 'credito_empleados'
+    )
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
   const pendingPaymentCount = pendingPaymentOrders.length;
