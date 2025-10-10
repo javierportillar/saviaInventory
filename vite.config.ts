@@ -27,7 +27,7 @@ const ensureBaseFormat = (value: string): string => {
   return normalized ? `/${normalized}/` : './';
 };
 
-const DEFAULT_PRODUCTION_BASE = './';
+const DEFAULT_PRODUCTION_BASE = '/saviaInventory/';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
