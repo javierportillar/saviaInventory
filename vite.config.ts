@@ -27,13 +27,13 @@ const ensureBaseFormat = (value: string): string => {
   return normalized ? `/${normalized}/` : './';
 };
 
-const FALLBACK_REPO_BASE = 'saviaInventory';
+const DEFAULT_PRODUCTION_BASE = './';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const envBase = env.VITE_BASE_PATH?.trim();
 
-  const productionBase = envBase ?? `/${FALLBACK_REPO_BASE}/`;
+  const productionBase = envBase ?? DEFAULT_PRODUCTION_BASE;
   const base = mode === 'production' ? ensureBaseFormat(productionBase) : '/';
 
   return {
