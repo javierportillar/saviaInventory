@@ -198,6 +198,9 @@ function App() {
     if (module === 'analitica' && user?.role !== 'admin') {
       return;
     }
+    if (module === 'comandas') {
+      setComandasFocus(null);
+    }
     setModule(module);
   };
 

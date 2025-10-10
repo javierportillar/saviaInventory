@@ -113,6 +113,15 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
     }
   }, [focusRequest, orders]);
 
+  useEffect(() => {
+    if (!focusRequest) {
+      setSelectedDateKey(getDateKey(new Date()));
+      setCurrentPage(1);
+      setExpandedActionsOrderId(null);
+      return;
+    }
+  }, [focusRequest?.requestId]);
+
   const sortedOrders = useMemo(
     () => [...orders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
     [orders]
