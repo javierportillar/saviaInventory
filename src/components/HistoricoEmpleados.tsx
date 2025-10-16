@@ -20,6 +20,8 @@ interface SaveState {
   message?: string;
 }
 
+type WeeklyRanges = Partial<Record<DayKey, string>>;
+
 const weeklyHoursEqual = (a: WeeklyHours, b: WeeklyHours): boolean =>
   DAY_ORDER.every(day => Math.abs((a[day] ?? 0) - (b[day] ?? 0)) < 0.01);
 
@@ -31,12 +33,107 @@ const cloneWeeklyHours = (source: WeeklyHours): WeeklyHours => {
   return clone;
 };
 
+// Parses a single 12h/24h time string ("7:30 pm" or "19:30") into decimal hours.
+const parseTimeComponent = (value: string): number | null => {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const periodMatch = normalized.match(/\b(am|pm)\b/);
+  const period = periodMatch ? periodMatch[1] : null;
+  const numericPart = normalized.replace(/\b(am|pm)\b/g, '').trim();
+  const timeMatch = numericPart.match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+
+  if (!timeMatch) {
+    return null;
+  }
+
+  let hours = Number(timeMatch[1]);
+  const minutes = Number(timeMatch[2] ?? '0');
+
+  if (Number.isNaN(hours) || Number.isNaN(minutes) || minutes >= 60) {
+    return null;
+  }
+
+  if (period) {
+    if (hours === 12) {
+      hours = period === 'am' ? 0 : 12;
+    } else if (period === 'pm') {
+      hours += 12;
+    }
+  } else if (hours > 23) {
+    return null;
+  }
+
+  return hours + minutes / 60;
+};
+
+// Converts a time range like "10:00 am - 7:30 pm" into the duration in hours.
+const parseTimeRangeToHours = (value: string): number | null => {
+  if (!value) {
+    return null;
+  }
+
+  const sanitized = value.replace(/[–—]/g, '-').replace(/\s+/g, ' ').trim();
+  const parts = sanitized.split(/\s*-\s*/);
+
+  if (parts.length !== 2) {
+    return null;
+  }
+
+  const [startInput, endInput] = parts;
+  const usesPeriod = /\b(am|pm)\b/i.test(startInput) && /\b(am|pm)\b/i.test(endInput);
+  const start = parseTimeComponent(startInput);
+  const end = parseTimeComponent(endInput);
+
+  if (start === null || end === null) {
+    return null;
+  }
+
+  let diff = end - start;
+
+  if (diff < 0) {
+    if (usesPeriod) {
+      diff += 24;
+    } else {
+      return null;
+    }
+  }
+
+  if (diff <= 0 || diff > 24) {
+    return null;
+  }
+
+  return Math.round(diff * 100) / 100;
+};
+
+const parseHoursInput = (value: string): number | null => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const rangeHours = parseTimeRangeToHours(trimmed);
+  if (rangeHours !== null) {
+    return rangeHours;
+  }
+
+  const numeric = Number(trimmed.replace(',', '.'));
+  if (!Number.isFinite(numeric) || Number.isNaN(numeric)) {
+    return null;
+  }
+
+  return Math.round(Math.max(0, numeric) * 100) / 100;
+};
+
 export function HistoricoEmpleados() {
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [baseSchedules, setBaseSchedules] = useState<Record<string, WeeklySchedule>>({});
   const [weeklyHours, setWeeklyHours] = useState<Record<string, WeeklyHours>>({});
   const [selectedWeek, setSelectedWeek] = useState<string>(getCurrentWeekKey());
   const [editedHours, setEditedHours] = useState<Record<string, WeeklyHours>>({});
+  const [editedRanges, setEditedRanges] = useState<Record<string, WeeklyRanges>>({});
   const [initialLoading, setInitialLoading] = useState(true);
   const [weekLoading, setWeekLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -110,6 +207,7 @@ export function HistoricoEmpleados() {
         if (!isMounted) return;
         setWeeklyHours(records);
         setEditedHours({});
+        setEditedRanges({});
         setSaveState({});
       } catch (error) {
         console.error('No se pudieron cargar las horas de la semana seleccionada:', error);
@@ -135,6 +233,7 @@ export function HistoricoEmpleados() {
     if (empleados.length === 0) {
       setWeeklyHours({});
       setEditedHours({});
+      setEditedRanges({});
       setSaveState({});
     }
   }, [empleados]);
@@ -157,11 +256,70 @@ export function HistoricoEmpleados() {
     clearRowTimeout(empleadoId);
   };
 
+  const handleRangeChange = (empleadoId: string, day: DayKey, value: string) => {
+    setEditedRanges(prev => {
+      const next = { ...prev };
+      const current = { ...(next[empleadoId] ?? {}) };
+      current[day] = value;
+      next[empleadoId] = current;
+      return next;
+    });
+    setSaveState(prev => ({
+      ...prev,
+      [empleadoId]: { status: 'idle' }
+    }));
+    clearRowTimeout(empleadoId);
+  };
+
+  const handleRangeBlur = (
+    empleadoId: string,
+    day: DayKey,
+    rawValue: string,
+    reference: WeeklyHours,
+    stored: WeeklyHours
+  ) => {
+    const trimmed = rawValue.trim();
+
+    setEditedRanges(prev => {
+      const next = { ...prev };
+      const current = { ...(next[empleadoId] ?? {}) };
+
+      if (trimmed) {
+        current[day] = trimmed;
+        next[empleadoId] = current;
+      } else {
+        delete current[day];
+        if (Object.keys(current).length > 0) {
+          next[empleadoId] = current;
+        } else {
+          delete next[empleadoId];
+        }
+      }
+
+      return next;
+    });
+
+    if (!trimmed) {
+      handleHourChange(empleadoId, day, stored[day] ?? 0, reference);
+      return;
+    }
+
+    const parsed = parseHoursInput(trimmed);
+    if (parsed !== null) {
+      handleHourChange(empleadoId, day, parsed, reference);
+    }
+  };
+
   const handleResetToBase = (empleadoId: string, baseHours: WeeklyHours) => {
     setEditedHours(prev => ({
       ...prev,
       [empleadoId]: cloneWeeklyHours(baseHours)
     }));
+    setEditedRanges(prev => {
+      const next = { ...prev };
+      delete next[empleadoId];
+      return next;
+    });
     setSaveState(prev => ({
       ...prev,
       [empleadoId]: { status: 'idle' }
@@ -174,6 +332,11 @@ export function HistoricoEmpleados() {
       if (!prev[empleadoId]) {
         return prev;
       }
+      const next = { ...prev };
+      delete next[empleadoId];
+      return next;
+    });
+    setEditedRanges(prev => {
       const next = { ...prev };
       delete next[empleadoId];
       return next;
@@ -203,6 +366,11 @@ export function HistoricoEmpleados() {
         [empleadoId]: sanitized
       }));
       setEditedHours(prev => {
+        const next = { ...prev };
+        delete next[empleadoId];
+        return next;
+      });
+      setEditedRanges(prev => {
         const next = { ...prev };
         delete next[empleadoId];
         return next;
@@ -390,9 +558,9 @@ export function HistoricoEmpleados() {
                 const totalWorked = sumWeeklyHours(workingHours);
                 const variation = totalWorked - totalBase;
                 const hasPending = pending ? !weeklyHoursEqual(pending, storedHours) : false;
-                const canSave = hasPending && rowSaveState !== 'saving';
                 const rowSaveState = saveState[empleado.id]?.status ?? 'idle';
                 const rowMessage = saveState[empleado.id]?.message;
+                const canSave = hasPending && rowSaveState !== 'saving';
 
                 return (
                   <tr key={empleado.id} className="hover:bg-gray-50/60">
@@ -406,21 +574,47 @@ export function HistoricoEmpleados() {
                     </td>
                     {DAY_ORDER.map(day => {
                       const reference = pending ?? storedHours;
+                      const rangeValue = editedRanges[empleado.id]?.[day] ?? '';
+                      const trimmedRange = rangeValue.trim();
+                      const parsedPreview = trimmedRange ? parseHoursInput(trimmedRange) : null;
+                      const isInvalidRange = Boolean(trimmedRange) && parsedPreview === null;
+                      const ringColor = isInvalidRange ? '#F87171' : COLORS.accent;
+
                       return (
                         <td key={day} className="px-3 py-3 text-center align-top">
-                          <div className="flex flex-col items-center gap-1">
+                          <div className="flex flex-col items-center gap-1.5">
                             <input
-                              type="number"
-                              min={0}
-                              step={0.5}
-                              value={workingHours[day] ?? 0}
-                              onChange={(event) =>
-                                handleHourChange(empleado.id, day, parseFloat(event.target.value), reference)
+                              type="text"
+                              value={rangeValue}
+                              placeholder="ej. 10:00 am - 7:30 pm"
+                              onChange={(event) => handleRangeChange(empleado.id, day, event.target.value)}
+                              onBlur={(event) =>
+                                handleRangeBlur(empleado.id, day, event.target.value, reference, storedHours)
                               }
-                              className="w-20 rounded-lg border border-gray-300 px-2 py-1 text-sm focus:border-transparent focus:ring-2"
-                              style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.currentTarget.blur();
+                                }
+                              }}
+                              autoComplete="off"
+                              className={`w-40 rounded-lg border px-2 py-1 text-sm focus:border-transparent focus:ring-2 ${
+                                isInvalidRange
+                                  ? 'border-red-300 text-red-700 placeholder:text-red-300'
+                                  : 'border-gray-300'
+                              }`}
+                              style={{ '--tw-ring-color': ringColor } as React.CSSProperties}
                             />
-                            <span className="text-[11px] text-gray-400">Base: {formatHours(baseHours[day] ?? 0)} h</span>
+                            <span className="text-[11px] text-gray-500">
+                              Calculadas: {formatHours(workingHours[day] ?? 0)} h
+                            </span>
+                            <span className="text-[11px] text-gray-400">
+                              Base: {formatHours(baseHours[day] ?? 0)} h
+                            </span>
+                            {isInvalidRange && (
+                              <span className="text-[11px] text-red-500">
+                                Usa formato "10:00 am - 7:30 pm"
+                              </span>
+                            )}
                           </div>
                         </td>
                       );
