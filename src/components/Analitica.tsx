@@ -32,12 +32,14 @@ type FinancialChartPoint = {
   sales: number;
   expenses: number;
   balance: number;
+  historicalBalance: number;
 };
 
 const GRID_COLOR = '#e5e7eb';
-const SALES_COLOR = COLORS.dark;
+const SALES_COLOR = '#16a34a';
 const EXPENSES_COLOR = '#ef4444';
 const BALANCE_COLOR = '#2563eb';
+const HISTORICAL_BALANCE_COLOR = '#000000';
 
 const compactNumberFormatter = new Intl.NumberFormat('es-CO', {
   notation: 'compact',
@@ -184,7 +186,7 @@ const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) =>
   const margin = { top: 24, right: 32, bottom: 56, left: 80 };
   const innerWidth = width - margin.left - margin.right;
   const innerHeight = height - margin.top - margin.bottom;
-  const values = data.flatMap(point => [point.sales, point.expenses, point.balance]);
+  const values = data.flatMap(point => [point.sales, point.expenses, point.balance, point.historicalBalance]);
   const maxValue = Math.max(...values, 0);
   const minValue = Math.min(...values, 0);
   const range = maxValue - minValue || 1;
@@ -204,6 +206,7 @@ const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) =>
   const salesPoints = buildPoints(point => point.sales);
   const expensesPoints = buildPoints(point => point.expenses);
   const balancePoints = buildPoints(point => point.balance);
+  const historicalBalancePoints = buildPoints(point => point.historicalBalance);
 
   const yTickCount = 5;
   const yTicks = Array.from({ length: yTickCount }, (_, index) => minValue + (range / (yTickCount - 1)) * index);
@@ -240,6 +243,7 @@ const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) =>
       <path d={buildPath(expensesPoints)} fill="none" stroke={EXPENSES_COLOR} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
       <path d={buildPath(salesPoints)} fill="none" stroke={SALES_COLOR} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
       <path d={buildPath(balancePoints)} fill="none" stroke={BALANCE_COLOR} strokeWidth={2.5} strokeDasharray="6 4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d={buildPath(historicalBalancePoints)} fill="none" stroke={HISTORICAL_BALANCE_COLOR} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
       {salesPoints.map(point => (
         <circle key={`sales-${point.index}`} cx={point.x} cy={point.y} r={4} fill="#fff" stroke={SALES_COLOR} strokeWidth={2} />
       ))}
@@ -248,6 +252,17 @@ const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) =>
       ))}
       {balancePoints.map(point => (
         <circle key={`balance-${point.index}`} cx={point.x} cy={point.y} r={4} fill="#fff" stroke={BALANCE_COLOR} strokeWidth={2} />
+      ))}
+      {historicalBalancePoints.map(point => (
+        <circle
+          key={`historical-balance-${point.index}`}
+          cx={point.x}
+          cy={point.y}
+          r={4}
+          fill="#fff"
+          stroke={HISTORICAL_BALANCE_COLOR}
+          strokeWidth={2}
+        />
       ))}
       <line
         x1={margin.left}
@@ -511,7 +526,7 @@ export function Analitica({ orders }: AnaliticaProps) {
       summary.set(dateKey, entry);
     });
 
-    return Array.from(summary.entries())
+    const sortedByDate = Array.from(summary.entries())
       .map(([dateKey, { sales, expenses }]) => {
         const date = parseDateInputValue(dateKey);
         const label = date.toLocaleDateString('es-CO', {
@@ -525,9 +540,19 @@ export function Analitica({ orders }: AnaliticaProps) {
           sales,
           expenses,
           balance: sales - expenses,
-        } satisfies FinancialChartPoint;
+        };
       })
       .sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    let cumulativeBalance = 0;
+
+    return sortedByDate.map(entry => {
+      cumulativeBalance += entry.balance;
+      return {
+        ...entry,
+        historicalBalance: cumulativeBalance,
+      } satisfies FinancialChartPoint;
+    });
   }, [filteredOrders, filteredExpenses]);
 
   const zoomedFinancialData = useMemo(() => {
@@ -952,7 +977,10 @@ export function Analitica({ orders }: AnaliticaProps) {
                   <span className="w-3 h-3 rounded-full" style={{ backgroundColor: EXPENSES_COLOR }} /> Gastos
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="w-5 border-t-2 border-dashed" style={{ borderColor: BALANCE_COLOR }} /> Balance
+                  <span className="w-5 border-t-2 border-dashed" style={{ borderColor: BALANCE_COLOR }} /> Balance diario
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-5 border-t-2" style={{ borderColor: HISTORICAL_BALANCE_COLOR }} /> Balance histórico
                 </div>
                 {financialRangeLabel && (
                   <div className="ml-auto text-xs text-gray-500">

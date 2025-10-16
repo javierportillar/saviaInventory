@@ -17,6 +17,7 @@ import {
   DAY_KEYS,
 } from '../types';
 import { supabase } from './supabaseClient';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getLocalData, setLocalData } from '../data/localData';
 import { formatDateInputValue, parseDateInputValue } from '../utils/format';
 import { slugify, generateMenuItemCode } from '../utils/strings';
@@ -806,34 +807,67 @@ const mapOrderRecord = (record: any): Order => {
 
   const metadata = getOrderMetadata(baseOrder.id);
   const rawAllocations = sanitizeAllocations(record?.paymentAllocations);
+  const remoteAllocations = supabaseAllocations;
+  const remoteHasAllocations = remoteAllocations.length > 0;
+  const metadataAllocations = metadata?.paymentAllocations
+    ? sanitizeAllocations(metadata.paymentAllocations)
+    : undefined;
+  const metadataExplicitClear = metadata
+    ? Array.isArray(metadata.paymentAllocations) && metadata.paymentAllocations.length === 0
+    : false;
 
-  let allocations: PaymentAllocation[] = supabaseAllocations;
-  if (metadata?.paymentAllocations && metadata.paymentAllocations.length > 0) {
-    allocations = sanitizeAllocations(metadata.paymentAllocations);
-  } else if (rawAllocations.length > 0 && allocations.length === 0) {
-    allocations = rawAllocations;
-  } else if (allocations.length === 0 && metodoPagoFromRecord) {
-    allocations = [{ metodo: metodoPagoFromRecord, monto: Math.round(baseOrder.total) }];
+  let allocations: PaymentAllocation[] = remoteAllocations;
+  if (!remoteHasAllocations) {
+    if (metadataAllocations && metadataAllocations.length > 0) {
+      allocations = metadataAllocations;
+    } else if (rawAllocations.length > 0) {
+      allocations = rawAllocations;
+    } else if (metadataExplicitClear) {
+      allocations = [];
+    }
   }
 
-  if (metadata && metadata.paymentAllocations && metadata.paymentAllocations.length === 0) {
-    allocations = [];
+  if (allocations.length === 0 && metodoPagoFromRecord) {
+    allocations = [{ metodo: metodoPagoFromRecord, monto: Math.round(baseOrder.total) }];
   }
 
   const mergedAllocations = allocations.length > 0 ? mergeAllocations(allocations) : allocations;
   const derivedMetodoPago = getPrimaryMethodFromAllocations(mergedAllocations) ?? metodoPagoFromRecord;
-  const paymentStatus: PaymentStatus = metadata?.paymentStatus
-    ?? (record?.paymentStatus as PaymentStatus | undefined)
-    ?? (Math.abs(getAllocationsTotal(mergedAllocations) - Math.round(baseOrder.total)) <= 1
-      ? 'pagado'
-      : 'pendiente');
+
+  const remotePaymentStatus: PaymentStatus | undefined = (() => {
+    const rawStatus = record?.paymentStatus ?? record?.payment_status;
+    if (rawStatus === 'pagado' || rawStatus === 'pendiente') {
+      return rawStatus;
+    }
+    if (remoteHasAllocations) {
+      const paidTotal = getAllocationsTotal(remoteAllocations);
+      const targetTotal = Math.round(baseOrder.total);
+      return Math.abs(paidTotal - targetTotal) <= 1 ? 'pagado' : 'pendiente';
+    }
+    return undefined;
+  })();
+
+  const fallbackStatus: PaymentStatus = Math.abs(
+    getAllocationsTotal(mergedAllocations) - Math.round(baseOrder.total)
+  ) <= 1
+    ? 'pagado'
+    : 'pendiente';
+
+  const paymentStatus: PaymentStatus = remotePaymentStatus
+    ?? metadata?.paymentStatus
+    ?? fallbackStatus;
 
   let paymentRegisteredAt: Date | undefined;
-  const rawPaidAt = metadata?.paymentRegisteredAt
-    ?? (typeof record?.paymentRegisteredAt === 'string' ? record.paymentRegisteredAt : undefined)
+  const remotePaidAt =
+    (typeof record?.paymentRegisteredAt === 'string' ? record.paymentRegisteredAt : undefined)
     ?? (typeof record?.paid_at === 'string' ? record.paid_at : undefined);
-  if (rawPaidAt) {
-    const parsed = new Date(rawPaidAt);
+  if (remotePaidAt) {
+    const parsed = new Date(remotePaidAt);
+    if (!Number.isNaN(parsed.getTime())) {
+      paymentRegisteredAt = parsed;
+    }
+  } else if (metadata?.paymentRegisteredAt) {
+    const parsed = new Date(metadata.paymentRegisteredAt);
     if (!Number.isNaN(parsed.getTime())) {
       paymentRegisteredAt = parsed;
     }
@@ -1332,6 +1366,62 @@ export const fetchOrders = async (): Promise<Order[]> => {
     }
   }
   return loadLocalOrders();
+};
+
+type OrdersSubscriptionHandler = () => void | Promise<void>;
+
+interface OrdersSubscriptionOptions {
+  onChange?: OrdersSubscriptionHandler;
+  debounceMs?: number;
+}
+
+export const subscribeToOrders = async (
+  options: OrdersSubscriptionOptions = {}
+): Promise<() => void> => {
+  if (!(await ensureSupabaseReady())) {
+    return () => {};
+  }
+
+  const { onChange, debounceMs = 250 } = options;
+
+  if (!onChange) {
+    return () => {};
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  const scheduleRefresh = () => {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    timeout = setTimeout(() => {
+      onChange();
+    }, debounceMs);
+  };
+
+  const channel = supabase
+    .channel('orders-sync')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, scheduleRefresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, scheduleRefresh);
+
+  let realtimeChannel: RealtimeChannel | undefined;
+
+  try {
+    realtimeChannel = await channel.subscribe();
+  } catch (error) {
+    console.warn('No se pudo suscribir a cambios de comandas en Supabase:', error);
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    return () => {};
+  }
+
+  return () => {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    realtimeChannel?.unsubscribe();
+  };
 };
 
 export const createOrder = async (order: Order): Promise<Order> => {
@@ -2255,6 +2345,7 @@ export const dataService = {
   updateMenuItem,
   deleteMenuItem,
   fetchOrders,
+  subscribeToOrders,
   createOrder,
   recordOrderPayment,
   assignOrderCredit,

@@ -50,6 +50,8 @@ function App() {
   const [connectionStatus, setConnectionStatus] = useState<DatabaseConnectionState>('checking');
   const [comandasFocus, setComandasFocus] = useState<FocusDateRequest | null>(null);
   const [gastosFocus, setGastosFocus] = useState<FocusDateRequest | null>(null);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+  const [isSyncingOrders, setIsSyncingOrders] = useState(false);
 
   useEffect(() => {
     initializeLocalData();
@@ -129,15 +131,28 @@ function App() {
 
   useEffect(() => {
     if (!user) {
+      setIsLoadingOrders(false);
+      setIsSyncingOrders(false);
       return;
     }
 
     let isActive = true;
 
     const fetchOrders = async () => {
-      const data = await dataService.fetchOrders();
-      if (isActive) {
-        setOrders(data);
+      try {
+        if (isActive) {
+          setIsLoadingOrders(true);
+        }
+        const data = await dataService.fetchOrders();
+        if (isActive) {
+          setOrders(data);
+        }
+      } catch (error) {
+        console.error('[App] Error obteniendo comandas.', error);
+      } finally {
+        if (isActive) {
+          setIsLoadingOrders(false);
+        }
       }
     };
 
@@ -145,6 +160,57 @@ function App() {
 
     return () => {
       isActive = false;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    let isMounted = true;
+    let unsubscribe: (() => void) | undefined;
+    let isFetching = false;
+
+    const refreshOrders = async () => {
+      if (!isMounted || isFetching) {
+        return;
+      }
+      isFetching = true;
+      setIsSyncingOrders(true);
+      try {
+        const data = await dataService.fetchOrders();
+        if (isMounted) {
+          setOrders(data);
+        }
+      } catch (error) {
+        console.error('[App] Error actualizando comandas tras cambios remotos.', error);
+      } finally {
+        if (isMounted) {
+          setIsSyncingOrders(false);
+        }
+        isFetching = false;
+      }
+    };
+
+    const setupSubscription = async () => {
+      try {
+        unsubscribe = await dataService.subscribeToOrders({
+          onChange: refreshOrders,
+          debounceMs: 400,
+        });
+      } catch (error) {
+        console.error('[App] No se pudo suscribir a los cambios de comandas.', error);
+      }
+    };
+
+    setupSubscription();
+
+    return () => {
+      isMounted = false;
+      if (unsubscribe) {
+        unsubscribe();
+      }
     };
   }, [user]);
 
@@ -415,6 +481,8 @@ function App() {
               isAdmin={user.role === 'admin'}
               onAssignOrderCredit={handleAssignOrderCredit}
               focusRequest={comandasFocus}
+              isLoading={isLoadingOrders}
+              isSyncing={isSyncingOrders}
             />
           )}
           {module === 'inventario' && (

@@ -49,6 +49,8 @@ interface ComandasProps {
   isAdmin: boolean;
   onAssignOrderCredit: (order: Order, options: { employeeId: string; amount: number; employeeName?: string }) => Promise<void>;
   focusRequest?: FocusDateRequest | null;
+  isLoading: boolean;
+  isSyncing?: boolean;
 }
 
 interface EditingOrder {
@@ -57,7 +59,18 @@ interface EditingOrder {
   total: number;
 }
 
-export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRecordOrderPayment, onDeleteOrder, isAdmin, onAssignOrderCredit, focusRequest }: ComandasProps) {
+export function Comandas({
+  orders,
+  onUpdateOrderStatus,
+  onSaveOrderChanges,
+  onRecordOrderPayment,
+  onDeleteOrder,
+  isAdmin,
+  onAssignOrderCredit,
+  focusRequest,
+  isLoading,
+  isSyncing = false,
+}: ComandasProps) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [editingOrder, setEditingOrder] = useState<EditingOrder | null>(null);
   const [expandedActionsOrderId, setExpandedActionsOrderId] = useState<string | null>(null);
@@ -835,8 +848,17 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
                     disabled={isSavingOrderChanges}
                     className="flex-1 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Save size={14} />
-                    {isSavingOrderChanges ? 'Guardando...' : 'Guardar'}
+                    {isSavingOrderChanges ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Guardando...
+                      </>
+                    ) : (
+                      <>
+                        <Save size={14} />
+                        Guardar
+                      </>
+                    )}
                   </button>
                   <button
                     onClick={cancelEditing}
@@ -1014,7 +1036,20 @@ export function Comandas({ orders, onUpdateOrderStatus, onSaveOrderChanges, onRe
         </p>
       </div>
 
-      {orders.length === 0 ? (
+      {isSyncing && !isLoading && (
+        <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
+          <Loader2 size={16} className="animate-spin" />
+          <span>Sincronizando cambios…</span>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="ui-card ui-card-pad text-center">
+          <Loader2 size={40} className="mx-auto text-gray-400 mb-4 animate-spin" />
+          <h3 className="text-lg lg:text-xl font-semibold text-gray-600 mb-2">Cargando comandas</h3>
+          <p className="text-sm lg:text-base text-gray-500">Estamos obteniendo la información más reciente.</p>
+        </div>
+      ) : orders.length === 0 ? (
         <div className="ui-card ui-card-pad text-center">
           <Clock size={48} className="mx-auto text-gray-400 mb-4" />
           <h3 className="text-lg lg:text-xl font-semibold text-gray-600 mb-2">No hay comandas</h3>
