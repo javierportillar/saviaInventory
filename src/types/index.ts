@@ -12,7 +12,7 @@ export interface MenuItem {
   unidadMedida?: 'kg' | 'g' | 'mg' | 'ml';
 }
 
-export type PaymentMethod = 'efectivo' | 'tarjeta' | 'nequi' | 'credito_empleados';
+export type PaymentMethod = 'efectivo' | 'tarjeta' | 'nequi' | 'provision_caja' | 'credito_empleados';
 
 export type CreditType = 'empleados';
 
@@ -148,6 +148,17 @@ export interface Gasto {
   metodoPago?: PaymentMethod;
 }
 
+export type ProvisionTransferOrigin = Extract<PaymentMethod, 'efectivo' | 'nequi' | 'tarjeta'>;
+
+export interface ProvisionTransfer {
+  id: string;
+  monto: number;
+  descripcion?: string;
+  fecha: Date;
+  origen: ProvisionTransferOrigin;
+  created_at?: Date;
+}
+
 export interface BalanceResumen {
   fecha: string;
   ingresosTotales: number;
@@ -166,6 +177,10 @@ export interface BalanceResumen {
   saldoEfectivoAcumulado: number;
   saldoNequiAcumulado: number;
   saldoTarjetaAcumulado: number;
+  ingresosProvisionCaja?: number;
+  egresosProvisionCaja?: number;
+  saldoProvisionCajaDia?: number;
+  saldoProvisionCajaAcumulado?: number;
 }
 
 export type ModuleType =
@@ -178,6 +193,7 @@ export type ModuleType =
   | 'clientes'
   | 'empleados'
   | 'gastos'
+  | 'contabilidad'
   | 'novedades'
   | 'creditoEmpleados'
   | 'analitica';

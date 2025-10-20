@@ -34,21 +34,24 @@ export function Gastos({ focusRequest }: GastosProps) {
     metodoPago: 'efectivo'
   });
 
-  const paymentMethods: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi'];
+  const paymentMethods: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi', 'provision_caja'];
   const paymentLabels: Record<PaymentMethod, string> = {
     efectivo: 'Efectivo',
     tarjeta: 'Tarjeta',
     nequi: 'Nequi',
+    provision_caja: 'Provisión caja',
     credito_empleados: 'Crédito empleados'
   };
 
   const categorias = [
-    'Ingredientes',
+    'Productos Limpieza',
+    'Carnes',
+    'Frutas/Verduras',
+    'Lacteos',
     'Servicios públicos',
     'Arriendo',
     'Salarios',
-    'Equipos',
-    'Mantenimiento',
+    'Papelería',
     'Marketing',
     'Transporte',
     'Otros'

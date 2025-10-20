@@ -15,6 +15,7 @@ const PAYMENT_LABELS: Record<string, string> = {
   efectivo: 'Efectivo',
   tarjeta: 'Tarjeta',
   nequi: 'Nequi',
+  provision_caja: 'Provisión caja',
   credito_empleados: 'Crédito empleados',
   sin_registro: 'Sin registro',
 };

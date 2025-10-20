@@ -8,6 +8,7 @@ import { Cocina } from './components/Cocina';
 import { Clientes } from './components/Clientes';
 import { Empleados } from './components/Empleados';
 import { Gastos } from './components/Gastos';
+import { Contabilidad } from './components/Contabilidad';
 import { Login } from './components/Login';
 import { Navigation } from './components/Navigation';
 import { Analitica } from './components/Analitica';
@@ -261,7 +262,7 @@ function App() {
   };
 
   const handleModuleChange = (module: ModuleType) => {
-    if (module === 'analitica' && user?.role !== 'admin') {
+    if ((module === 'analitica' || module === 'contabilidad') && user?.role !== 'admin') {
       return;
     }
     if (module === 'comandas') {
@@ -509,6 +510,7 @@ function App() {
           )}
           {module === 'empleados' && <Empleados />}
           {module === 'gastos' && <Gastos focusRequest={gastosFocus} />}
+          {module === 'contabilidad' && user.role === 'admin' && <Contabilidad />}
           {module === 'novedades' && (
             <Novedades
               onNavigateToComandas={handleNavigateToComandasFromNovedades}

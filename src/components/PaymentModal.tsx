@@ -52,6 +52,7 @@ const emptySelection = (): Record<PaymentMethod, boolean> => ({
   efectivo: false,
   tarjeta: false,
   nequi: false,
+  provision_caja: false,
   credito_empleados: false,
 });
 
@@ -59,6 +60,7 @@ const emptyAmounts = (): Record<PaymentMethod, string> => ({
   efectivo: '',
   tarjeta: '',
   nequi: '',
+  provision_caja: '',
   credito_empleados: '',
 });
 

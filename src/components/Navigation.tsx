@@ -15,7 +15,8 @@ import {
   Menu,
   X,
   CreditCard,
-  CalendarDays
+  CalendarDays,
+  FileSpreadsheet
 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 
@@ -37,6 +38,7 @@ const modules = [
   { id: 'clientes' as ModuleType, label: 'Clientes', icon: Users },
   { id: 'empleados' as ModuleType, label: 'Empleados', icon: UserCheck },
   { id: 'gastos' as ModuleType, label: 'Gastos', icon: Receipt },
+  { id: 'contabilidad' as ModuleType, label: 'Contabilidad', icon: FileSpreadsheet },
   { id: 'novedades' as ModuleType, label: 'Novedades', icon: CalendarDays },
   { id: 'creditoEmpleados' as ModuleType, label: 'Crédito empleados', icon: CreditCard },
   { id: 'analitica' as ModuleType, label: 'Analítica', icon: BarChart3 },

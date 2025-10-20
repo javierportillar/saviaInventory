@@ -6,6 +6,7 @@ import {
   Gasto,
   BalanceResumen,
   PaymentMethod,
+  ProvisionTransfer,
   CartItem,
   PaymentAllocation,
   PaymentStatus,
@@ -71,12 +72,13 @@ export const checkDatabaseConnection = async (): Promise<DatabaseConnectionState
   }
 };
 
-const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi', 'credito_empleados'];
+const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi', 'provision_caja', 'credito_empleados'];
 
 export const EMPLOYEE_CREDIT_UPDATED_EVENT = 'savia-employee-credit-updated';
 
 const BASE_SCHEDULE_STORAGE_KEY = 'savia-horarios-base';
 const WEEKLY_HOURS_STORAGE_KEY = 'savia-horarios-semanales';
+const PROVISION_TRANSFERS_STORAGE_KEY = 'savia-provision-transfers';
 
 const notifyEmployeeCreditUpdate = () => {
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
@@ -964,12 +966,80 @@ const normalizeGastoRecord = (gasto: any): Gasto => ({
   metodoPago: normalizePaymentMethod(extractPaymentMethodValue(gasto)),
 });
 
+const PROVISION_ORIGINS: ProvisionTransfer['origen'][] = ['efectivo', 'nequi', 'tarjeta'];
+
+const normalizeProvisionTransfer = (raw: any): ProvisionTransfer | null => {
+  if (!raw) {
+    return null;
+  }
+
+  const amount = Math.max(0, Math.round(Number(raw.monto) || 0));
+  if (amount <= 0) {
+    return null;
+  }
+
+  const fecha = parseDateInputValue(raw.fecha);
+  if (!(fecha instanceof Date) || Number.isNaN(fecha.getTime())) {
+    return null;
+  }
+
+  const id = typeof raw.id === 'string' && raw.id.trim()
+    ? raw.id.trim()
+    : `transfer-${Math.random().toString(36).slice(2, 10)}`;
+
+  const descripcion = typeof raw.descripcion === 'string' && raw.descripcion.trim()
+    ? raw.descripcion.trim()
+    : undefined;
+
+  const originValue = typeof raw.origen === 'string' ? raw.origen : undefined;
+  const origen: ProvisionTransfer['origen'] = PROVISION_ORIGINS.includes(originValue as ProvisionTransfer['origen'])
+    ? (originValue as ProvisionTransfer['origen'])
+    : 'efectivo';
+
+  const createdAtValue = raw.created_at ?? raw.createdAt;
+  const created_at = createdAtValue ? new Date(createdAtValue) : undefined;
+
+  return {
+    id,
+    monto: amount,
+    descripcion,
+    fecha,
+    origen,
+    created_at,
+  };
+};
+
+const serializeProvisionTransfer = (transfer: ProvisionTransfer) => ({
+  id: transfer.id,
+  monto: transfer.monto,
+  descripcion: transfer.descripcion ?? null,
+  fecha: formatDateInputValue(transfer.fecha instanceof Date ? transfer.fecha : new Date(transfer.fecha)),
+  origen: transfer.origen,
+  created_at: transfer.created_at ? transfer.created_at.toISOString() : new Date().toISOString(),
+});
+
+const readLocalProvisionTransfers = (): ProvisionTransfer[] => {
+  const stored = getLocalData<any[]>(PROVISION_TRANSFERS_STORAGE_KEY, []);
+  const normalized = (stored ?? [])
+    .map(normalizeProvisionTransfer)
+    .filter((entry): entry is ProvisionTransfer => entry !== null)
+    .sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+  return normalized;
+};
+
+const persistLocalProvisionTransfers = (transfers: ProvisionTransfer[]) => {
+  const serialized = transfers.map(serializeProvisionTransfer);
+  setLocalData(PROVISION_TRANSFERS_STORAGE_KEY, serialized);
+};
+
 type MethodTotals = Record<PaymentMethod, number>;
 
 const zeroMethodTotals = (): MethodTotals => ({
   efectivo: 0,
   tarjeta: 0,
-  nequi: 0
+  nequi: 0,
+  provision_caja: 0,
+  credito_empleados: 0
 });
 
 interface DailyAccumulator {
@@ -1120,7 +1190,7 @@ const hydrateOrdersWithEmployeeCredit = async (orders: Order[]): Promise<Order[]
   }
 };
 
-const computeLocalBalance = (orders: Order[], gastos: Gasto[]): BalanceResumen[] => {
+const computeLocalBalance = (orders: Order[], gastos: Gasto[], transfers: ProvisionTransfer[]): BalanceResumen[] => {
   const accumulator = new Map<string, DailyAccumulator>();
 
   const getAccumulator = (key: string): DailyAccumulator => {
@@ -1170,6 +1240,21 @@ const computeLocalBalance = (orders: Order[], gastos: Gasto[]): BalanceResumen[]
     entry.egresosPorMetodo[method] += gasto.monto;
   });
 
+  transfers.forEach((transfer) => {
+    if (!(transfer.fecha instanceof Date)) {
+      return;
+    }
+    const key = toLocalDateKey(transfer.fecha);
+    if (!key) {
+      return;
+    }
+    const entry = getAccumulator(key);
+    entry.ingresosPorMetodo.provision_caja += transfer.monto;
+    if (entry.egresosPorMetodo[transfer.origen] !== undefined) {
+      entry.egresosPorMetodo[transfer.origen] += transfer.monto;
+    }
+  });
+
   const sortedDates = Array.from(accumulator.keys()).sort();
   if (sortedDates.length === 0) {
     return [];
@@ -1184,13 +1269,17 @@ const computeLocalBalance = (orders: Order[], gastos: Gasto[]): BalanceResumen[]
     const saldoEfectivoDia = entry.ingresosPorMetodo.efectivo - entry.egresosPorMetodo.efectivo;
     const saldoNequiDia = entry.ingresosPorMetodo.nequi - entry.egresosPorMetodo.nequi;
     const saldoTarjetaDia = entry.ingresosPorMetodo.tarjeta - entry.egresosPorMetodo.tarjeta;
+    const saldoProvisionCajaDia = entry.ingresosPorMetodo.provision_caja - entry.egresosPorMetodo.provision_caja;
+    const saldoCreditoEmpleadosDia = entry.ingresosPorMetodo.credito_empleados - entry.egresosPorMetodo.credito_empleados;
     const balanceDiario = entry.ingresosTotales - entry.egresosTotales;
 
     saldoTotal += balanceDiario;
     acumuladoMetodo = {
       efectivo: acumuladoMetodo.efectivo + saldoEfectivoDia,
       tarjeta: acumuladoMetodo.tarjeta + saldoTarjetaDia,
-      nequi: acumuladoMetodo.nequi + saldoNequiDia
+      nequi: acumuladoMetodo.nequi + saldoNequiDia,
+      provision_caja: acumuladoMetodo.provision_caja + saldoProvisionCajaDia,
+      credito_empleados: acumuladoMetodo.credito_empleados + saldoCreditoEmpleadosDia
     };
 
     results.push({
@@ -1204,13 +1293,17 @@ const computeLocalBalance = (orders: Order[], gastos: Gasto[]): BalanceResumen[]
       egresosNequi: entry.egresosPorMetodo.nequi,
       ingresosTarjeta: entry.ingresosPorMetodo.tarjeta,
       egresosTarjeta: entry.egresosPorMetodo.tarjeta,
+      ingresosProvisionCaja: entry.ingresosPorMetodo.provision_caja,
+      egresosProvisionCaja: entry.egresosPorMetodo.provision_caja,
       saldoEfectivoDia,
       saldoNequiDia,
       saldoTarjetaDia,
+      saldoProvisionCajaDia,
       saldoTotalAcumulado: saldoTotal,
       saldoEfectivoAcumulado: acumuladoMetodo.efectivo,
       saldoNequiAcumulado: acumuladoMetodo.nequi,
-      saldoTarjetaAcumulado: acumuladoMetodo.tarjeta
+      saldoTarjetaAcumulado: acumuladoMetodo.tarjeta,
+      saldoProvisionCajaAcumulado: acumuladoMetodo.provision_caja
     });
   });
 
@@ -1228,13 +1321,17 @@ const mapBalanceRow = (row: any): BalanceResumen => ({
   egresosNequi: Number(row.egresos_nequi ?? 0),
   ingresosTarjeta: Number(row.ingresos_tarjeta ?? 0),
   egresosTarjeta: Number(row.egresos_tarjeta ?? 0),
+  ingresosProvisionCaja: Number(row.ingresos_provision_caja ?? row.ingresos_provision ?? 0),
+  egresosProvisionCaja: Number(row.egresos_provision_caja ?? row.egresos_provision ?? 0),
   saldoEfectivoDia: Number(row.saldo_efectivo_dia ?? 0),
   saldoNequiDia: Number(row.saldo_nequi_dia ?? 0),
   saldoTarjetaDia: Number(row.saldo_tarjeta_dia ?? 0),
+  saldoProvisionCajaDia: Number(row.saldo_provision_caja_dia ?? 0),
   saldoTotalAcumulado: Number(row.saldo_total_acumulado ?? 0),
   saldoEfectivoAcumulado: Number(row.saldo_efectivo_acumulado ?? 0),
   saldoNequiAcumulado: Number(row.saldo_nequi_acumulado ?? 0),
-  saldoTarjetaAcumulado: Number(row.saldo_tarjeta_acumulado ?? 0)
+  saldoTarjetaAcumulado: Number(row.saldo_tarjeta_acumulado ?? 0),
+  saldoProvisionCajaAcumulado: Number(row.saldo_provision_caja_acumulado ?? 0)
 });
 
 const loadMenuItemsFromLocalCache = (reason?: string): MenuItem[] => {
@@ -2319,6 +2416,72 @@ export const deleteGasto = async (id: string): Promise<void> => {
   setLocalData('savia-gastos', filteredGastos);
 };
 
+// PROVISIÓN DE CAJA
+type ProvisionTransferDraft = {
+  id?: string;
+  monto: number;
+  descripcion?: string;
+  fecha: Date;
+  origen?: ProvisionTransfer['origen'];
+};
+
+export const fetchProvisionTransfers = async (): Promise<ProvisionTransfer[]> => {
+  if (await ensureSupabaseReady()) {
+    // TODO: sincronizar con Supabase cuando exista la tabla correspondiente
+  }
+  return readLocalProvisionTransfers();
+};
+
+export const createProvisionTransfer = async (draft: ProvisionTransferDraft): Promise<ProvisionTransfer> => {
+  const amount = Math.max(0, Math.round(Number(draft.monto) || 0));
+  if (amount <= 0) {
+    throw new Error('El monto de la provisión debe ser mayor a cero.');
+  }
+
+  const fecha = draft.fecha instanceof Date ? new Date(draft.fecha.getTime()) : new Date(draft.fecha);
+  if (Number.isNaN(fecha.getTime())) {
+    throw new Error('La fecha del movimiento de provisión no es válida.');
+  }
+  fecha.setHours(0, 0, 0, 0);
+
+  const descripcion = draft.descripcion?.trim() || undefined;
+  const originCandidate = draft.origen ?? 'efectivo';
+  const origen: ProvisionTransfer['origen'] = PROVISION_ORIGINS.includes(originCandidate) ? originCandidate : 'efectivo';
+  const id = draft.id && draft.id.trim() ? draft.id.trim() : (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `transfer-${Math.random().toString(36).slice(2, 10)}`);
+
+  const transfer: ProvisionTransfer = {
+    id,
+    monto: amount,
+    descripcion,
+    fecha,
+    origen,
+    created_at: new Date(),
+  };
+
+  if (await ensureSupabaseReady()) {
+    // TODO: persistir en Supabase cuando esté disponible
+  }
+
+  const current = readLocalProvisionTransfers();
+  const next = [transfer, ...current].sort((a, b) => b.fecha.getTime() - a.fecha.getTime() || (b.created_at?.getTime() ?? 0) - (a.created_at?.getTime() ?? 0));
+  persistLocalProvisionTransfers(next);
+  return transfer;
+};
+
+export const deleteProvisionTransfer = async (id: string): Promise<void> => {
+  if (!id) {
+    return;
+  }
+
+  if (await ensureSupabaseReady()) {
+    // TODO: sincronizar eliminación cuando exista tabla en Supabase
+  }
+
+  const current = readLocalProvisionTransfers();
+  const next = current.filter((transfer) => transfer.id !== id);
+  persistLocalProvisionTransfers(next);
+};
+
 // BALANCE
 export const fetchBalanceResumen = async (): Promise<BalanceResumen[]> => {
   if (await ensureSupabaseReady()) {
@@ -2336,7 +2499,8 @@ export const fetchBalanceResumen = async (): Promise<BalanceResumen[]> => {
 
   const localOrders = getLocalData<Order[]>('savia-orders', []).map(mapOrderRecord);
   const localGastos = getLocalData<Gasto[]>('savia-gastos', []).map(normalizeGastoRecord);
-  return computeLocalBalance(localOrders, localGastos);
+  const localTransfers = readLocalProvisionTransfers();
+  return computeLocalBalance(localOrders, localGastos, localTransfers);
 };
 
 export const dataService = {
@@ -2372,6 +2536,9 @@ export const dataService = {
   createGasto,
   updateGasto,
   deleteGasto,
+  fetchProvisionTransfers,
+  createProvisionTransfer,
+  deleteProvisionTransfer,
   fetchBalanceResumen,
   checkDatabaseConnection,
 } as const;

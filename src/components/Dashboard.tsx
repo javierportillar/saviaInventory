@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
+import { getOrderPaymentDate, isOrderPaid } from '../utils/payments';
 
 interface DashboardProps {
   orders: Order[];
@@ -17,11 +18,17 @@ interface DashboardProps {
 
 export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps) {
   const today = new Date();
-  const todayOrders = orders.filter(order => 
-    order.timestamp.toDateString() === today.toDateString()
+  const todayKey = today.toDateString();
+
+  const todayOrders = orders.filter(order =>
+    order.timestamp.toDateString() === todayKey
   );
-  
-  const todayRevenue = todayOrders.reduce((sum, order) => sum + order.total, 0);
+
+  const todayPaidOrders = orders.filter(order =>
+    isOrderPaid(order) && getOrderPaymentDate(order).toDateString() === todayKey
+  );
+
+  const todayRevenue = todayPaidOrders.reduce((sum, order) => sum + order.total, 0);
   const pendingOrders = orders.filter(order => 
     order.estado === 'pendiente' || order.estado === 'preparando'
   ).length;

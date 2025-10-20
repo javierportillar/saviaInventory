@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Gasto, Order, PaymentMethod } from '../types';
+import { Gasto, Order, PaymentMethod, ProvisionTransfer } from '../types';
 import dataService from '../lib/dataService';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
@@ -19,10 +19,11 @@ const methodLabels: Record<PaymentMethod, string> = {
   efectivo: 'Efectivo',
   nequi: 'Nequi',
   tarjeta: 'Tarjeta',
+  provision_caja: 'Provisión caja',
   credito_empleados: 'Crédito empleados',
 };
 
-const methodOrder: PaymentMethod[] = ['efectivo', 'nequi', 'tarjeta', 'credito_empleados'];
+const methodOrder: PaymentMethod[] = ['efectivo', 'provision_caja', 'nequi', 'tarjeta', 'credito_empleados'];
 
 const valueColor = (value: number) => (value >= 0 ? 'text-green-600' : 'text-red-600');
 
@@ -46,10 +47,11 @@ const emptyMethodTotals = (): MethodTotalsDetail => ({
   efectivo: { ingresos: 0, egresos: 0 },
   nequi: { ingresos: 0, egresos: 0 },
   tarjeta: { ingresos: 0, egresos: 0 },
+  provision_caja: { ingresos: 0, egresos: 0 },
   credito_empleados: { ingresos: 0, egresos: 0 },
 });
 
-const computeMethodTotals = (orders: Order[], gastos: Gasto[]): MethodTotalsDetail => {
+const computeMethodTotals = (orders: Order[], gastos: Gasto[], transfers: ProvisionTransfer[]): MethodTotalsDetail => {
   const totals = emptyMethodTotals();
 
   orders.forEach((order) => {
@@ -66,6 +68,14 @@ const computeMethodTotals = (orders: Order[], gastos: Gasto[]): MethodTotalsDeta
   gastos.forEach((gasto) => {
     const method = gasto.metodoPago ?? 'efectivo';
     totals[method].egresos += gasto.monto;
+  });
+
+  transfers.forEach((transfer) => {
+    const origin = transfer.origen ?? 'efectivo';
+    if (totals[origin]) {
+      totals[origin].egresos += transfer.monto;
+    }
+    totals.provision_caja.ingresos += transfer.monto;
   });
 
   return totals;
@@ -134,6 +144,7 @@ const filterAndSortByDateRange = <T,>(
 export function Balance() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [gastos, setGastos] = useState<Gasto[]>([]);
+  const [transfers, setTransfers] = useState<ProvisionTransfer[]>([]);
   const today = useMemo(() => {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
@@ -149,9 +160,10 @@ export function Balance() {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [ordersData, gastosData] = await Promise.all([
+        const [ordersData, gastosData, transfersData] = await Promise.all([
           dataService.fetchOrders(),
           dataService.fetchGastos(),
+          dataService.fetchProvisionTransfers(),
         ]);
 
         if (!isMounted) {
@@ -160,6 +172,7 @@ export function Balance() {
 
         setOrders(ordersData);
         setGastos(gastosData);
+        setTransfers(transfersData);
       } finally {
         if (isMounted) {
           setLoading(false);
@@ -181,6 +194,10 @@ export function Balance() {
   const filteredGastos = useMemo(
     () => filterAndSortByDateRange(gastos, startDate, endDate, (gasto) => gasto.fecha),
     [gastos, startDate, endDate],
+  );
+  const filteredTransfers = useMemo(
+    () => filterAndSortByDateRange(transfers, startDate, endDate, (transfer) => transfer.fecha),
+    [transfers, startDate, endDate],
   );
 
   const totals = useMemo(() => {
@@ -264,13 +281,38 @@ export function Balance() {
       : 'Sin registros disponibles.';
 
   const rangeMethodTotals = useMemo(
-    () => computeMethodTotals(filteredOrders, filteredGastos),
-    [filteredOrders, filteredGastos],
+    () => computeMethodTotals(filteredOrders, filteredGastos, filteredTransfers),
+    [filteredGastos, filteredOrders, filteredTransfers],
   );
   const overallMethodTotals = useMemo(
-    () => computeMethodTotals(orders, gastos),
-    [orders, gastos],
+    () => computeMethodTotals(orders, gastos, transfers),
+    [gastos, orders, transfers],
   );
+
+  const totalProvisionDepositsRange = useMemo(
+    () => filteredTransfers.reduce((sum, transfer) => sum + transfer.monto, 0),
+    [filteredTransfers],
+  );
+
+  const totalProvisionDepositsOverall = useMemo(
+    () => transfers.reduce((sum, transfer) => sum + transfer.monto, 0),
+    [transfers],
+  );
+
+  const totalProvisionSpentRange = useMemo(
+    () => filteredGastos.reduce((sum, gasto) => (gasto.metodoPago === 'provision_caja' ? sum + gasto.monto : sum), 0),
+    [filteredGastos],
+  );
+
+  const totalProvisionSpentOverall = useMemo(
+    () => gastos.reduce((sum, gasto) => (gasto.metodoPago === 'provision_caja' ? sum + gasto.monto : sum), 0),
+    [gastos],
+  );
+
+  const provisionBalanceRange = totalProvisionDepositsRange - totalProvisionSpentRange;
+  const provisionBalanceOverall = totalProvisionDepositsOverall - totalProvisionSpentOverall;
+  const provisionBalanceRangeClass = valueColor(provisionBalanceRange);
+  const provisionBalanceOverallClass = valueColor(provisionBalanceOverall);
 
   const methodBreakdown: MethodSummary[] = useMemo(
     () =>
@@ -432,6 +474,98 @@ export function Balance() {
               ))}
             </div>
           )}
+
+          <div className="ui-card ui-card-pad space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <PiggyBank size={18} style={{ color: COLORS.dark }} />
+                <div>
+                  <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
+                    Movimientos de provisión de caja
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Depósitos desde caja y gastos realizados usando la provisión en el período filtrado.
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-xs uppercase text-gray-500 font-medium">Saldo histórico</p>
+                <p className={`text-sm font-semibold ${provisionBalanceOverallClass}`}>
+                  {formatCOP(provisionBalanceOverall)}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="bg-gray-50 rounded-lg px-3 py-3">
+                <p className="text-[11px] uppercase text-gray-500 font-medium">Depósitos en el período</p>
+                <p className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                  {formatCOP(totalProvisionDepositsRange)}
+                </p>
+              </div>
+              <div className="bg-gray-50 rounded-lg px-3 py-3">
+                <p className="text-[11px] uppercase text-gray-500 font-medium">Gastos desde provisión</p>
+                <p className="text-sm font-semibold text-red-600">
+                  {formatCOP(totalProvisionSpentRange)}
+                </p>
+              </div>
+              <div className="bg-gray-50 rounded-lg px-3 py-3">
+                <p className="text-[11px] uppercase text-gray-500 font-medium">Saldo del período</p>
+                <p className={`text-sm font-semibold ${provisionBalanceRangeClass}`}>
+                  {formatCOP(provisionBalanceRange)}
+                </p>
+              </div>
+            </div>
+
+            <div className="ui-table-wrapper">
+              <table className="ui-table">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Fecha
+                    </th>
+                    <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Descripción
+                    </th>
+                    <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">
+                      Origen
+                    </th>
+                    <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Monto
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredTransfers.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="px-3 lg:px-6 py-6 text-center text-xs lg:text-sm text-gray-500"
+                      >
+                        No hay movimientos de provisión en el rango seleccionado.
+                      </td>
+                    </tr>
+                  )}
+                  {filteredTransfers.map((transfer) => (
+                    <tr key={transfer.id} className="hover:bg-gray-50">
+                      <td className="px-3 lg:px-6 py-3 whitespace-nowrap text-xs text-gray-900">
+                        {dateFormatter.format(transfer.fecha)}
+                      </td>
+                      <td className="px-3 lg:px-6 py-3 text-xs text-gray-600">
+                        {transfer.descripcion ?? '—'}
+                      </td>
+                      <td className="px-3 lg:px-6 py-3 whitespace-nowrap text-xs text-gray-600 hidden sm:table-cell">
+                        {methodLabels[transfer.origen]}
+                      </td>
+                      <td className="px-3 lg:px-6 py-3 whitespace-nowrap text-xs font-semibold text-green-600">
+                        {formatCOP(transfer.monto)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
             <div className="ui-card">
