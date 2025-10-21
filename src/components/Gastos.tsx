@@ -9,6 +9,7 @@ import {
   parseDateInputValue,
 } from '../utils/format';
 import dataService from '../lib/dataService';
+import { EXPENSE_PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from '../utils/payments';
 
 interface GastosProps {
   focusRequest?: FocusDateRequest | null;
@@ -34,14 +35,8 @@ export function Gastos({ focusRequest }: GastosProps) {
     metodoPago: 'efectivo'
   });
 
-  const paymentMethods: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi', 'provision_caja'];
-  const paymentLabels: Record<PaymentMethod, string> = {
-    efectivo: 'Efectivo',
-    tarjeta: 'Tarjeta',
-    nequi: 'Nequi',
-    provision_caja: 'Provisión caja',
-    credito_empleados: 'Crédito empleados'
-  };
+  const paymentMethods: PaymentMethod[] = EXPENSE_PAYMENT_METHODS;
+  const paymentLabels: Record<PaymentMethod, string> = PAYMENT_METHOD_LABELS;
 
   const categorias = [
     'Productos Limpieza',

@@ -7,9 +7,9 @@ import {
   getAllocationsTotal,
   getOrderAllocations,
   mergeAllocations,
-  PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
   sanitizeAllocations,
+  POS_PAYMENT_METHODS,
 } from '../utils/payments';
 import { formatCOP } from '../utils/format';
 import { getCartItemEffectiveUnitPrice } from '../utils/cart';
@@ -76,7 +76,7 @@ const computeSelectedTotal = (
   selected: Record<PaymentMethod, boolean>,
   amounts: Record<PaymentMethod, string>
 ): number => {
-  return PAYMENT_METHODS.reduce((sum, method) => {
+  return POS_PAYMENT_METHODS.reduce((sum, method) => {
     if (!selected[method]) {
       return sum;
     }
@@ -435,7 +435,7 @@ export function PaymentModal({
   };
 
   const selectedList = useMemo(
-    () => PAYMENT_METHODS.filter((method) => selectedMethods[method]),
+    () => POS_PAYMENT_METHODS.filter((method) => selectedMethods[method]),
     [selectedMethods]
   );
 
@@ -984,7 +984,7 @@ export function PaymentModal({
                   Selecciona los métodos de pago
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-                  {PAYMENT_METHODS.map((method) => {
+                  {POS_PAYMENT_METHODS.map((method) => {
                     const isActive = selectedMethods[method];
                     const label = PAYMENT_METHOD_LABELS[method];
                     const disableMethod =
@@ -1163,7 +1163,7 @@ export function PaymentModal({
                               className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:border-transparent"
                               style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
                             >
-                              {PAYMENT_METHODS.map((method) => (
+                              {POS_PAYMENT_METHODS.map((method) => (
                                 <option key={method} value={method}>
                                   {PAYMENT_METHOD_LABELS[method]}
                                 </option>

@@ -632,9 +632,9 @@ export function Comandas({
     const paymentStatusLabel = paymentHandled
       ? (paid ? 'Pago registrado' : 'Pago gestionado')
       : 'Pago pendiente';
-    const canEditOrder = order.estado === 'entregado' && (paid || !isEmployeeCredit || isAdmin);
+    const canEditOrder = isAdmin && order.estado === 'entregado' && (paid || !isEmployeeCredit);
     const canManagePaymentActions = paid || !isEmployeeCredit || isAdmin;
-    const showEditActionsToggle = paid || (isEmployeeCredit && isAdmin);
+    const showEditActionsToggle = isAdmin && (paid || isEmployeeCredit);
     const showPaymentResetNotice = paid && isAdmin;
     const isDeleting = deletingOrderId === order.id;
     const isActionsExpanded = expandedActionsOrderId === order.id;

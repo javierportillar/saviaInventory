@@ -1032,6 +1032,48 @@ const persistLocalProvisionTransfers = (transfers: ProvisionTransfer[]) => {
   setLocalData(PROVISION_TRANSFERS_STORAGE_KEY, serialized);
 };
 
+const sortProvisionTransfersDesc = (a: ProvisionTransfer, b: ProvisionTransfer) =>
+  b.fecha.getTime() - a.fecha.getTime() || (b.created_at?.getTime() ?? 0) - (a.created_at?.getTime() ?? 0);
+
+const PROVISION_TRANSFER_SELECT = `
+  id,
+  fecha,
+  monto,
+  descripcion,
+  bolsillo_origen,
+  bolsillo_destino,
+  created_at,
+  origen_bolsillo:caja_bolsillos!caja_transferencias_bolsillo_origen_fkey(metodo_pago)
+`;
+
+const mapSupabaseProvisionTransfer = (row: any): ProvisionTransfer | null => {
+  if (!row) {
+    return null;
+  }
+
+  const candidate = normalizeProvisionTransfer({
+    id: row.id,
+    monto: row.monto,
+    descripcion: row.descripcion,
+    fecha: row.fecha,
+    origen: row.origen_bolsillo?.metodo_pago ?? row.origen ?? 'efectivo',
+    created_at: row.created_at,
+  });
+
+  if (!candidate) {
+    return null;
+  }
+
+  const origenNormalizado: ProvisionTransfer['origen'] = PROVISION_ORIGINS.includes(candidate.origen)
+    ? candidate.origen
+    : 'efectivo';
+
+  return {
+    ...candidate,
+    origen: origenNormalizado,
+  };
+};
+
 type MethodTotals = Record<PaymentMethod, number>;
 
 const zeroMethodTotals = (): MethodTotals => ({
@@ -2427,7 +2469,27 @@ type ProvisionTransferDraft = {
 
 export const fetchProvisionTransfers = async (): Promise<ProvisionTransfer[]> => {
   if (await ensureSupabaseReady()) {
-    // TODO: sincronizar con Supabase cuando exista la tabla correspondiente
+    try {
+      const { data, error } = await supabase
+        .from('caja_transferencias')
+        .select(PROVISION_TRANSFER_SELECT)
+        .eq('bolsillo_destino', 'provision_caja')
+        .order('fecha', { ascending: false })
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const mapped = (data ?? [])
+        .map(mapSupabaseProvisionTransfer)
+        .filter((transfer): transfer is ProvisionTransfer => transfer !== null)
+        .sort(sortProvisionTransfersDesc);
+
+      persistLocalProvisionTransfers(mapped);
+
+      return mapped;
+    } catch (error) {
+      console.warn('[dataService] No se pudo obtener las provisiones desde Supabase.', error);
+    }
   }
   return readLocalProvisionTransfers();
 };
@@ -2447,6 +2509,34 @@ export const createProvisionTransfer = async (draft: ProvisionTransferDraft): Pr
   const descripcion = draft.descripcion?.trim() || undefined;
   const originCandidate = draft.origen ?? 'efectivo';
   const origen: ProvisionTransfer['origen'] = PROVISION_ORIGINS.includes(originCandidate) ? originCandidate : 'efectivo';
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const { data, error } = await supabase
+        .from('caja_transferencias')
+        .insert({
+          fecha: formatDateInputValue(fecha),
+          monto: amount,
+          descripcion: descripcion ?? null,
+          bolsillo_origen: 'caja_principal',
+          bolsillo_destino: 'provision_caja',
+        })
+        .select(PROVISION_TRANSFER_SELECT)
+        .single();
+
+      if (error) throw error;
+
+      const mapped = mapSupabaseProvisionTransfer(data);
+      if (mapped) {
+        const current = readLocalProvisionTransfers().filter((transfer) => transfer.id !== mapped.id);
+        persistLocalProvisionTransfers([mapped, ...current].sort(sortProvisionTransfersDesc));
+        return mapped;
+      }
+    } catch (error) {
+      console.warn('[dataService] No se pudo registrar la provisión en Supabase. Usando modo local.', error);
+    }
+  }
+
   const id = draft.id && draft.id.trim() ? draft.id.trim() : (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `transfer-${Math.random().toString(36).slice(2, 10)}`);
 
   const transfer: ProvisionTransfer = {
@@ -2458,12 +2548,8 @@ export const createProvisionTransfer = async (draft: ProvisionTransferDraft): Pr
     created_at: new Date(),
   };
 
-  if (await ensureSupabaseReady()) {
-    // TODO: persistir en Supabase cuando esté disponible
-  }
-
   const current = readLocalProvisionTransfers();
-  const next = [transfer, ...current].sort((a, b) => b.fecha.getTime() - a.fecha.getTime() || (b.created_at?.getTime() ?? 0) - (a.created_at?.getTime() ?? 0));
+  const next = [transfer, ...current].sort(sortProvisionTransfersDesc);
   persistLocalProvisionTransfers(next);
   return transfer;
 };
@@ -2474,7 +2560,14 @@ export const deleteProvisionTransfer = async (id: string): Promise<void> => {
   }
 
   if (await ensureSupabaseReady()) {
-    // TODO: sincronizar eliminación cuando exista tabla en Supabase
+    const { error } = await supabase
+      .from('caja_transferencias')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      throw error;
+    }
   }
 
   const current = readLocalProvisionTransfers();

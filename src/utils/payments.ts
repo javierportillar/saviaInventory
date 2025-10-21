@@ -2,6 +2,10 @@ import { Order, PaymentAllocation, PaymentMethod, PaymentStatus } from '../types
 
 export const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi', 'provision_caja', 'credito_empleados'];
 
+export const POS_PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi', 'credito_empleados'];
+
+export const EXPENSE_PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'nequi', 'tarjeta', 'provision_caja'];
+
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   efectivo: 'Efectivo',
   tarjeta: 'Tarjeta',
