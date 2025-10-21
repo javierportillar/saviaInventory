@@ -42,5 +42,9 @@ export default defineConfig(({ mode }) => {
     optimizeDeps: {
       exclude: ['lucide-react'],
     },
+    build: {
+      outDir: 'docs',
+      emptyOutDir: true,
+    },
   };
 });
