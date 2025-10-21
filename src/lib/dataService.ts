@@ -7,6 +7,7 @@ import {
   BalanceResumen,
   PaymentMethod,
   ProvisionTransfer,
+  CajaPocket,
   CartItem,
   PaymentAllocation,
   PaymentStatus,
@@ -79,6 +80,7 @@ export const EMPLOYEE_CREDIT_UPDATED_EVENT = 'savia-employee-credit-updated';
 const BASE_SCHEDULE_STORAGE_KEY = 'savia-horarios-base';
 const WEEKLY_HOURS_STORAGE_KEY = 'savia-horarios-semanales';
 const PROVISION_TRANSFERS_STORAGE_KEY = 'savia-provision-transfers';
+const CAJA_POCKETS_STORAGE_KEY = 'savia-caja-bolsillos';
 
 const notifyEmployeeCreditUpdate = () => {
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
@@ -389,9 +391,25 @@ const settleEmployeeCreditBalance = async ({ empleadoId, monto, orderId, orderNu
   notifyEmployeeCreditUpdate();
 };
 
+const normalizeMethodAlias = (method?: string | null): string | null => {
+  if (typeof method !== 'string') {
+    return null;
+  }
+  const trimmed = method.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const normalized = trimmed.toLowerCase();
+  if (normalized === 'transferencia') {
+    return 'nequi';
+  }
+  return normalized;
+};
+
 const toOptionalPaymentMethod = (method?: string | null): PaymentMethod | undefined => {
-  if (method && PAYMENT_METHODS.includes(method as PaymentMethod)) {
-    return method as PaymentMethod;
+  const alias = normalizeMethodAlias(method);
+  if (alias && PAYMENT_METHODS.includes(alias as PaymentMethod)) {
+    return alias as PaymentMethod;
   }
   return undefined;
 };
@@ -963,8 +981,110 @@ const normalizeGastoRecord = (gasto: any): Gasto => ({
   categoria: gasto?.categoria ?? '',
   fecha: parseDateInputValue(gasto?.fecha),
   created_at: gasto?.created_at ? new Date(gasto.created_at) : undefined,
-  metodoPago: normalizePaymentMethod(extractPaymentMethodValue(gasto)),
+  metodoPago: (() => {
+    const metodo = normalizePaymentMethod(extractPaymentMethodValue(gasto));
+    return metodo === 'provision_caja' ? 'efectivo' : metodo;
+  })(),
 });
+
+const normalizeCajaPocket = (raw: any): CajaPocket | null => {
+  if (!raw) {
+    return null;
+  }
+
+  const codigo = typeof raw.codigo === 'string' && raw.codigo.trim() ? raw.codigo.trim() : null;
+  if (!codigo) {
+    return null;
+  }
+
+  const nombre = typeof raw.nombre === 'string' && raw.nombre.trim() ? raw.nombre.trim() : codigo;
+  const descripcion = typeof raw.descripcion === 'string' && raw.descripcion.trim() ? raw.descripcion.trim() : undefined;
+  const metodo = normalizePaymentMethod(raw.metodoPago ?? raw.metodo_pago ?? raw.metodo);
+  const esPrincipal = Boolean(raw.esPrincipal ?? raw.es_principal);
+  const createdAtValue = raw.created_at ?? raw.createdAt;
+  const created_at = createdAtValue ? new Date(createdAtValue) : undefined;
+
+  return {
+    codigo,
+    nombre,
+    descripcion,
+    metodoPago: metodo,
+    esPrincipal,
+    created_at,
+  };
+};
+
+const DEFAULT_POCKET_NAMES: Record<string, string> = {
+  caja_principal: 'Caja principal',
+  provision_caja: 'Provisión de caja',
+};
+
+const serializeCajaPocket = (pocket: CajaPocket) => ({
+  codigo: pocket.codigo,
+  nombre: pocket.nombre,
+  descripcion: pocket.descripcion ?? null,
+  metodoPago: pocket.metodoPago,
+  esPrincipal: pocket.esPrincipal,
+  created_at: pocket.created_at ? pocket.created_at.toISOString() : null,
+});
+
+const sortCajaPockets = (a: CajaPocket, b: CajaPocket) => {
+  if (a.esPrincipal && !b.esPrincipal) return -1;
+  if (!a.esPrincipal && b.esPrincipal) return 1;
+  return a.nombre.localeCompare(b.nombre, 'es');
+};
+
+const readLocalCajaPockets = (): CajaPocket[] => {
+  const stored = getLocalData<any[]>(CAJA_POCKETS_STORAGE_KEY, []);
+  return (stored ?? [])
+    .map(normalizeCajaPocket)
+    .filter((entry): entry is CajaPocket => entry !== null)
+    .sort(sortCajaPockets);
+};
+
+const persistLocalCajaPockets = (pockets: CajaPocket[]) => {
+  const serialized = pockets.map(serializeCajaPocket);
+  setLocalData(CAJA_POCKETS_STORAGE_KEY, serialized);
+};
+
+const mapSupabaseCajaPocket = (row: any): CajaPocket | null => normalizeCajaPocket({
+  codigo: row?.codigo,
+  nombre: row?.nombre,
+  descripcion: row?.descripcion,
+  metodoPago: row?.metodo_pago,
+  esPrincipal: row?.es_principal,
+  created_at: row?.created_at,
+});
+
+const fetchCajaBolsillos = async (): Promise<CajaPocket[]> => {
+  if (await ensureSupabaseReady()) {
+    try {
+      const { data, error } = await supabase
+        .from('caja_bolsillos')
+        .select('codigo, nombre, descripcion, metodo_pago, es_principal, created_at')
+        .order('es_principal', { ascending: false })
+        .order('nombre', { ascending: true });
+
+      if (error) {
+        throw error;
+      }
+
+      const mapped = (data ?? [])
+        .map(mapSupabaseCajaPocket)
+        .filter((entry): entry is CajaPocket => entry !== null)
+        .sort(sortCajaPockets);
+
+      persistLocalCajaPockets(mapped);
+      return mapped;
+    } catch (error) {
+      console.warn('[dataService] No se pudieron obtener los bolsillos de caja desde Supabase.', error);
+    }
+  }
+
+  return readLocalCajaPockets();
+};
+
+const pickString = (value: unknown): string | undefined => (typeof value === 'string' && value.trim() ? value.trim() : undefined);
 
 const PROVISION_ORIGINS: ProvisionTransfer['origen'][] = ['efectivo', 'nequi', 'tarjeta'];
 
@@ -983,18 +1103,25 @@ const normalizeProvisionTransfer = (raw: any): ProvisionTransfer | null => {
     return null;
   }
 
-  const id = typeof raw.id === 'string' && raw.id.trim()
-    ? raw.id.trim()
-    : `transfer-${Math.random().toString(36).slice(2, 10)}`;
+  const id = pickString(raw.id) ?? `transfer-${Math.random().toString(36).slice(2, 10)}`;
+  const descripcion = pickString(raw.descripcion);
 
-  const descripcion = typeof raw.descripcion === 'string' && raw.descripcion.trim()
-    ? raw.descripcion.trim()
-    : undefined;
-
-  const originValue = typeof raw.origen === 'string' ? raw.origen : undefined;
-  const origen: ProvisionTransfer['origen'] = PROVISION_ORIGINS.includes(originValue as ProvisionTransfer['origen'])
-    ? (originValue as ProvisionTransfer['origen'])
+  const originCandidate = normalizeMethodAlias(
+    pickString(raw.origen) ??
+    pickString(raw.origenMetodo) ??
+    pickString(raw.metodo_origen) ??
+    pickString(raw.metodo)
+  );
+  const origen: ProvisionTransfer['origen'] = originCandidate && PROVISION_ORIGINS.includes(originCandidate as ProvisionTransfer['origen'])
+    ? (originCandidate as ProvisionTransfer['origen'])
     : 'efectivo';
+
+  const bolsilloOrigen = pickString(raw.bolsilloOrigen) ?? pickString(raw.bolsillo_origen);
+  const bolsilloDestino = pickString(raw.bolsilloDestino) ?? pickString(raw.bolsillo_destino);
+  const origenNombre = pickString(raw.origenNombre) ?? pickString(raw.origen_nombre);
+  const destinoNombre = pickString(raw.destinoNombre) ?? pickString(raw.destino_nombre);
+  const destinoMetodoCandidate = pickString(raw.destinoMetodo) ?? pickString(raw.destino_metodo) ?? pickString(raw.destinoMetodoPago) ?? pickString(raw.destino_metodo_pago);
+  const destinoMetodo = toOptionalPaymentMethod(destinoMetodoCandidate) ?? undefined;
 
   const createdAtValue = raw.created_at ?? raw.createdAt;
   const created_at = createdAtValue ? new Date(createdAtValue) : undefined;
@@ -1006,6 +1133,11 @@ const normalizeProvisionTransfer = (raw: any): ProvisionTransfer | null => {
     fecha,
     origen,
     created_at,
+    bolsilloOrigen,
+    bolsilloDestino,
+    origenNombre,
+    destinoNombre,
+    destinoMetodo,
   };
 };
 
@@ -1015,6 +1147,11 @@ const serializeProvisionTransfer = (transfer: ProvisionTransfer) => ({
   descripcion: transfer.descripcion ?? null,
   fecha: formatDateInputValue(transfer.fecha instanceof Date ? transfer.fecha : new Date(transfer.fecha)),
   origen: transfer.origen,
+  bolsilloOrigen: transfer.bolsilloOrigen ?? null,
+  bolsilloDestino: transfer.bolsilloDestino ?? null,
+  origenNombre: transfer.origenNombre ?? null,
+  destinoNombre: transfer.destinoNombre ?? null,
+  destinoMetodo: transfer.destinoMetodo ?? null,
   created_at: transfer.created_at ? transfer.created_at.toISOString() : new Date().toISOString(),
 });
 
@@ -1023,7 +1160,7 @@ const readLocalProvisionTransfers = (): ProvisionTransfer[] => {
   const normalized = (stored ?? [])
     .map(normalizeProvisionTransfer)
     .filter((entry): entry is ProvisionTransfer => entry !== null)
-    .sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+    .sort(sortProvisionTransfersDesc);
   return normalized;
 };
 
@@ -1043,7 +1180,8 @@ const PROVISION_TRANSFER_SELECT = `
   bolsillo_origen,
   bolsillo_destino,
   created_at,
-  origen_bolsillo:caja_bolsillos!caja_transferencias_bolsillo_origen_fkey(metodo_pago)
+  origen_bolsillo:caja_bolsillos!caja_transferencias_bolsillo_origen_fkey (codigo, nombre, metodo_pago),
+  destino_bolsillo:caja_bolsillos!caja_transferencias_bolsillo_destino_fkey (codigo, nombre, metodo_pago)
 `;
 
 const mapSupabaseProvisionTransfer = (row: any): ProvisionTransfer | null => {
@@ -1056,8 +1194,13 @@ const mapSupabaseProvisionTransfer = (row: any): ProvisionTransfer | null => {
     monto: row.monto,
     descripcion: row.descripcion,
     fecha: row.fecha,
-    origen: row.origen_bolsillo?.metodo_pago ?? row.origen ?? 'efectivo',
+    origen: row.origen_bolsillo?.metodo_pago ?? row.origen ?? row.metodo_pago ?? 'efectivo',
     created_at: row.created_at,
+    bolsillo_origen: row.bolsillo_origen,
+    bolsillo_destino: row.bolsillo_destino,
+    origen_nombre: row.origen_bolsillo?.nombre,
+    destino_nombre: row.destino_bolsillo?.nombre,
+    destino_metodo: row.destino_bolsillo?.metodo_pago,
   });
 
   if (!candidate) {
@@ -1071,6 +1214,11 @@ const mapSupabaseProvisionTransfer = (row: any): ProvisionTransfer | null => {
   return {
     ...candidate,
     origen: origenNormalizado,
+    bolsilloOrigen: candidate.bolsilloOrigen ?? pickString(row.origen_bolsillo?.codigo) ?? pickString(row.bolsillo_origen),
+    bolsilloDestino: candidate.bolsilloDestino ?? pickString(row.destino_bolsillo?.codigo) ?? pickString(row.bolsillo_destino),
+    origenNombre: candidate.origenNombre ?? pickString(row.origen_bolsillo?.nombre),
+    destinoNombre: candidate.destinoNombre ?? pickString(row.destino_bolsillo?.nombre),
+    destinoMetodo: candidate.destinoMetodo ?? toOptionalPaymentMethod(row.destino_bolsillo?.metodo_pago) ?? undefined,
   };
 };
 
@@ -1290,10 +1438,35 @@ const computeLocalBalance = (orders: Order[], gastos: Gasto[], transfers: Provis
     if (!key) {
       return;
     }
+
     const entry = getAccumulator(key);
-    entry.ingresosPorMetodo.provision_caja += transfer.monto;
-    if (entry.egresosPorMetodo[transfer.origen] !== undefined) {
-      entry.egresosPorMetodo[transfer.origen] += transfer.monto;
+    const originMethod = PROVISION_ORIGINS.includes(transfer.origen) ? transfer.origen : 'efectivo';
+    const destinationMethod = transfer.destinoMetodo && PAYMENT_METHODS.includes(transfer.destinoMetodo)
+      ? transfer.destinoMetodo
+      : undefined;
+
+    if (transfer.bolsilloDestino === 'provision_caja') {
+      entry.ingresosPorMetodo.provision_caja += transfer.monto;
+      if (entry.egresosPorMetodo[originMethod] !== undefined) {
+        entry.egresosPorMetodo[originMethod] += transfer.monto;
+      }
+      return;
+    }
+
+    if (transfer.bolsilloOrigen === 'provision_caja') {
+      entry.egresosPorMetodo.provision_caja += transfer.monto;
+      if (destinationMethod && entry.ingresosPorMetodo[destinationMethod] !== undefined) {
+        entry.ingresosPorMetodo[destinationMethod] += transfer.monto;
+      }
+      return;
+    }
+
+    if (entry.egresosPorMetodo[originMethod] !== undefined) {
+      entry.egresosPorMetodo[originMethod] += transfer.monto;
+    }
+
+    if (destinationMethod && entry.ingresosPorMetodo[destinationMethod] !== undefined) {
+      entry.ingresosPorMetodo[destinationMethod] += transfer.monto;
     }
   });
 
@@ -2372,25 +2545,26 @@ export const fetchGastos = async (): Promise<Gasto[]> => {
 
 export const createGasto = async (gasto: Gasto): Promise<Gasto> => {
   const sanitized = normalizeGastoRecord(gasto);
+  const gastoToPersist: Gasto = { ...sanitized };
   if (await ensureSupabaseReady()) {
     try {
       const fechaValue = formatDateInputValue(
-        sanitized.fecha instanceof Date ? sanitized.fecha : new Date(sanitized.fecha)
+        gastoToPersist.fecha instanceof Date ? gastoToPersist.fecha : new Date(gastoToPersist.fecha)
       );
 
       const { data, error } = await supabase
         .from('gastos')
         .insert([
           {
-            id: sanitized.id,
-            descripcion: sanitized.descripcion,
-            monto: sanitized.monto,
-            categoria: sanitized.categoria,
+            id: gastoToPersist.id,
+            descripcion: gastoToPersist.descripcion,
+            monto: gastoToPersist.monto,
+            categoria: gastoToPersist.categoria,
             fecha: fechaValue,
-            created_at: sanitized.created_at instanceof Date
-              ? sanitized.created_at.toISOString()
-              : sanitized.created_at ?? new Date().toISOString(),
-            [SUPABASE_GASTOS_PAYMENT_COLUMN]: sanitized.metodoPago,
+            created_at: gastoToPersist.created_at instanceof Date
+              ? gastoToPersist.created_at.toISOString()
+              : gastoToPersist.created_at ?? new Date().toISOString(),
+            [SUPABASE_GASTOS_PAYMENT_COLUMN]: gastoToPersist.metodoPago,
           },
         ])
         .select('*')
@@ -2404,31 +2578,32 @@ export const createGasto = async (gasto: Gasto): Promise<Gasto> => {
 
   // Local storage fallback
   const gastos = getLocalData<Gasto[]>('savia-gastos', []).map(normalizeGastoRecord);
-  const newGastos = [...gastos, sanitized];
+  const newGastos = [...gastos, gastoToPersist];
   setLocalData('savia-gastos', newGastos);
-  return sanitized;
+  return gastoToPersist;
 };
 
 export const updateGasto = async (gasto: Gasto): Promise<Gasto> => {
   const sanitized = normalizeGastoRecord(gasto);
+  const gastoToPersist: Gasto = { ...sanitized };
   if (await ensureSupabaseReady()) {
     try {
       const fechaValue = formatDateInputValue(
-        sanitized.fecha instanceof Date ? sanitized.fecha : new Date(sanitized.fecha)
+        gastoToPersist.fecha instanceof Date ? gastoToPersist.fecha : new Date(gastoToPersist.fecha)
       );
 
       const { error } = await supabase
         .from('gastos')
         .update({
-          descripcion: sanitized.descripcion,
-          monto: sanitized.monto,
-          categoria: sanitized.categoria,
+          descripcion: gastoToPersist.descripcion,
+          monto: gastoToPersist.monto,
+          categoria: gastoToPersist.categoria,
           fecha: fechaValue,
-          [SUPABASE_GASTOS_PAYMENT_COLUMN]: sanitized.metodoPago,
+          [SUPABASE_GASTOS_PAYMENT_COLUMN]: gastoToPersist.metodoPago,
         })
-        .eq('id', sanitized.id);
+        .eq('id', gastoToPersist.id);
       if (error) throw error;
-      return sanitized;
+      return gastoToPersist;
     } catch (error) {
       console.warn('Supabase not available, using local data:', error);
     }
@@ -2436,9 +2611,9 @@ export const updateGasto = async (gasto: Gasto): Promise<Gasto> => {
 
   // Local storage fallback
   const gastos = getLocalData<Gasto[]>('savia-gastos', []).map(normalizeGastoRecord);
-  const updatedGastos = gastos.map(g => g.id === sanitized.id ? sanitized : g);
+  const updatedGastos = gastos.map(g => g.id === gastoToPersist.id ? gastoToPersist : g);
   setLocalData('savia-gastos', updatedGastos);
-  return sanitized;
+  return gastoToPersist;
 };
 
 export const deleteGasto = async (id: string): Promise<void> => {
@@ -2465,6 +2640,12 @@ type ProvisionTransferDraft = {
   descripcion?: string;
   fecha: Date;
   origen?: ProvisionTransfer['origen'];
+  origenMetodo?: ProvisionTransfer['origen'];
+  destinoMetodo?: PaymentMethod;
+  bolsilloOrigen?: string;
+  bolsilloDestino?: string;
+  origenNombre?: string;
+  destinoNombre?: string;
 };
 
 export const fetchProvisionTransfers = async (): Promise<ProvisionTransfer[]> => {
@@ -2473,7 +2654,6 @@ export const fetchProvisionTransfers = async (): Promise<ProvisionTransfer[]> =>
       const { data, error } = await supabase
         .from('caja_transferencias')
         .select(PROVISION_TRANSFER_SELECT)
-        .eq('bolsillo_destino', 'provision_caja')
         .order('fecha', { ascending: false })
         .order('created_at', { ascending: false });
 
@@ -2482,6 +2662,12 @@ export const fetchProvisionTransfers = async (): Promise<ProvisionTransfer[]> =>
       const mapped = (data ?? [])
         .map(mapSupabaseProvisionTransfer)
         .filter((transfer): transfer is ProvisionTransfer => transfer !== null)
+        .filter((transfer) => {
+          if (!transfer.bolsilloOrigen && !transfer.bolsilloDestino) {
+            return true;
+          }
+          return transfer.bolsilloDestino === 'provision_caja' || transfer.bolsilloOrigen === 'provision_caja';
+        })
         .sort(sortProvisionTransfersDesc);
 
       persistLocalProvisionTransfers(mapped);
@@ -2491,7 +2677,12 @@ export const fetchProvisionTransfers = async (): Promise<ProvisionTransfer[]> =>
       console.warn('[dataService] No se pudo obtener las provisiones desde Supabase.', error);
     }
   }
-  return readLocalProvisionTransfers();
+  return readLocalProvisionTransfers().filter((transfer) => {
+    if (!transfer.bolsilloOrigen && !transfer.bolsilloDestino) {
+      return true;
+    }
+    return transfer.bolsilloDestino === 'provision_caja' || transfer.bolsilloOrigen === 'provision_caja';
+  });
 };
 
 export const createProvisionTransfer = async (draft: ProvisionTransferDraft): Promise<ProvisionTransfer> => {
@@ -2507,10 +2698,39 @@ export const createProvisionTransfer = async (draft: ProvisionTransferDraft): Pr
   fecha.setHours(0, 0, 0, 0);
 
   const descripcion = draft.descripcion?.trim() || undefined;
-  const originCandidate = draft.origen ?? 'efectivo';
-  const origen: ProvisionTransfer['origen'] = PROVISION_ORIGINS.includes(originCandidate) ? originCandidate : 'efectivo';
+  const supabaseReady = await ensureSupabaseReady();
 
-  if (await ensureSupabaseReady()) {
+  const originCode = pickString(draft.bolsilloOrigen) ?? 'caja_principal';
+  const destinationCode = pickString(draft.bolsilloDestino) ?? 'provision_caja';
+
+  if (originCode === destinationCode) {
+    throw new Error('Selecciona bolsillos diferentes para origen y destino.');
+  }
+
+  let pockets = readLocalCajaPockets();
+  let originPocket = pockets.find((pocket) => pocket.codigo === originCode);
+  let destinationPocket = pockets.find((pocket) => pocket.codigo === destinationCode);
+
+  if ((!originPocket || !destinationPocket) && supabaseReady) {
+    try {
+      pockets = await fetchCajaBolsillos();
+      originPocket = pockets.find((pocket) => pocket.codigo === originCode) ?? originPocket;
+      destinationPocket = pockets.find((pocket) => pocket.codigo === destinationCode) ?? destinationPocket;
+    } catch (error) {
+      console.warn('[dataService] No se pudieron refrescar los bolsillos antes de crear la transferencia.', error);
+    }
+  }
+
+  const originMethodCandidate = normalizeMethodAlias(draft.origenMetodo ?? draft.origen ?? originPocket?.metodoPago);
+  const origen: ProvisionTransfer['origen'] = originMethodCandidate && PROVISION_ORIGINS.includes(originMethodCandidate as ProvisionTransfer['origen'])
+    ? (originMethodCandidate as ProvisionTransfer['origen'])
+    : 'efectivo';
+
+  const destinoMetodo = toOptionalPaymentMethod(draft.destinoMetodo ?? destinationPocket?.metodoPago ?? undefined) ?? undefined;
+  const origenNombre = pickString(draft.origenNombre) ?? originPocket?.nombre ?? DEFAULT_POCKET_NAMES[originCode] ?? originCode;
+  const destinoNombre = pickString(draft.destinoNombre) ?? destinationPocket?.nombre ?? DEFAULT_POCKET_NAMES[destinationCode] ?? destinationCode;
+
+  if (supabaseReady) {
     try {
       const { data, error } = await supabase
         .from('caja_transferencias')
@@ -2518,8 +2738,8 @@ export const createProvisionTransfer = async (draft: ProvisionTransferDraft): Pr
           fecha: formatDateInputValue(fecha),
           monto: amount,
           descripcion: descripcion ?? null,
-          bolsillo_origen: 'caja_principal',
-          bolsillo_destino: 'provision_caja',
+          bolsillo_origen: originCode,
+          bolsillo_destino: destinationCode,
         })
         .select(PROVISION_TRANSFER_SELECT)
         .single();
@@ -2546,6 +2766,11 @@ export const createProvisionTransfer = async (draft: ProvisionTransferDraft): Pr
     fecha,
     origen,
     created_at: new Date(),
+    bolsilloOrigen: originCode,
+    bolsilloDestino: destinationCode,
+    origenNombre,
+    destinoNombre,
+    destinoMetodo,
   };
 
   const current = readLocalProvisionTransfers();
@@ -2629,6 +2854,7 @@ export const dataService = {
   createGasto,
   updateGasto,
   deleteGasto,
+  fetchCajaBolsillos,
   fetchProvisionTransfers,
   createProvisionTransfer,
   deleteProvisionTransfer,

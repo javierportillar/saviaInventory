@@ -14,6 +14,15 @@ export interface MenuItem {
 
 export type PaymentMethod = 'efectivo' | 'tarjeta' | 'nequi' | 'provision_caja' | 'credito_empleados';
 
+export interface CajaPocket {
+  codigo: string;
+  nombre: string;
+  descripcion?: string;
+  metodoPago: PaymentMethod;
+  esPrincipal: boolean;
+  created_at?: Date;
+}
+
 export type CreditType = 'empleados';
 
 export interface OrderCreditInfo {
@@ -157,6 +166,11 @@ export interface ProvisionTransfer {
   fecha: Date;
   origen: ProvisionTransferOrigin;
   created_at?: Date;
+  bolsilloOrigen?: string;
+  bolsilloDestino?: string;
+  origenNombre?: string;
+  destinoNombre?: string;
+  destinoMetodo?: PaymentMethod;
 }
 
 export interface BalanceResumen {

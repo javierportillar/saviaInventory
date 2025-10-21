@@ -4,7 +4,7 @@ export const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi',
 
 export const POS_PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi', 'credito_empleados'];
 
-export const EXPENSE_PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'nequi', 'tarjeta', 'provision_caja'];
+export const EXPENSE_PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'nequi', 'tarjeta'];
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   efectivo: 'Efectivo',

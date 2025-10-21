@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FileSpreadsheet,
   Wallet,
@@ -14,6 +14,7 @@ import {
   Empleado,
   Gasto,
   PaymentMethod,
+  CajaPocket,
   ProvisionTransfer,
   WeeklySchedule,
   WeeklyHours
@@ -36,6 +37,7 @@ import {
   getStartOfWeek,
   sumWeeklyHours
 } from '../utils/employeeHours';
+import { PAYMENT_METHOD_LABELS } from '../utils/payments';
 
 const trackedMethods = ['efectivo', 'nequi', 'tarjeta', 'provision_caja'] as const;
 type TrackedMethod = typeof trackedMethods[number];
@@ -109,6 +111,7 @@ export function Contabilidad() {
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [baseSchedules, setBaseSchedules] = useState<Record<string, WeeklySchedule>>({});
+  const [pockets, setPockets] = useState<CajaPocket[]>([]);
   const weekOptions = useMemo(() => createWeekOptions(16), []);
   const defaultWeek = weekOptions[0]?.key ?? getCurrentWeekKey();
   const [selectedWeek, setSelectedWeek] = useState<string>(defaultWeek);
@@ -121,8 +124,48 @@ export function Contabilidad() {
   const [transferForm, setTransferForm] = useState({
     monto: '',
     fecha: getTodayDateInputValue(),
-    descripcion: ''
+    descripcion: '',
+    origen: 'caja_principal',
+    destino: 'provision_caja'
   });
+
+  const pocketMap = useMemo(() => {
+    const map = new Map<string, CajaPocket>();
+    pockets.forEach(pocket => {
+      map.set(pocket.codigo, pocket);
+    });
+    return map;
+  }, [pockets]);
+
+  const pocketOptions = useMemo(() => {
+    if (pockets.length > 0) {
+      return pockets;
+    }
+    return [
+      { codigo: 'caja_principal', nombre: 'Caja principal', metodoPago: 'efectivo', esPrincipal: true } as CajaPocket,
+      { codigo: 'provision_caja', nombre: 'Provisión de caja', metodoPago: 'efectivo', esPrincipal: false } as CajaPocket
+    ];
+  }, [pockets]);
+
+  const getPocketName = useCallback(
+    (codigo?: string | null) => {
+      if (!codigo) {
+        return '—';
+      }
+      const fromMap = pocketMap.get(codigo);
+      if (fromMap) {
+        return fromMap.nombre;
+      }
+      if (codigo === 'caja_principal') {
+        return 'Caja principal';
+      }
+      if (codigo === 'provision_caja') {
+        return 'Provisión de caja';
+      }
+      return codigo;
+    },
+    [pocketMap]
+  );
 
   useEffect(() => {
     setSelectedWeek(weekOptions[0]?.key ?? getCurrentWeekKey());
@@ -135,11 +178,12 @@ export function Contabilidad() {
       setLoading(true);
       setLoadError(null);
       try {
-        const [gastosData, empleadosData, schedules, transfersData] = await Promise.all([
+        const [gastosData, empleadosData, schedules, transfersData, pocketsData] = await Promise.all([
           dataService.fetchGastos(),
           dataService.fetchEmpleados(),
           dataService.fetchEmployeeBaseSchedules(),
-          dataService.fetchProvisionTransfers()
+          dataService.fetchProvisionTransfers(),
+          dataService.fetchCajaBolsillos()
         ]);
 
         if (!isMounted) {
@@ -150,6 +194,7 @@ export function Contabilidad() {
         setEmpleados(empleadosData);
         setBaseSchedules(schedules);
         setTransfers(transfersData);
+        setPockets(pocketsData);
       } catch (error) {
         console.error('Error cargando la información de contabilidad:', error);
         if (isMounted) {
@@ -271,16 +316,20 @@ export function Contabilidad() {
   );
 
   const totalProvisionDeposits = useMemo(
-    () => transfers.reduce((acc, transfer) => acc + transfer.monto, 0),
+    () => transfers
+      .filter((transfer) => transfer.bolsilloDestino === 'provision_caja')
+      .reduce((acc, transfer) => acc + transfer.monto, 0),
     [transfers]
   );
 
-  const totalProvisionSpent = useMemo(
-    () => gastos.reduce((acc, gasto) => (gasto.metodoPago === 'provision_caja' ? acc + gasto.monto : acc), 0),
-    [gastos]
+  const totalProvisionWithdrawals = useMemo(
+    () => transfers
+      .filter((transfer) => transfer.bolsilloOrigen === 'provision_caja')
+      .reduce((acc, transfer) => acc + transfer.monto, 0),
+    [transfers]
   );
 
-  const currentProvisionBalance = totalProvisionDeposits - totalProvisionSpent;
+  const currentProvisionBalance = totalProvisionDeposits - totalProvisionWithdrawals;
 
   const weekHours = weeklyHoursCache[selectedWeek] || {};
 
@@ -333,6 +382,13 @@ export function Contabilidad() {
     setTransferForm(prev => ({ ...prev, [field]: value }));
   };
 
+  const handleTransferPocketChange = (
+    field: 'origen' | 'destino'
+  ) => (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value;
+    setTransferForm(prev => ({ ...prev, [field]: value }));
+  };
+
   const handleCreateTransfer = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setTransferError(null);
@@ -353,16 +409,44 @@ export function Contabilidad() {
       return;
     }
 
+    if (!transferForm.origen || !transferForm.destino) {
+      setTransferError('Selecciona los bolsillos de origen y destino.');
+      return;
+    }
+
+    if (transferForm.origen === transferForm.destino) {
+      setTransferError('Elige bolsillos diferentes para origen y destino.');
+      return;
+    }
+
+    const originPocket = pocketMap.get(transferForm.origen);
+    const destinationPocket = pocketMap.get(transferForm.destino);
+    const originMethodCandidate = originPocket?.metodoPago;
+    const originMethod: ProvisionTransfer['origen'] = originMethodCandidate === 'nequi' || originMethodCandidate === 'tarjeta'
+      ? originMethodCandidate
+      : 'efectivo';
+
     setTransferSubmitting(true);
     try {
       const newTransfer = await dataService.createProvisionTransfer({
         monto: amount,
         fecha,
         descripcion: transferForm.descripcion,
-        origen: 'efectivo'
+        origenMetodo: originMethod,
+        destinoMetodo: destinationPocket?.metodoPago,
+        bolsilloOrigen: transferForm.origen,
+        bolsilloDestino: transferForm.destino,
+        origenNombre: originPocket?.nombre,
+        destinoNombre: destinationPocket?.nombre,
       });
       setTransfers(prev => [newTransfer, ...prev].sort(compareTransfers));
-      setTransferForm({ monto: '', fecha: getTodayDateInputValue(), descripcion: '' });
+      setTransferForm({
+        monto: '',
+        fecha: getTodayDateInputValue(),
+        descripcion: '',
+        origen: transferForm.origen,
+        destino: transferForm.destino,
+      });
       setTransferFormOpen(false);
     } catch (error) {
       console.error('Error registrando movimiento de provisión:', error);
@@ -478,9 +562,9 @@ export function Contabilidad() {
             </p>
           </div>
           <div className="bg-gray-50 rounded-lg px-3 py-3">
-            <p className="text-xs font-medium uppercase text-gray-500">Gastos desde provisión</p>
+            <p className="text-xs font-medium uppercase text-gray-500">Retirado de provisión</p>
             <p className="text-lg font-semibold text-red-600">
-              {formatCOP(totalProvisionSpent)}
+              {formatCOP(totalProvisionWithdrawals)}
             </p>
           </div>
           <div className="bg-gray-50 rounded-lg px-3 py-3">
@@ -492,8 +576,8 @@ export function Contabilidad() {
         </div>
 
         {transferFormOpen && (
-          <form className="grid gap-3 sm:grid-cols-4" onSubmit={handleCreateTransfer}>
-            <label className="flex flex-col gap-1 text-xs font-medium text-gray-600">
+          <form className="grid gap-3 sm:grid-cols-6" onSubmit={handleCreateTransfer}>
+            <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 sm:col-span-2">
               Monto
               <input
                 type="number"
@@ -507,7 +591,7 @@ export function Contabilidad() {
                 required
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-gray-600">
+            <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 sm:col-span-2">
               Fecha
               <input
                 type="date"
@@ -518,7 +602,43 @@ export function Contabilidad() {
                 required
               />
             </label>
-            <label className="flex flex-col gap-1 sm:col-span-2 text-xs font-medium text-gray-600">
+            <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 sm:col-span-2">
+              Desde
+              <select
+                value={transferForm.origen}
+                onChange={handleTransferPocketChange('origen')}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:outline-none"
+                style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+              >
+                {pocketOptions.map((pocket) => {
+                  const methodLabel = PAYMENT_METHOD_LABELS[pocket.metodoPago] ?? pocket.metodoPago;
+                  return (
+                    <option key={pocket.codigo} value={pocket.codigo} disabled={pocket.codigo === transferForm.destino}>
+                      {`${pocket.nombre} · ${methodLabel}`}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 sm:col-span-2">
+              Hacia
+              <select
+                value={transferForm.destino}
+                onChange={handleTransferPocketChange('destino')}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:outline-none"
+                style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+              >
+                {pocketOptions.map((pocket) => {
+                  const methodLabel = PAYMENT_METHOD_LABELS[pocket.metodoPago] ?? pocket.metodoPago;
+                  return (
+                    <option key={pocket.codigo} value={pocket.codigo} disabled={pocket.codigo === transferForm.origen}>
+                      {`${pocket.nombre} · ${methodLabel}`}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 sm:col-span-6 text-xs font-medium text-gray-600">
               Descripción (opcional)
               <input
                 type="text"
@@ -529,7 +649,7 @@ export function Contabilidad() {
                 placeholder="Ej. Arqueo semanal"
               />
             </label>
-            <div className="sm:col-span-4 flex justify-end gap-2">
+            <div className="sm:col-span-6 flex justify-end gap-2">
               <button
                 type="submit"
                 disabled={transferSubmitting}
@@ -552,7 +672,8 @@ export function Contabilidad() {
               <tr className="text-left">
                 <th className="py-2 pr-4 font-medium">Fecha</th>
                 <th className="py-2 pr-4 font-medium">Descripción</th>
-                <th className="py-2 pr-4 font-medium">Origen</th>
+                <th className="py-2 pr-4 font-medium">Desde</th>
+                <th className="py-2 pr-4 font-medium">Hacia</th>
                 <th className="py-2 pr-4 font-medium">Monto</th>
                 <th className="py-2 pr-4 font-medium text-right">Acciones</th>
               </tr>
@@ -560,7 +681,7 @@ export function Contabilidad() {
             <tbody>
               {sortedTransfers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-4 pr-4 text-center text-gray-500">
+                  <td colSpan={6} className="py-4 pr-4 text-center text-gray-500">
                     Aún no registras movimientos de provisión.
                   </td>
                 </tr>
@@ -574,7 +695,24 @@ export function Contabilidad() {
                       {transfer.descripcion ?? '—'}
                     </td>
                     <td className="py-2 pr-4 text-gray-600">
-                      {methodLabels[transfer.origen as TrackedMethod]}
+                      <div className="flex flex-col">
+                        <span className="font-medium" style={{ color: COLORS.dark }}>
+                          {getPocketName(transfer.bolsilloOrigen)}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {PAYMENT_METHOD_LABELS[transfer.origen] ?? transfer.origen}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-2 pr-4 text-gray-600">
+                      <div className="flex flex-col">
+                        <span className="font-medium" style={{ color: COLORS.dark }}>
+                          {getPocketName(transfer.bolsilloDestino)}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {transfer.destinoMetodo ? (PAYMENT_METHOD_LABELS[transfer.destinoMetodo] ?? transfer.destinoMetodo) : '—'}
+                        </span>
+                      </div>
                     </td>
                     <td className="py-2 pr-4 text-green-600 font-semibold">
                       {formatCOP(transfer.monto)}

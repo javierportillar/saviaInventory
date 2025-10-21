@@ -4,7 +4,7 @@ import dataService from '../lib/dataService';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
 import { Wallet, TrendingUp, TrendingDown, CalendarDays, PiggyBank } from 'lucide-react';
-import { formatPaymentSummary, getOrderAllocations, getOrderPaymentDate, isOrderPaid } from '../utils/payments';
+import { formatPaymentSummary, getOrderAllocations, getOrderPaymentDate, isOrderPaid, PAYMENT_METHOD_LABELS } from '../utils/payments';
 
 type MethodSummary = {
   id: PaymentMethod;
@@ -31,6 +31,19 @@ const normalizeDate = (value: Date) => {
   const date = new Date(value);
   date.setHours(0, 0, 0, 0);
   return date;
+};
+
+const formatPocketName = (codigo?: string | null) => {
+  if (!codigo) {
+    return '—';
+  }
+  if (codigo === 'caja_principal') {
+    return 'Caja principal';
+  }
+  if (codigo === 'provision_caja') {
+    return 'Provisión de caja';
+  }
+  return codigo.replace(/_/g, ' ');
 };
 
 const formatDateTime = (value: Date) => {
@@ -71,11 +84,24 @@ const computeMethodTotals = (orders: Order[], gastos: Gasto[], transfers: Provis
   });
 
   transfers.forEach((transfer) => {
-    const origin = transfer.origen ?? 'efectivo';
-    if (totals[origin]) {
-      totals[origin].egresos += transfer.monto;
+    if (transfer.bolsilloDestino === 'provision_caja') {
+      totals.provision_caja.ingresos += transfer.monto;
+      totals[transfer.origen].egresos += transfer.monto;
+      return;
     }
-    totals.provision_caja.ingresos += transfer.monto;
+
+    if (transfer.bolsilloOrigen === 'provision_caja') {
+      totals.provision_caja.egresos += transfer.monto;
+      if (transfer.destinoMetodo) {
+        totals[transfer.destinoMetodo].ingresos += transfer.monto;
+      }
+      return;
+    }
+
+    totals[transfer.origen].egresos += transfer.monto;
+    if (transfer.destinoMetodo) {
+      totals[transfer.destinoMetodo].ingresos += transfer.monto;
+    }
   });
 
   return totals;
@@ -290,27 +316,35 @@ export function Balance() {
   );
 
   const totalProvisionDepositsRange = useMemo(
-    () => filteredTransfers.reduce((sum, transfer) => sum + transfer.monto, 0),
+    () => filteredTransfers
+      .filter((transfer) => transfer.bolsilloDestino === 'provision_caja')
+      .reduce((sum, transfer) => sum + transfer.monto, 0),
     [filteredTransfers],
   );
 
   const totalProvisionDepositsOverall = useMemo(
-    () => transfers.reduce((sum, transfer) => sum + transfer.monto, 0),
+    () => transfers
+      .filter((transfer) => transfer.bolsilloDestino === 'provision_caja')
+      .reduce((sum, transfer) => sum + transfer.monto, 0),
     [transfers],
   );
 
-  const totalProvisionSpentRange = useMemo(
-    () => filteredGastos.reduce((sum, gasto) => (gasto.metodoPago === 'provision_caja' ? sum + gasto.monto : sum), 0),
-    [filteredGastos],
+  const totalProvisionWithdrawalsRange = useMemo(
+    () => filteredTransfers
+      .filter((transfer) => transfer.bolsilloOrigen === 'provision_caja')
+      .reduce((sum, transfer) => sum + transfer.monto, 0),
+    [filteredTransfers],
   );
 
-  const totalProvisionSpentOverall = useMemo(
-    () => gastos.reduce((sum, gasto) => (gasto.metodoPago === 'provision_caja' ? sum + gasto.monto : sum), 0),
-    [gastos],
+  const totalProvisionWithdrawalsOverall = useMemo(
+    () => transfers
+      .filter((transfer) => transfer.bolsilloOrigen === 'provision_caja')
+      .reduce((sum, transfer) => sum + transfer.monto, 0),
+    [transfers],
   );
 
-  const provisionBalanceRange = totalProvisionDepositsRange - totalProvisionSpentRange;
-  const provisionBalanceOverall = totalProvisionDepositsOverall - totalProvisionSpentOverall;
+  const provisionBalanceRange = totalProvisionDepositsRange - totalProvisionWithdrawalsRange;
+  const provisionBalanceOverall = totalProvisionDepositsOverall - totalProvisionWithdrawalsOverall;
   const provisionBalanceRangeClass = valueColor(provisionBalanceRange);
   const provisionBalanceOverallClass = valueColor(provisionBalanceOverall);
 
@@ -504,9 +538,9 @@ export function Balance() {
                 </p>
               </div>
               <div className="bg-gray-50 rounded-lg px-3 py-3">
-                <p className="text-[11px] uppercase text-gray-500 font-medium">Gastos desde provisión</p>
+                <p className="text-[11px] uppercase text-gray-500 font-medium">Retiros en el período</p>
                 <p className="text-sm font-semibold text-red-600">
-                  {formatCOP(totalProvisionSpentRange)}
+                  {formatCOP(totalProvisionWithdrawalsRange)}
                 </p>
               </div>
               <div className="bg-gray-50 rounded-lg px-3 py-3">
@@ -528,7 +562,10 @@ export function Balance() {
                       Descripción
                     </th>
                     <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">
-                      Origen
+                      Desde
+                    </th>
+                    <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">
+                      Hacia
                     </th>
                     <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Monto
@@ -539,7 +576,7 @@ export function Balance() {
                   {filteredTransfers.length === 0 && (
                     <tr>
                       <td
-                        colSpan={4}
+                        colSpan={5}
                         className="px-3 lg:px-6 py-6 text-center text-xs lg:text-sm text-gray-500"
                       >
                         No hay movimientos de provisión en el rango seleccionado.
@@ -554,10 +591,28 @@ export function Balance() {
                       <td className="px-3 lg:px-6 py-3 text-xs text-gray-600">
                         {transfer.descripcion ?? '—'}
                       </td>
-                      <td className="px-3 lg:px-6 py-3 whitespace-nowrap text-xs text-gray-600 hidden sm:table-cell">
-                        {methodLabels[transfer.origen]}
+                      <td className="px-3 lg:px-6 py-3 text-xs text-gray-600 hidden sm:table-cell">
+                        <div className="flex flex-col">
+                          <span className="font-medium" style={{ color: COLORS.dark }}>
+                            {formatPocketName(transfer.bolsilloOrigen)}
+                          </span>
+                          <span className="text-[10px] text-gray-500">
+                            {PAYMENT_METHOD_LABELS[transfer.origen] ?? transfer.origen}
+                          </span>
+                        </div>
                       </td>
-                      <td className="px-3 lg:px-6 py-3 whitespace-nowrap text-xs font-semibold text-green-600">
+                      <td className="px-3 lg:px-6 py-3 text-xs text-gray-600 hidden sm:table-cell">
+                        <div className="flex flex-col">
+                          <span className="font-medium" style={{ color: COLORS.dark }}>
+                            {formatPocketName(transfer.bolsilloDestino)}
+                          </span>
+                          <span className="text-[10px] text-gray-500">
+                            {transfer.destinoMetodo ? (PAYMENT_METHOD_LABELS[transfer.destinoMetodo] ?? transfer.destinoMetodo) : '—'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-3 lg:px-6 py-3 whitespace-nowrap text-xs font-semibold" style={{ color: transfer.bolsilloDestino === 'provision_caja' ? '#15803d' : '#dc2626' }}>
+                        {transfer.bolsilloDestino === 'provision_caja' ? '+' : '-'}
                         {formatCOP(transfer.monto)}
                       </td>
                     </tr>

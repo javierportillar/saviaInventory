@@ -43,7 +43,6 @@ ALTER TYPE "public"."inventario_tipo_type" OWNER TO "postgres";
 CREATE TYPE "public"."metodo_pago_type" AS ENUM (
     'efectivo',
     'tarjeta',
-    'nequi',
     'transferencia',
     'credito_empleados'
 );
@@ -167,65 +166,6 @@ $$;
 ALTER FUNCTION "public"."insertar_ingreso_desde_order_multi"() OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."sync_caja_transferencia_movimientos"() RETURNS "trigger"
-    LANGUAGE "plpgsql"
-    AS $$
-DECLARE
-  datos_origen RECORD;
-  datos_destino RECORD;
-  descripcion_base text;
-BEGIN
-  SELECT nombre, metodo_pago INTO datos_origen
-  FROM caja_bolsillos
-  WHERE codigo = NEW.bolsillo_origen;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'El bolsillo de origen % no existe', NEW.bolsillo_origen;
-  END IF;
-
-  SELECT nombre, metodo_pago INTO datos_destino
-  FROM caja_bolsillos
-  WHERE codigo = NEW.bolsillo_destino;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'El bolsillo de destino % no existe', NEW.bolsillo_destino;
-  END IF;
-
-  descripcion_base := NULLIF(TRIM(NEW.descripcion), '');
-
-  DELETE FROM caja_movimientos
-  WHERE transferencia_id = NEW.id;
-
-  INSERT INTO caja_movimientos (fecha, tipo, concepto, monto, metodoPago, transferencia_id, bolsillo)
-  VALUES (
-    NEW.fecha,
-    'EGRESO',
-    COALESCE(descripcion_base, 'Transferencia a ' || datos_destino.nombre),
-    NEW.monto,
-    datos_origen.metodo_pago,
-    NEW.id,
-    NEW.bolsillo_origen
-  );
-
-  INSERT INTO caja_movimientos (fecha, tipo, concepto, monto, metodoPago, transferencia_id, bolsillo)
-  VALUES (
-    NEW.fecha,
-    'INGRESO',
-    COALESCE(descripcion_base, 'Transferencia desde ' || datos_origen.nombre),
-    NEW.monto,
-    datos_destino.metodo_pago,
-    NEW.id,
-    NEW.bolsillo_destino
-  );
-
-  RETURN NEW;
-END;
-$$;
-
-
-ALTER FUNCTION "public"."sync_caja_transferencia_movimientos"() OWNER TO "postgres";
-
-
 CREATE OR REPLACE FUNCTION "public"."update_employee_weekly_hours_updated_at"() RETURNS "trigger"
     LANGUAGE "plpgsql"
     AS $$
@@ -256,36 +196,6 @@ SET default_tablespace = '';
 SET default_table_access_method = "heap";
 
 
-CREATE TABLE IF NOT EXISTS "public"."caja_bolsillos" (
-    "codigo" "text" NOT NULL,
-    "nombre" "text" NOT NULL,
-    "descripcion" "text",
-    "metodo_pago" "text" NOT NULL,
-    "es_principal" boolean DEFAULT false,
-    "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT "caja_bolsillos_pkey" PRIMARY KEY ("codigo")
-);
-
-
-ALTER TABLE "public"."caja_bolsillos" OWNER TO "postgres";
-
-
-CREATE TABLE IF NOT EXISTS "public"."caja_transferencias" (
-    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "fecha" "date" DEFAULT CURRENT_DATE NOT NULL,
-    "monto" numeric NOT NULL,
-    "descripcion" "text",
-    "bolsillo_origen" "text" NOT NULL,
-    "bolsillo_destino" "text" NOT NULL,
-    "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT "caja_transferencias_monto_check" CHECK (("monto" > (0)::numeric)),
-    CONSTRAINT "caja_transferencias_pkey" PRIMARY KEY ("id")
-);
-
-
-ALTER TABLE "public"."caja_transferencias" OWNER TO "postgres";
-
-
 CREATE TABLE IF NOT EXISTS "public"."caja_movimientos" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "fecha" "date" DEFAULT CURRENT_DATE,
@@ -297,20 +207,12 @@ CREATE TABLE IF NOT EXISTS "public"."caja_movimientos" (
     "gasto_id" "uuid",
     "bolsillo" "text" DEFAULT 'caja_principal'::"text" NOT NULL,
     "transferencia_id" "uuid",
-    CONSTRAINT "caja_movimientos_metodopago_check" CHECK (("metodopago" = ANY (ARRAY['efectivo'::"text", 'tarjeta'::"text", 'nequi'::"text", 'credito_empleados'::"text"]))),
+    CONSTRAINT "caja_movimientos_metodopago_check" CHECK (("metodopago" = ANY (ARRAY['efectivo'::"text", 'tarjeta'::"text", 'nequi'::"text"]))),
     CONSTRAINT "caja_movimientos_tipo_check" CHECK (("tipo" = ANY (ARRAY['INGRESO'::"text", 'EGRESO'::"text"])))
 );
 
 
 ALTER TABLE "public"."caja_movimientos" OWNER TO "postgres";
-
-
-CREATE INDEX "idx_caja_movimientos_bolsillo" ON "public"."caja_movimientos" USING btree ("bolsillo");
-
-
-
-CREATE INDEX "idx_caja_movimientos_transferencia" ON "public"."caja_movimientos" USING btree ("transferencia_id");
-
 
 
 CREATE OR REPLACE VIEW "public"."balance_caja" AS
@@ -355,17 +257,7 @@ CREATE OR REPLACE VIEW "public"."balance_caja" AS
                 CASE
                     WHEN (("caja_movimientos"."tipo" = 'EGRESO'::"text") AND ("caja_movimientos"."metodopago" = 'tarjeta'::"text")) THEN "caja_movimientos"."monto"
                     ELSE (0)::numeric
-                END) AS "egresos_tarjeta",
-            "sum"(
-                CASE
-                    WHEN (("caja_movimientos"."tipo" = 'INGRESO'::"text") AND ("caja_movimientos"."bolsillo" = 'provision_caja'::"text")) THEN "caja_movimientos"."monto"
-                    ELSE (0)::numeric
-                END) AS "ingresos_provision_caja",
-            "sum"(
-                CASE
-                    WHEN (("caja_movimientos"."tipo" = 'EGRESO'::"text") AND ("caja_movimientos"."bolsillo" = 'provision_caja'::"text")) THEN "caja_movimientos"."monto"
-                    ELSE (0)::numeric
-                END) AS "egresos_provision_caja"
+                END) AS "egresos_tarjeta"
            FROM "public"."caja_movimientos"
           GROUP BY "caja_movimientos"."fecha"
         )
@@ -379,22 +271,46 @@ CREATE OR REPLACE VIEW "public"."balance_caja" AS
     "egresos_nequi",
     "ingresos_tarjeta",
     "egresos_tarjeta",
-    "ingresos_provision_caja",
-    "egresos_provision_caja",
     ("ingresos_efectivo" - "egresos_efectivo") AS "saldo_efectivo_dia",
     ("ingresos_nequi" - "egresos_nequi") AS "saldo_nequi_dia",
     ("ingresos_tarjeta" - "egresos_tarjeta") AS "saldo_tarjeta_dia",
-    ("ingresos_provision_caja" - "egresos_provision_caja") AS "saldo_provision_caja_dia",
     "sum"(("ingresos_totales" - "egresos_totales")) OVER (ORDER BY "fecha") AS "saldo_total_acumulado",
     "sum"(("ingresos_efectivo" - "egresos_efectivo")) OVER (ORDER BY "fecha") AS "saldo_efectivo_acumulado",
     "sum"(("ingresos_nequi" - "egresos_nequi")) OVER (ORDER BY "fecha") AS "saldo_nequi_acumulado",
-    "sum"(("ingresos_tarjeta" - "egresos_tarjeta")) OVER (ORDER BY "fecha") AS "saldo_tarjeta_acumulado",
-    "sum"(("ingresos_provision_caja" - "egresos_provision_caja")) OVER (ORDER BY "fecha") AS "saldo_provision_caja_acumulado"
+    "sum"(("ingresos_tarjeta" - "egresos_tarjeta")) OVER (ORDER BY "fecha") AS "saldo_tarjeta_acumulado"
    FROM "resumen"
   ORDER BY "fecha" DESC;
 
 
 ALTER VIEW "public"."balance_caja" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."caja_bolsillos" (
+    "codigo" "text" NOT NULL,
+    "nombre" "text" NOT NULL,
+    "descripcion" "text",
+    "metodo_pago" "public"."metodo_pago_type" NOT NULL,
+    "es_principal" boolean DEFAULT false,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."caja_bolsillos" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."caja_transferencias" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "fecha" "date" DEFAULT CURRENT_DATE NOT NULL,
+    "monto" numeric NOT NULL,
+    "descripcion" "text",
+    "bolsillo_origen" "text" NOT NULL,
+    "bolsillo_destino" "text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "caja_transferencias_monto_check" CHECK (("monto" > (0)::numeric))
+);
+
+
+ALTER TABLE "public"."caja_transferencias" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."customers" (
@@ -539,8 +455,18 @@ CREATE TABLE IF NOT EXISTS "public"."users" (
 ALTER TABLE "public"."users" OWNER TO "postgres";
 
 
+ALTER TABLE ONLY "public"."caja_bolsillos"
+    ADD CONSTRAINT "caja_bolsillos_pkey" PRIMARY KEY ("codigo");
+
+
+
 ALTER TABLE ONLY "public"."caja_movimientos"
     ADD CONSTRAINT "caja_movimientos_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."caja_transferencias"
+    ADD CONSTRAINT "caja_transferencias_pkey" PRIMARY KEY ("id");
 
 
 
@@ -616,9 +542,6 @@ CREATE OR REPLACE TRIGGER "trg_gasto_to_caja" AFTER INSERT ON "public"."gastos" 
 CREATE OR REPLACE TRIGGER "trg_order_to_caja" AFTER INSERT ON "public"."orders" FOR EACH ROW EXECUTE FUNCTION "public"."insertar_ingreso_desde_order_multi"();
 
 
-CREATE OR REPLACE TRIGGER "trg_sync_caja_transferencias" AFTER INSERT OR UPDATE ON "public"."caja_transferencias" FOR EACH ROW EXECUTE FUNCTION "public"."sync_caja_transferencia_movimientos"();
-
-
 
 CREATE OR REPLACE TRIGGER "trg_update_employee_weekly_hours_updated_at" BEFORE UPDATE ON "public"."employee_weekly_hours" FOR EACH ROW EXECUTE FUNCTION "public"."update_employee_weekly_hours_updated_at"();
 
@@ -638,6 +561,16 @@ ALTER TABLE ONLY "public"."caja_movimientos"
 
 
 ALTER TABLE ONLY "public"."caja_movimientos"
+    ADD CONSTRAINT "caja_movimientos_gasto_id_fkey" FOREIGN KEY ("gasto_id") REFERENCES "public"."gastos"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."caja_movimientos"
+    ADD CONSTRAINT "caja_movimientos_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."caja_movimientos"
     ADD CONSTRAINT "caja_movimientos_transferencia_id_fkey" FOREIGN KEY ("transferencia_id") REFERENCES "public"."caja_transferencias"("id") ON DELETE CASCADE;
 
 
@@ -649,16 +582,6 @@ ALTER TABLE ONLY "public"."caja_transferencias"
 
 ALTER TABLE ONLY "public"."caja_transferencias"
     ADD CONSTRAINT "caja_transferencias_bolsillo_origen_fkey" FOREIGN KEY ("bolsillo_origen") REFERENCES "public"."caja_bolsillos"("codigo");
-
-
-
-ALTER TABLE ONLY "public"."caja_movimientos"
-    ADD CONSTRAINT "caja_movimientos_gasto_id_fkey" FOREIGN KEY ("gasto_id") REFERENCES "public"."gastos"("id") ON DELETE SET NULL;
-
-
-
-ALTER TABLE ONLY "public"."caja_movimientos"
-    ADD CONSTRAINT "caja_movimientos_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE SET NULL;
 
 
 
@@ -695,18 +618,6 @@ ALTER TABLE ONLY "public"."orders"
 ALTER TABLE "public"."caja_movimientos" ENABLE ROW LEVEL SECURITY;
 
 
-
-ALTER TABLE "public"."caja_bolsillos" ENABLE ROW LEVEL SECURITY;
-
-
-
-ALTER TABLE "public"."caja_transferencias" ENABLE ROW LEVEL SECURITY;
-
-
-
-
-
-
 ALTER TABLE "public"."customers" ENABLE ROW LEVEL SECURITY;
 
 
@@ -726,13 +637,6 @@ ALTER TABLE "public"."orders" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "public_all_caja_movimientos" ON "public"."caja_movimientos" USING (true) WITH CHECK (true);
-
-
-CREATE POLICY "public_all_caja_bolsillos" ON "public"."caja_bolsillos" USING (true) WITH CHECK (true);
-
-
-
-CREATE POLICY "public_all_caja_transferencias" ON "public"."caja_transferencias" USING (true) WITH CHECK (true);
 
 
 
@@ -815,11 +719,6 @@ GRANT ALL ON FUNCTION "public"."insertar_ingreso_desde_order_multi"() TO "authen
 GRANT ALL ON FUNCTION "public"."insertar_ingreso_desde_order_multi"() TO "service_role";
 
 
-GRANT ALL ON FUNCTION "public"."sync_caja_transferencia_movimientos"() TO "anon";
-GRANT ALL ON FUNCTION "public"."sync_caja_transferencia_movimientos"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."sync_caja_transferencia_movimientos"() TO "service_role";
-
-
 
 GRANT ALL ON FUNCTION "public"."update_employee_weekly_hours_updated_at"() TO "anon";
 GRANT ALL ON FUNCTION "public"."update_employee_weekly_hours_updated_at"() TO "authenticated";
@@ -838,6 +737,13 @@ GRANT ALL ON TABLE "public"."caja_movimientos" TO "authenticated";
 GRANT ALL ON TABLE "public"."caja_movimientos" TO "service_role";
 
 
+
+GRANT ALL ON TABLE "public"."balance_caja" TO "anon";
+GRANT ALL ON TABLE "public"."balance_caja" TO "authenticated";
+GRANT ALL ON TABLE "public"."balance_caja" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."caja_bolsillos" TO "anon";
 GRANT ALL ON TABLE "public"."caja_bolsillos" TO "authenticated";
 GRANT ALL ON TABLE "public"."caja_bolsillos" TO "service_role";
@@ -847,12 +753,6 @@ GRANT ALL ON TABLE "public"."caja_bolsillos" TO "service_role";
 GRANT ALL ON TABLE "public"."caja_transferencias" TO "anon";
 GRANT ALL ON TABLE "public"."caja_transferencias" TO "authenticated";
 GRANT ALL ON TABLE "public"."caja_transferencias" TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."balance_caja" TO "anon";
-GRANT ALL ON TABLE "public"."balance_caja" TO "authenticated";
-GRANT ALL ON TABLE "public"."balance_caja" TO "service_role";
 
 
 
