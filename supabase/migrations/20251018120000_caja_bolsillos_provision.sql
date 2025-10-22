@@ -62,13 +62,6 @@ EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
 
--- Extender catálogo de métodos de pago permitidos en movimientos
-ALTER TABLE caja_movimientos
-  DROP CONSTRAINT IF EXISTS caja_movimientos_metodopago_check;
-
-ALTER TABLE caja_movimientos
-  ADD CONSTRAINT caja_movimientos_metodopago_check
-    CHECK (metodoPago IN ('efectivo', 'tarjeta', 'nequi', 'credito_empleados'));
 
 -- Índices de apoyo para consultas por bolsillo/transferencia
 CREATE INDEX IF NOT EXISTS idx_caja_movimientos_bolsillo ON caja_movimientos (bolsillo);
