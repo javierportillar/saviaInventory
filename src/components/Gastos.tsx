@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Gasto, PaymentMethod, FocusDateRequest } from '../types';
-import { Receipt, Plus, Edit3, Trash2, Calendar, TrendingDown, Filter } from 'lucide-react';
+import { Receipt, Plus, Edit3, Trash2, Calendar, TrendingDown, Filter, ArrowDown, ArrowUp } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import {
   formatCOP,
+  formatDateTime,
   formatDateInputValue,
   getTodayDateInputValue,
   parseDateInputValue,
@@ -21,6 +22,7 @@ export function Gastos({ focusRequest }: GastosProps) {
   const [showForm, setShowForm] = useState(false);
   const [viewMode, setViewMode] = useState<'diario' | 'semanal' | 'mensual'>('diario');
   const [selectedDate, setSelectedDate] = useState(getTodayDateInputValue());
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [formData, setFormData] = useState<{
     descripcion: string;
     monto: number;
@@ -146,7 +148,17 @@ export function Gastos({ focusRequest }: GastosProps) {
   const getFilteredGastos = () => {
     const today = parseDateInputValue(selectedDate);
 
-    return gastos.filter(gasto => {
+    const getSortTimestamp = (gasto: Gasto) => {
+      const createdAtTime = gasto.created_at instanceof Date ? gasto.created_at.getTime() : NaN;
+      if (!Number.isNaN(createdAtTime)) {
+        return createdAtTime;
+      }
+
+      const fechaDate = gasto.fecha instanceof Date ? gasto.fecha : parseDateInputValue(gasto.fecha);
+      return Number.isNaN(fechaDate.getTime()) ? 0 : fechaDate.getTime();
+    };
+
+    const filtered = gastos.filter(gasto => {
       const gastoDate = parseDateInputValue(gasto.fecha);
       
       switch (viewMode) {
@@ -164,6 +176,11 @@ export function Gastos({ focusRequest }: GastosProps) {
         default:
           return true;
       }
+    });
+
+    return filtered.sort((a, b) => {
+      const diff = getSortTimestamp(a) - getSortTimestamp(b);
+      return sortDirection === 'asc' ? diff : -diff;
     });
   };
 
@@ -360,7 +377,9 @@ export function Gastos({ focusRequest }: GastosProps) {
             Gastos por categoría
           </h3>
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-            {Object.entries(gastosPorCategoria).map(([categoria, monto]) => (
+            {Object.entries(gastosPorCategoria)
+              .sort(([a], [b]) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
+              .map(([categoria, monto]) => (
               <div key={categoria} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                 <span className="text-sm font-medium">{categoria}</span>
                 <span className="font-bold" style={{ color: COLORS.accent }}>
@@ -379,7 +398,17 @@ export function Gastos({ focusRequest }: GastosProps) {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Fecha
+                  <button
+                    type="button"
+                    onClick={() => setSortDirection(prev => (prev === 'desc' ? 'asc' : 'desc'))}
+                    className="flex items-center gap-1">
+                    Fecha
+                    {sortDirection === 'desc' ? (
+                      <ArrowDown size={14} />
+                    ) : (
+                      <ArrowUp size={14} />
+                    )}
+                  </button>
                 </th>
                 <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Descripción
@@ -402,7 +431,14 @@ export function Gastos({ focusRequest }: GastosProps) {
               {filteredGastos.map((gasto) => (
                 <tr key={gasto.id} className="hover:bg-gray-50">
                   <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs lg:text-sm text-gray-900">
-                    {gasto.fecha.toLocaleDateString('es-CO')}
+                    {(() => {
+                      const displayDate = (gasto.created_at instanceof Date && !Number.isNaN(gasto.created_at.getTime()))
+                        ? gasto.created_at
+                        : gasto.fecha instanceof Date
+                          ? gasto.fecha
+                          : parseDateInputValue(gasto.fecha);
+                      return formatDateTime(displayDate);
+                    })()}
                   </td>
                   <td className="px-3 lg:px-6 py-4 text-xs lg:text-sm text-gray-900">
                     {gasto.descripcion}

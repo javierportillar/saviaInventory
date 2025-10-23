@@ -1,15 +1,34 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Order } from '../types';
-import { ChefHat, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+import { ChefHat, Clock, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatDateTime } from '../utils/format';
 
 interface CocinaProps {
   orders: Order[];
-  onUpdateOrderStatus: (order: Order, status: Order['estado']) => void;
+  onUpdateOrderStatus: (order: Order, status: Order['estado']) => Promise<void> | void;
 }
 
 export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
+  const [statusUpdatingOrderIds, setStatusUpdatingOrderIds] = useState<Record<string, boolean>>({});
+
+  const handleOrderStatusChange = async (order: Order, nextStatus: Order['estado']) => {
+    if (statusUpdatingOrderIds[order.id]) {
+      return;
+    }
+
+    setStatusUpdatingOrderIds((prev) => ({ ...prev, [order.id]: true }));
+
+    try {
+      await onUpdateOrderStatus(order, nextStatus);
+    } finally {
+      setStatusUpdatingOrderIds((prev) => {
+        const { [order.id]: _ignored, ...rest } = prev;
+        return rest;
+      });
+    }
+  };
+
   const activeOrders = orders.filter(order => 
     order.estado === 'pendiente' || order.estado === 'preparando'
   ).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
@@ -62,6 +81,7 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {activeOrders.map((order) => {
+                  const isStatusUpdating = Boolean(statusUpdatingOrderIds[order.id]);
                   const urgency = getOrderUrgency(order.timestamp);
                   return (
                     <div
@@ -111,20 +131,36 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
                       <div className="space-y-2">
                         {order.estado === 'pendiente' && (
                           <button
-                            onClick={() => onUpdateOrderStatus(order, 'preparando')}
-                            className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
+                            onClick={() => handleOrderStatusChange(order, 'preparando')}
+                            disabled={isStatusUpdating}
+                            className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             style={{ backgroundColor: COLORS.dark }}
                           >
-                            Iniciar preparación
+                            {isStatusUpdating ? (
+                              <>
+                                <Loader2 size={16} className="animate-spin" />
+                                Procesando...
+                              </>
+                            ) : (
+                              'Iniciar preparación'
+                            )}
                           </button>
                         )}
                         {order.estado === 'preparando' && (
                           <button
-                            onClick={() => onUpdateOrderStatus(order, 'listo')}
-                            className="w-full py-2 rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm"
+                            onClick={() => handleOrderStatusChange(order, 'listo')}
+                            disabled={isStatusUpdating}
+                            className="w-full py-2 rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
                           >
-                            Marcar como listo
+                            {isStatusUpdating ? (
+                              <>
+                                <Loader2 size={16} className="animate-spin" />
+                                Procesando...
+                              </>
+                            ) : (
+                              'Marcar como listo'
+                            )}
                           </button>
                         )}
                       </div>

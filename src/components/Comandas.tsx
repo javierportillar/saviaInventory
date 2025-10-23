@@ -42,7 +42,7 @@ const parseDateKey = (key: string): Date => {
 
 interface ComandasProps {
   orders: Order[];
-  onUpdateOrderStatus: (order: Order, status: Order['estado']) => void;
+  onUpdateOrderStatus: (order: Order, status: Order['estado']) => Promise<void> | void;
   onSaveOrderChanges: (orderId: string, updates: { items: CartItem[]; total: number }) => Promise<void>;
   onRecordOrderPayment: (order: Order, allocations: PaymentAllocation[]) => Promise<void>;
   onDeleteOrder: (orderId: string) => Promise<void>;
@@ -86,6 +86,24 @@ export function Comandas({
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
   const [isSavingOrderChanges, setIsSavingOrderChanges] = useState(false);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
+  const [statusUpdatingOrderIds, setStatusUpdatingOrderIds] = useState<Record<string, boolean>>({});
+
+  const handleOrderStatusChange = async (order: Order, nextStatus: Order['estado']) => {
+    if (statusUpdatingOrderIds[order.id]) {
+      return;
+    }
+
+    setStatusUpdatingOrderIds((prev) => ({ ...prev, [order.id]: true }));
+
+    try {
+      await onUpdateOrderStatus(order, nextStatus);
+    } finally {
+      setStatusUpdatingOrderIds((prev) => {
+        const { [order.id]: _ignored, ...rest } = prev;
+        return rest;
+      });
+    }
+  };
 
   useEffect(() => {
     if (!focusRequest) {
@@ -638,6 +656,7 @@ export function Comandas({
     const showPaymentResetNotice = paid && isAdmin;
     const isDeleting = deletingOrderId === order.id;
     const isActionsExpanded = expandedActionsOrderId === order.id;
+    const isStatusUpdating = Boolean(statusUpdatingOrderIds[order.id]);
 
     return (
       <div
@@ -992,28 +1011,52 @@ export function Comandas({
                 <React.Fragment>
                   {order.estado === 'pendiente' && (
                     <button
-                      onClick={() => onUpdateOrderStatus(order, 'preparando')}
-                      className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
+                      onClick={() => handleOrderStatusChange(order, 'preparando')}
+                      disabled={isStatusUpdating}
+                      className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       style={{ backgroundColor: COLORS.dark }}
                     >
-                      Iniciar preparación
+                      {isStatusUpdating ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin" />
+                          Procesando...
+                        </>
+                      ) : (
+                        'Iniciar preparación'
+                      )}
                     </button>
                   )}
                   {order.estado === 'preparando' && (
                     <button
-                      onClick={() => onUpdateOrderStatus(order, 'listo')}
-                      className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm"
+                      onClick={() => handleOrderStatusChange(order, 'listo')}
+                      disabled={isStatusUpdating}
+                      className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
                     >
-                      Marcar como listo
+                      {isStatusUpdating ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin" />
+                          Procesando...
+                        </>
+                      ) : (
+                        'Marcar como listo'
+                      )}
                     </button>
                   )}
                   {order.estado === 'listo' && (
                     <button
-                      onClick={() => onUpdateOrderStatus(order, 'entregado')}
-                      className="w-full py-2 bg-green-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm"
+                      onClick={() => handleOrderStatusChange(order, 'entregado')}
+                      disabled={isStatusUpdating}
+                      className="w-full py-2 bg-green-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
-                      Entregar pedido
+                      {isStatusUpdating ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin" />
+                          Procesando...
+                        </>
+                      ) : (
+                        'Entregar pedido'
+                      )}
                     </button>
                   )}
                 </React.Fragment>
