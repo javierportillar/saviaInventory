@@ -470,7 +470,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                   type="date"
                   value={selectedDate}
                   onChange={handleSelectedDateChange}
-                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
+                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-base sm:text-sm"
                   style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
                 />
               </div>
@@ -485,14 +485,14 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                   placeholder="Buscar productos..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-base sm:text-sm"
                   style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
                 />
               </div>
               <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
-                className="px-3 lg:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm w-full lg:w-auto"
+                className="px-3 lg:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-base sm:text-sm w-full lg:w-auto"
                 style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
               >
                 <option value="">Todas las categorías</option>
