@@ -238,8 +238,11 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
 
       {isMobileMenuOpen && (
         <div className="lg:hidden fixed inset-0 z-50 bg-black bg-opacity-50" onClick={() => setIsMobileMenuOpen(false)}>
-          <div className="fixed inset-y-0 left-0 w-full max-w-xs sm:max-w-sm bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+          <div
+            className="fixed inset-y-0 left-0 w-full max-w-xs sm:max-w-sm bg-white shadow-xl flex flex-col h-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 flex-shrink-0">
               <div className="flex items-center gap-3">
                 <div
                   className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-base"
@@ -259,7 +262,7 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
               </button>
             </div>
 
-            <div className="py-4">
+            <div className="py-4 flex-1 overflow-y-auto">
               <div className={`px-4 pb-4 text-sm font-medium flex items-center gap-2 ${currentStatus.textClass}`}>
                 <span className={`inline-flex h-2.5 w-2.5 rounded-full ${currentStatus.dotClass}`} />
                 <span>{currentStatus.label}</span>
