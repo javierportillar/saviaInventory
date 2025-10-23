@@ -45,6 +45,7 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'docs',
       emptyOutDir: true,
+      manifest: true,
     },
   };
 });
