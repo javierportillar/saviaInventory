@@ -650,9 +650,10 @@ export function Comandas({
     const paymentStatusLabel = paymentHandled
       ? (paid ? 'Pago registrado' : 'Pago gestionado')
       : 'Pago pendiente';
-    const canEditOrder = isAdmin && order.estado === 'entregado' && (paid || !isEmployeeCredit);
-    const canManagePaymentActions = paid || !isEmployeeCredit || isAdmin;
-    const showEditActionsToggle = isAdmin && (paid || isEmployeeCredit);
+    const hasStartedPreparation = order.estado !== 'pendiente';
+    const canEditOrder = isAdmin && hasStartedPreparation && (paid || !isEmployeeCredit);
+    const canManagePaymentActions = hasStartedPreparation && (paid || !isEmployeeCredit || isAdmin);
+    const showEditActionsToggle = isAdmin && order.estado === 'entregado' && (paid || isEmployeeCredit);
     const showPaymentResetNotice = paid && isAdmin;
     const isDeleting = deletingOrderId === order.id;
     const isActionsExpanded = expandedActionsOrderId === order.id;
@@ -1009,56 +1010,100 @@ export function Comandas({
                 </div>
               ) : (
                 <React.Fragment>
-                  {order.estado === 'pendiente' && (
+              {order.estado === 'pendiente' && (
+                <button
+                  onClick={() => handleOrderStatusChange(order, 'preparando')}
+                  disabled={isStatusUpdating}
+                  className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  style={{ backgroundColor: COLORS.dark }}
+                >
+                  {isStatusUpdating ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    'Iniciar preparación'
+                  )}
+                </button>
+              )}
+              {order.estado === 'preparando' && (
+                <button
+                  onClick={() => handleOrderStatusChange(order, 'listo')}
+                  disabled={isStatusUpdating}
+                  className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
+                >
+                  {isStatusUpdating ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    'Marcar como listo'
+                  )}
+                </button>
+              )}
+              {order.estado === 'listo' && (
+                <button
+                  onClick={() => handleOrderStatusChange(order, 'entregado')}
+                  disabled={isStatusUpdating}
+                  className="w-full py-2 bg-green-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {isStatusUpdating ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    'Entregar pedido'
+                  )}
+                </button>
+              )}
+              {hasStartedPreparation && (
+                <div className="space-y-2 mt-2">
+                  {canEditOrder && (
                     <button
-                      onClick={() => handleOrderStatusChange(order, 'preparando')}
-                      disabled={isStatusUpdating}
-                      className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                      style={{ backgroundColor: COLORS.dark }}
+                      onClick={() => startEditingOrder(order)}
+                      className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm"
                     >
-                      {isStatusUpdating ? (
-                        <>
-                          <Loader2 size={16} className="animate-spin" />
-                          Procesando...
-                        </>
-                      ) : (
-                        'Iniciar preparación'
-                      )}
+                      Modificar pedido
                     </button>
                   )}
-                  {order.estado === 'preparando' && (
-                    <button
-                      onClick={() => handleOrderStatusChange(order, 'listo')}
-                      disabled={isStatusUpdating}
-                      className="w-full py-2 rounded-lg text-white font-medium transition-all duration-200 hover:scale-105 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                      style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
-                    >
-                      {isStatusUpdating ? (
-                        <>
-                          <Loader2 size={16} className="animate-spin" />
-                          Procesando...
-                        </>
-                      ) : (
-                        'Marcar como listo'
+                  {isEmployeeCredit ? (
+                    <>
+                      <div className="px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-lg text-xs text-yellow-800">
+                        <p className="font-semibold">
+                          Crédito de empleados en seguimiento{employeeCreditLabel}
+                        </p>
+                        <p className="mt-1 text-[11px] text-yellow-700">
+                          Gestiona el cobro desde el módulo Crédito empleados cuando el colaborador realice el pago.
+                        </p>
+                      </div>
+                      {isAdmin && (
+                        <button
+                          onClick={() => openPaymentModal(order)}
+                          className="w-full py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm flex items-center justify-center gap-1"
+                        >
+                          <CreditCard size={14} />
+                          Gestionar crédito
+                        </button>
                       )}
-                    </button>
+                    </>
+                  ) : (
+                    canManagePaymentActions && (
+                      <button
+                        onClick={() => openPaymentModal(order, paid ? { force: true } : undefined)}
+                        disabled={paid && !isAdmin}
+                        className="w-full py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <CreditCard size={14} />
+                        {paid ? 'Modificar pago' : 'Registrar pago'}
+                      </button>
+                    )
                   )}
-                  {order.estado === 'listo' && (
-                    <button
-                      onClick={() => handleOrderStatusChange(order, 'entregado')}
-                      disabled={isStatusUpdating}
-                      className="w-full py-2 bg-green-600 text-white rounded-lg font-medium transition-all duration-200 hover:scale-105 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    >
-                      {isStatusUpdating ? (
-                        <>
-                          <Loader2 size={16} className="animate-spin" />
-                          Procesando...
-                        </>
-                      ) : (
-                        'Entregar pedido'
-                      )}
-                    </button>
-                  )}
+                </div>
+              )}
                 </React.Fragment>
               )}
             </div>
