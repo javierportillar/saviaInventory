@@ -8,6 +8,75 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module">
+      const devHosts = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
+      const devPorts = new Set(['5173', '5174']);
+
+      const isDev =
+        devHosts.has(window.location.hostname) || devPorts.has(window.location.port);
+
+      const appendStylesheet = (href) => {
+        if (!href) {
+          return;
+        }
+
+        const existing = document.head.querySelector(
+          `link[data-built-css="${href}"]`
+        );
+
+        if (existing) {
+          return;
+        }
+
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = href;
+        link.dataset.builtCss = href;
+        document.head.appendChild(link);
+      };
+
+      const resolveUrl = (relativePath) =>
+        new URL(relativePath, window.location.href).toString();
+
+      const loadCandidatesSequentially = async (candidates) => {
+        let lastError = null;
+
+        for (const candidate of candidates) {
+          try {
+            appendStylesheet(candidate.css);
+            await import(/* @vite-ignore */ candidate.js);
+            return;
+          } catch (error) {
+            lastError = error;
+          }
+        }
+
+        throw lastError ?? new Error('No se pudo cargar el bundle de producción.');
+      };
+
+      const bootstrap = async () => {
+        if (isDev) {
+          await import('/src/main.tsx');
+          return;
+        }
+
+        const candidates = [
+          {
+            js: resolveUrl('./assets/main.js'),
+            css: resolveUrl('./assets/main.css'),
+          },
+          {
+            js: resolveUrl('./docs/assets/main.js'),
+            css: resolveUrl('./docs/assets/main.css'),
+          },
+        ];
+
+        await loadCandidatesSequentially(candidates);
+      };
+
+      bootstrap().catch((error) => {
+        console.error('Unable to bootstrap the application.', error);
+      });
+    </script>
   </body>
 </html>
