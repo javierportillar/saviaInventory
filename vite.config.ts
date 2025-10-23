@@ -27,14 +27,14 @@ const ensureBaseFormat = (value: string): string => {
   return normalized ? `/${normalized}/` : './';
 };
 
-const DEFAULT_PRODUCTION_BASE = '/saviaInventory/';
+const DEFAULT_PRODUCTION_BASE = './';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const envBase = env.VITE_BASE_PATH?.trim();
 
   const productionBase = envBase ?? DEFAULT_PRODUCTION_BASE;
-  const base = mode === 'production' ? ensureBaseFormat(productionBase) : '/';
+  const base = mode === 'production' ? productionBase : '/';
 
   return {
     base,
@@ -45,7 +45,6 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'docs',
       emptyOutDir: true,
-      manifest: true,
     },
   };
 });
