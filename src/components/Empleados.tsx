@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Empleado, DayKey, DaySchedule, WeeklySchedule, WeeklyHours } from '../types';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Empleado, DayKey, DaySchedule, WeeklySchedule, WeeklyHours, EmployeeShift } from '../types';
 import {
   Users,
   Edit3,
@@ -11,10 +11,17 @@ import {
   RefreshCcw,
   X,
   CreditCard,
-  History
+  History,
+  Loader2,
+  LogIn,
+  LogOut,
+  PauseCircle,
+  PlayCircle,
+  Flag,
+  Eraser
 } from 'lucide-react';
 import { COLORS } from '../data/menu';
-import { formatCOP } from '../utils/format';
+import { formatCOP, formatDate, formatDateInputValue, formatSqlTime } from '../utils/format';
 import {
   DAY_ORDER,
   DAY_LABELS,
@@ -39,6 +46,8 @@ type HistoryState = {
   loaded: boolean;
   error: string | null;
 };
+
+type ShiftActionKey = 'clockIn' | 'clockOut' | 'startNovelty' | 'finishNovelty' | 'clearNovelty';
 
 const createHistoryState = (): HistoryState => ({ expanded: false, loading: false, loaded: false, error: null });
 
@@ -67,6 +76,10 @@ export function Empleados() {
   const [historyState, setHistoryState] = useState<Record<string, HistoryState>>({});
   const loadedWeeksRef = useRef<Set<string>>(new Set());
   const [showGeneralHistory, setShowGeneralHistory] = useState(false);
+  const [dayShiftMap, setDayShiftMap] = useState<Record<string, EmployeeShift | null>>({});
+  const [shiftLoading, setShiftLoading] = useState(false);
+  const [shiftActionState, setShiftActionState] = useState<Record<string, ShiftActionKey | null>>({});
+  const todayLabel = useMemo(() => formatDate(new Date()), []);
 
   const refreshEmployeeCredits = useCallback(async () => {
     try {
@@ -102,6 +115,179 @@ export function Empleados() {
       }
     };
   }, [refreshEmployeeCredits]);
+
+  const loadTodayShifts = useCallback(async (options: { silent?: boolean } = {}) => {
+    const { silent } = options;
+    if (!silent) {
+      setShiftLoading(true);
+    }
+    try {
+      const todayKey = formatDateInputValue(new Date());
+      const shifts = await dataService.fetchEmployeeShiftsForDate(todayKey);
+      const map: Record<string, EmployeeShift | null> = {};
+      shifts.forEach(shift => {
+        map[shift.empleadoId] = shift;
+      });
+      setDayShiftMap(map);
+    } catch (error) {
+      console.error('Error cargando los turnos del día:', error);
+    } finally {
+      if (!silent) {
+        setShiftLoading(false);
+      }
+    }
+  }, []);
+
+  const setShiftActionForEmployee = useCallback((empleadoId: string, action: ShiftActionKey | null) => {
+    setShiftActionState(prev => ({ ...prev, [empleadoId]: action }));
+  }, []);
+
+  useEffect(() => {
+    void loadTodayShifts();
+  }, [loadTodayShifts]);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+
+    const setupSubscription = async () => {
+      unsubscribe = await dataService.subscribeToEmployeeShifts({
+        onChange: () => {
+          void loadTodayShifts({ silent: true });
+        },
+      });
+    };
+
+    void setupSubscription();
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, [loadTodayShifts]);
+
+  const employeesForShifts = useMemo(() => {
+    const map = new Map<string, Empleado>();
+    empleados.forEach(empleado => {
+      if (empleado.activo) {
+        map.set(empleado.id, empleado);
+      }
+    });
+
+    Object.keys(dayShiftMap).forEach(empleadoId => {
+      if (!map.has(empleadoId)) {
+        const match = empleados.find(empleado => empleado.id === empleadoId);
+        if (match) {
+          map.set(match.id, match);
+        }
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [empleados, dayShiftMap]);
+
+  const handleClockIn = useCallback(
+    async (empleado: Empleado) => {
+      const empleadoId = empleado.id;
+      setShiftActionForEmployee(empleadoId, 'clockIn');
+      try {
+        const shift = await dataService.startEmployeeShift(empleadoId);
+        setDayShiftMap(prev => ({ ...prev, [empleadoId]: shift }));
+      } catch (error) {
+        console.error(`No se pudo registrar la llegada de ${empleado.nombre}:`, error);
+      } finally {
+        setShiftActionForEmployee(empleadoId, null);
+        void loadTodayShifts({ silent: true });
+      }
+    },
+    [loadTodayShifts, setShiftActionForEmployee]
+  );
+
+  const handleClockOut = useCallback(
+    async (empleado: Empleado, shift: EmployeeShift) => {
+      if (!shift?.id) {
+        return;
+      }
+      const empleadoId = empleado.id;
+      setShiftActionForEmployee(empleadoId, 'clockOut');
+      try {
+        const updated = await dataService.completeEmployeeShift(shift.id);
+        if (updated) {
+          setDayShiftMap(prev => ({ ...prev, [empleadoId]: updated }));
+        }
+      } catch (error) {
+        console.error(`No se pudo registrar la salida de ${empleado.nombre}:`, error);
+      } finally {
+        setShiftActionForEmployee(empleadoId, null);
+        void loadTodayShifts({ silent: true });
+      }
+    },
+    [loadTodayShifts, setShiftActionForEmployee]
+  );
+
+  const handleStartNovelty = useCallback(
+    async (empleado: Empleado, shift: EmployeeShift) => {
+      if (!shift?.id) {
+        return;
+      }
+      const empleadoId = empleado.id;
+      setShiftActionForEmployee(empleadoId, 'startNovelty');
+      try {
+        const updated = await dataService.startEmployeeShiftNovelty(shift.id);
+        if (updated) {
+          setDayShiftMap(prev => ({ ...prev, [empleadoId]: updated }));
+        }
+      } catch (error) {
+        console.error(`No se pudo marcar la novedad de ${empleado.nombre}:`, error);
+      } finally {
+        setShiftActionForEmployee(empleadoId, null);
+        void loadTodayShifts({ silent: true });
+      }
+    },
+    [loadTodayShifts, setShiftActionForEmployee]
+  );
+
+  const handleFinishNovelty = useCallback(
+    async (empleado: Empleado, shift: EmployeeShift) => {
+      if (!shift?.id) {
+        return;
+      }
+      const empleadoId = empleado.id;
+      setShiftActionForEmployee(empleadoId, 'finishNovelty');
+      try {
+        const updated = await dataService.finishEmployeeShiftNovelty(shift.id);
+        if (updated) {
+          setDayShiftMap(prev => ({ ...prev, [empleadoId]: updated }));
+        }
+      } catch (error) {
+        console.error(`No se pudo finalizar la novedad de ${empleado.nombre}:`, error);
+      } finally {
+        setShiftActionForEmployee(empleadoId, null);
+        void loadTodayShifts({ silent: true });
+      }
+    },
+    [loadTodayShifts, setShiftActionForEmployee]
+  );
+
+  const handleClearNovelty = useCallback(
+    async (empleado: Empleado, shift: EmployeeShift) => {
+      if (!shift?.id) {
+        return;
+      }
+      const empleadoId = empleado.id;
+      setShiftActionForEmployee(empleadoId, 'clearNovelty');
+      try {
+        const updated = await dataService.clearEmployeeShiftNovelty(shift.id);
+        if (updated) {
+          setDayShiftMap(prev => ({ ...prev, [empleadoId]: updated }));
+        }
+      } catch (error) {
+        console.error(`No se pudo limpiar la novedad de ${empleado.nombre}:`, error);
+      } finally {
+        setShiftActionForEmployee(empleadoId, null);
+        void loadTodayShifts({ silent: true });
+      }
+    },
+    [loadTodayShifts, setShiftActionForEmployee]
+  );
 
   const loadBaseSchedules = useCallback(async (employeeList: Empleado[]) => {
     try {
@@ -584,6 +770,222 @@ export function Empleados() {
             <span className="lg:hidden">Agregar</span>
           </button>
         </div>
+      </div>
+
+      <div className="ui-card ui-card-pad space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800">Registro diario de turnos</h3>
+            <p className="text-sm text-gray-500">
+              Registra llegadas, salidas y novedades para mantener sincronizado el control de horas.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <Clock size={16} />
+            <span>{todayLabel}</span>
+          </div>
+        </div>
+        {shiftLoading ? (
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Cargando turnos del día…</span>
+          </div>
+        ) : employeesForShifts.length === 0 ? (
+          <p className="text-sm text-gray-500">
+            No hay empleados activos para registrar turnos hoy.
+          </p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {employeesForShifts.map(empleado => {
+              const shift = dayShiftMap[empleado.id] ?? null;
+              const action = shiftActionState[empleado.id];
+              const isBusy = Boolean(action);
+              const hasShift = Boolean(shift);
+              const hasOpenShift = Boolean(shift && !shift.horaSalida);
+              const canClockIn = empleado.activo && (!shift || Boolean(shift.horaSalida));
+              const noveltyInProgress = Boolean(
+                hasOpenShift && shift?.novedad && shift?.novedadInicio && !shift?.novedadFin
+              );
+              const canStartNovelty = Boolean(
+                hasOpenShift && (!shift?.novedad || Boolean(shift?.novedadFin))
+              );
+              const hasFinishedNovelty = Boolean(
+                shift?.novedad && shift?.novedadInicio && shift?.novedadFin
+              );
+              const hasAnyNovelty = Boolean(shift?.novedad && shift?.novedadInicio);
+              const entrada = formatSqlTime(shift?.horaLlegada);
+              const salidaLabel = shift?.horaSalida ? formatSqlTime(shift.horaSalida) : 'pendiente';
+              const novedadInicioLabel = shift?.novedadInicio ? formatSqlTime(shift.novedadInicio) : '—';
+              const novedadFinLabel = shift?.novedadFin ? formatSqlTime(shift.novedadFin) : '—';
+              const horasTrabajadas =
+                typeof shift?.horasTrabajadas === 'number' ? shift.horasTrabajadas : undefined;
+
+              let statusLabel = 'Sin turno registrado';
+              let statusClass = 'bg-gray-100 text-gray-600';
+
+              if (hasOpenShift) {
+                statusLabel = noveltyInProgress ? 'Novedad en curso' : 'Turno activo';
+                statusClass = noveltyInProgress
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-emerald-100 text-emerald-700';
+              } else if (hasFinishedNovelty) {
+                statusLabel = 'Novedad registrada';
+                statusClass = 'bg-amber-100 text-amber-700';
+              } else if (hasShift) {
+                statusLabel = 'Turno registrado';
+                statusClass = 'bg-blue-100 text-blue-700';
+              }
+
+              return (
+                <div
+                  key={empleado.id}
+                  className="rounded-xl border border-gray-100 bg-white/70 p-4 shadow-sm space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-base font-semibold text-gray-800">{empleado.nombre}</p>
+                      <p className="text-xs text-gray-500">
+                        {empleado.activo ? 'Empleado activo' : 'Empleado inactivo'}
+                      </p>
+                    </div>
+                    <span
+                      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${statusClass}`}
+                    >
+                      {statusLabel}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm text-gray-600">
+                    <div>
+                      <span className="text-xs uppercase text-gray-400">Entrada</span>
+                      <p className="font-medium text-gray-800">{entrada}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs uppercase text-gray-400">Salida</span>
+                      <p className="font-medium text-gray-800">{salidaLabel}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="text-xs uppercase text-gray-400">Novedad</span>
+                      <p className="font-medium text-gray-800">
+                        {hasAnyNovelty
+                          ? noveltyInProgress
+                            ? `Inició a las ${novedadInicioLabel}`
+                            : `${novedadInicioLabel} – ${novedadFinLabel}`
+                          : 'Sin novedad'}
+                      </p>
+                    </div>
+                    {typeof horasTrabajadas === 'number' && shift?.horaSalida && (
+                      <div className="col-span-2">
+                        <span className="text-xs uppercase text-gray-400">Horas registradas</span>
+                        <p className="font-medium text-gray-800">{formatHours(horasTrabajadas)} h</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {hasAnyNovelty && (
+                    <div className="flex items-center gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                      <Flag size={14} />
+                      <span>
+                        {noveltyInProgress
+                          ? `Novedad en curso desde las ${novedadInicioLabel}`
+                          : `Se descontará el tiempo entre ${novedadInicioLabel} y ${novedadFinLabel}`}
+                      </span>
+                    </div>
+                  )}
+
+                  {hasShift && shift?.horaSalida && (
+                    <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                      Turno cerrado a las {salidaLabel}. Revisa el histórico si necesitas editar los valores.
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2">
+                    {canClockIn && (
+                      <button
+                        type="button"
+                        onClick={() => handleClockIn(empleado)}
+                        disabled={!empleado.activo || isBusy || !canClockIn}
+                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70 hover:scale-105"
+                        style={{ backgroundColor: COLORS.dark }}
+                      >
+                        {action === 'clockIn' ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <LogIn size={16} />
+                        )}
+                        Registrar llegada
+                      </button>
+                    )}
+
+                    {hasOpenShift && (
+                      <button
+                        type="button"
+                        onClick={() => handleClockOut(empleado, shift!)}
+                        disabled={isBusy}
+                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70 bg-emerald-600 hover:bg-emerald-700"
+                      >
+                        {action === 'clockOut' ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <LogOut size={16} />
+                        )}
+                        Registrar salida
+                      </button>
+                    )}
+
+                    {canStartNovelty && shift && (
+                      <button
+                        type="button"
+                        onClick={() => handleStartNovelty(empleado, shift)}
+                        disabled={isBusy}
+                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70 bg-amber-500 hover:bg-amber-600"
+                      >
+                        {action === 'startNovelty' ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <PauseCircle size={16} />
+                        )}
+                        Marcar novedad
+                      </button>
+                    )}
+
+                    {noveltyInProgress && shift && (
+                      <button
+                        type="button"
+                        onClick={() => handleFinishNovelty(empleado, shift)}
+                        disabled={isBusy}
+                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70 bg-indigo-600 hover:bg-indigo-700"
+                      >
+                        {action === 'finishNovelty' ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <PlayCircle size={16} />
+                        )}
+                        Finalizar novedad
+                      </button>
+                    )}
+
+                    {hasOpenShift && hasAnyNovelty && !noveltyInProgress && shift && (
+                      <button
+                        type="button"
+                        onClick={() => handleClearNovelty(empleado, shift)}
+                        disabled={isBusy}
+                        className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 transition disabled:cursor-not-allowed disabled:opacity-70 hover:bg-gray-100"
+                      >
+                        {action === 'clearNovelty' ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Eraser size={16} />
+                        )}
+                        Limpiar novedad
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {showGeneralHistory && (

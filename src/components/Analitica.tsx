@@ -4,9 +4,19 @@ import { Gasto, Order } from '../types';
 import { COLORS } from '../data/menu';
 import { formatCOP, formatDateInputValue, parseDateInputValue } from '../utils/format';
 import dataService from '../lib/dataService';
+import {
+  FinancialChartPoint,
+  buildFinancialInsights,
+  computePeriodMetrics,
+  computePrevWindow,
+  describePointTooltip,
+  isCurrentMonthRange,
+  percentChange,
+} from '../utils/analytics';
 
 interface AnaliticaProps {
   orders: Order[];
+  targetVentasMensual?: number;
 }
 
 type FilterMode = 'range' | 'single';
@@ -27,13 +37,13 @@ type HourlyChartEntry = {
   total: number;
 };
 
-type FinancialChartPoint = {
-  date: Date;
+type FinancialAnnotation = {
+  index: number;
+  anchor: 'sales' | 'expenses' | 'balance' | 'historical';
+  icon?: string;
   label: string;
-  sales: number;
-  expenses: number;
-  balance: number;
-  historicalBalance: number;
+  color?: string;
+  variant?: 'outline';
 };
 
 const GRID_COLOR = '#e5e7eb';
@@ -54,6 +64,50 @@ const FINANCIAL_ZOOM_OPTIONS = [
   { id: '90', label: '3 meses' },
   { id: 'all', label: 'Todo' },
 ] as const;
+
+const percentile = (values: number[], p: number): number | null => {
+  if (!values.length) {
+    return null;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = (sorted.length - 1) * p;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) {
+    return sorted[lower];
+  }
+  const weight = index - lower;
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * weight;
+};
+
+const formatShortDate = (date: Date) =>
+  date.toLocaleDateString('es-CO', {
+    day: '2-digit',
+    month: 'short',
+  });
+
+const hasTwoConsecutiveHistoricalDrops = (points: FinancialChartPoint[]) => {
+  for (let index = 2; index < points.length; index += 1) {
+    const prev = points[index - 1].historicalBalance;
+    const beforePrev = points[index - 2].historicalBalance;
+    const current = points[index].historicalBalance;
+    if (prev < beforePrev && current < prev) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const findZeroCrossIndex = (points: FinancialChartPoint[]) => {
+  for (let index = 1; index < points.length; index += 1) {
+    const prev = points[index - 1].historicalBalance;
+    const current = points[index].historicalBalance;
+    if ((prev <= 0 && current >= 0) || (prev >= 0 && current <= 0)) {
+      return index;
+    }
+  }
+  return null;
+};
 
 const HourlyOrdersChart = ({ data, maxOrders }: { data: HourlyChartEntry[]; maxOrders: number }) => {
   if (data.length === 0) {
@@ -177,7 +231,23 @@ const HourlyOrdersChart = ({ data, maxOrders }: { data: HourlyChartEntry[]; maxO
   );
 };
 
-const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) => {
+type FinancialPerformanceChartProps = {
+  data: FinancialChartPoint[];
+  totalSales: number;
+  annotations?: FinancialAnnotation[];
+  targetLineValue?: number | null;
+  targetLineLabel?: string;
+};
+
+const FinancialPerformanceChart = ({
+  data,
+  totalSales,
+  annotations = [],
+  targetLineValue,
+  targetLineLabel,
+}: FinancialPerformanceChartProps) => {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+
   if (data.length === 0) {
     return <p className="text-sm text-gray-500">No hay datos suficientes para mostrar la gráfica.</p>;
   }
@@ -187,18 +257,35 @@ const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) =>
   const margin = { top: 24, right: 32, bottom: 56, left: 80 };
   const innerWidth = width - margin.left - margin.right;
   const innerHeight = height - margin.top - margin.bottom;
-  const values = data.flatMap(point => [point.sales, point.expenses, point.balance, point.historicalBalance]);
+
+  const additionalValues =
+    targetLineValue !== undefined && targetLineValue !== null ? [targetLineValue] : [];
+  const values = data
+    .flatMap(point => [point.sales, point.expenses, point.balance, point.historicalBalance])
+    .concat(additionalValues);
+
   const maxValue = Math.max(...values, 0);
   const minValue = Math.min(...values, 0);
   const range = maxValue - minValue || 1;
   const xStep = data.length > 1 ? innerWidth / (data.length - 1) : innerWidth;
 
+  const getX = (index: number) => margin.left + index * xStep;
+  const getY = (value: number) => {
+    const ratio = (value - minValue) / range;
+    const y = margin.top + innerHeight - ratio * innerHeight;
+    return Math.min(margin.top + innerHeight, Math.max(margin.top, y));
+  };
+
   const buildPoints = (selector: (point: FinancialChartPoint) => number) =>
     data.map((point, index) => {
-      const x = margin.left + index * xStep;
       const value = selector(point);
-      const y = margin.top + innerHeight - ((value - minValue) / range) * innerHeight;
-      return { x, y, value, index, label: point.label };
+      return {
+        x: getX(index),
+        y: getY(value),
+        value,
+        index,
+        label: point.label,
+      };
     });
 
   const buildPath = (points: { x: number; y: number }[]) =>
@@ -214,12 +301,64 @@ const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) =>
   const xTickEvery = Math.max(1, Math.ceil(data.length / 6));
   const xTicks = salesPoints.filter(point => point.index % xTickEvery === 0 || point.index === salesPoints.length - 1);
 
-  const zeroY = margin.top + innerHeight - ((0 - minValue) / range) * innerHeight;
+  const zeroY = getY(0);
+  const hoveredPoint = hoverIndex !== null ? data[hoverIndex] : null;
+  const hoveredSalesPoint = hoverIndex !== null ? salesPoints[hoverIndex] : null;
+  const tooltipLines = hoveredPoint ? describePointTooltip(hoveredPoint, totalSales) : [];
+
+  const getAnchorPoint = (anchor: FinancialAnnotation['anchor'], index: number) => {
+    switch (anchor) {
+      case 'sales':
+        return salesPoints[index];
+      case 'expenses':
+        return expensesPoints[index];
+      case 'balance':
+        return balancePoints[index];
+      case 'historical':
+        return historicalBalancePoints[index];
+      default:
+        return undefined;
+    }
+  };
+
+  const interactiveZones = salesPoints.map((point, index) => {
+    const prevX = index === 0 ? margin.left : (salesPoints[index - 1].x + point.x) / 2;
+    const nextX =
+      index === salesPoints.length - 1 ? margin.left + innerWidth : (point.x + salesPoints[index + 1].x) / 2;
+    const widthZone = Math.max(8, nextX - prevX);
+    return (
+      <rect
+        key={`zone-${point.index}`}
+        x={prevX}
+        y={margin.top}
+        width={widthZone}
+        height={innerHeight}
+        fill="transparent"
+        onMouseEnter={() => setHoverIndex(index)}
+        onFocus={() => setHoverIndex(index)}
+        onMouseLeave={() => setHoverIndex(null)}
+        onTouchStart={() => setHoverIndex(index)}
+        role="presentation"
+      />
+    );
+  });
+
+  const tooltipWidth = 200;
+  const tooltipHeight = 24 + tooltipLines.length * 16;
+  const tooltipX = hoveredSalesPoint
+    ? Math.min(
+        Math.max(hoveredSalesPoint.x - tooltipWidth / 2, margin.left + 8),
+        margin.left + innerWidth - tooltipWidth - 8,
+      )
+    : 0;
+  const tooltipY = hoveredSalesPoint
+    ? Math.max(hoveredSalesPoint.y - tooltipHeight - 16, margin.top + 8)
+    : 0;
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-80">
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-80" onMouseLeave={() => setHoverIndex(null)}>
       {yTicks.map((tick, index) => {
-        const y = margin.top + innerHeight - ((tick - minValue) / range) * innerHeight;
+        const y = getY(tick);
         return (
           <g key={`y-financial-${index}`}>
             <line x1={margin.left} x2={margin.left + innerWidth} y1={y} y2={y} stroke={GRID_COLOR} strokeDasharray="4 4" />
@@ -241,12 +380,43 @@ const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) =>
           strokeDasharray="4 4"
         />
       ))}
+      {targetLineValue !== undefined && targetLineValue !== null && (
+        <g>
+          <line
+            x1={margin.left}
+            x2={margin.left + innerWidth}
+            y1={getY(targetLineValue)}
+            y2={getY(targetLineValue)}
+            stroke="#4b5563"
+            strokeDasharray="4 4"
+            strokeWidth={1.5}
+          />
+          {targetLineLabel && (
+            <text
+              x={margin.left + innerWidth - 4}
+              y={getY(targetLineValue) - 6}
+              textAnchor="end"
+              className="text-xs font-medium fill-gray-600"
+            >
+              {targetLineLabel}
+            </text>
+          )}
+        </g>
+      )}
       <path d={buildPath(expensesPoints)} fill="none" stroke={EXPENSES_COLOR} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
       <path d={buildPath(salesPoints)} fill="none" stroke={SALES_COLOR} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
       <path d={buildPath(balancePoints)} fill="none" stroke={BALANCE_COLOR} strokeWidth={2.5} strokeDasharray="6 4" strokeLinecap="round" strokeLinejoin="round" />
       <path d={buildPath(historicalBalancePoints)} fill="none" stroke={HISTORICAL_BALANCE_COLOR} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
       {salesPoints.map(point => (
-        <circle key={`sales-${point.index}`} cx={point.x} cy={point.y} r={4} fill="#fff" stroke={SALES_COLOR} strokeWidth={2} />
+        <circle
+          key={`sales-${point.index}`}
+          cx={point.x}
+          cy={point.y}
+          r={hoverIndex === point.index ? 5 : 4}
+          fill="#fff"
+          stroke={SALES_COLOR}
+          strokeWidth={2}
+        />
       ))}
       {expensesPoints.map(point => (
         <circle key={`expenses-${point.index}`} cx={point.x} cy={point.y} r={4} fill="#fff" stroke={EXPENSES_COLOR} strokeWidth={2} />
@@ -265,6 +435,76 @@ const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) =>
           strokeWidth={2}
         />
       ))}
+      {annotations.map(annotation => {
+        const anchorPoint = getAnchorPoint(annotation.anchor, annotation.index);
+        if (!anchorPoint) {
+          return null;
+        }
+
+        return (
+          <g key={`${annotation.anchor}-${annotation.index}`}>
+            {annotation.variant === 'outline' && (
+              <circle
+                cx={anchorPoint.x}
+                cy={anchorPoint.y}
+                r={7}
+                fill="white"
+                stroke={annotation.color ?? EXPENSES_COLOR}
+                strokeWidth={2.5}
+              />
+            )}
+            {annotation.icon && (
+              <text
+                x={anchorPoint.x}
+                y={anchorPoint.y - 12}
+                textAnchor="middle"
+                className="text-sm"
+              >
+                {annotation.icon}
+              </text>
+            )}
+            <text
+              x={anchorPoint.x}
+              y={annotation.icon ? anchorPoint.y - 26 : anchorPoint.y - 12}
+              textAnchor="middle"
+              className="text-xs font-medium fill-gray-700"
+            >
+              {annotation.label}
+            </text>
+          </g>
+        );
+      })}
+      {hoveredSalesPoint && (
+        <g>
+          <line
+            x1={hoveredSalesPoint.x}
+            x2={hoveredSalesPoint.x}
+            y1={margin.top}
+            y2={margin.top + innerHeight}
+            stroke="#d1d5db"
+            strokeDasharray="4 4"
+          />
+          <rect
+            x={tooltipX}
+            y={tooltipY}
+            width={tooltipWidth}
+            height={tooltipHeight}
+            rx={8}
+            ry={8}
+            fill="white"
+            stroke="#e5e7eb"
+            strokeWidth={1}
+          />
+          <text x={tooltipX + 12} y={tooltipY + 18} className="text-xs fill-gray-700">
+            {tooltipLines.map((line, lineIndex) => (
+              <tspan key={line} x={tooltipX + 12} dy={lineIndex === 0 ? 0 : 16}>
+                {line}
+              </tspan>
+            ))}
+          </text>
+        </g>
+      )}
+      {interactiveZones}
       <line
         x1={margin.left}
         x2={margin.left + innerWidth}
@@ -342,7 +582,7 @@ const getNormalizedRange = (startInput: string, endInput: string) => {
   return { start: normalizedStart, end: normalizedEnd };
 };
 
-export function Analitica({ orders }: AnaliticaProps) {
+export function Analitica({ orders, targetVentasMensual }: AnaliticaProps) {
   const today = useMemo(() => {
     const now = new Date();
     return formatDateInputValue(now);
@@ -565,19 +805,287 @@ export function Analitica({ orders }: AnaliticaProps) {
     return dailyFinancialPerformance.slice(-days);
   }, [dailyFinancialPerformance, financialZoom]);
 
-  const zoomedFinancialTotals = useMemo(
-    () =>
-      zoomedFinancialData.reduce(
-        (acc, point) => {
-          acc.sales += point.sales;
-          acc.expenses += point.expenses;
-          acc.balance += point.balance;
-          return acc;
-        },
-        { sales: 0, expenses: 0, balance: 0 },
-      ),
+  const metrics = useMemo(() => computePeriodMetrics(zoomedFinancialData), [zoomedFinancialData]);
+
+  const prevPoints = useMemo(
+    () => computePrevWindow(dailyFinancialPerformance, zoomedFinancialData),
+    [dailyFinancialPerformance, zoomedFinancialData],
+  );
+
+  const prevMetrics = useMemo(
+    () => (prevPoints ? computePeriodMetrics(prevPoints) : null),
+    [prevPoints],
+  );
+
+  const ordersByDateKey = useMemo(() => {
+    const map = new Map<string, { total: number; count: number }>();
+    filteredOrders.forEach(order => {
+      const key = formatDateInputValue(order.timestamp);
+      const entry = map.get(key) ?? { total: 0, count: 0 };
+      entry.total += order.total;
+      entry.count += 1;
+      map.set(key, entry);
+    });
+    return map;
+  }, [filteredOrders]);
+
+  const visibleOrderStats = useMemo(() => {
+    if (zoomedFinancialData.length === 0) {
+      return { total: 0, count: 0 };
+    }
+    let total = 0;
+    let count = 0;
+    zoomedFinancialData.forEach(point => {
+      const key = formatDateInputValue(point.date);
+      const entry = ordersByDateKey.get(key);
+      if (entry) {
+        total += entry.total;
+        count += entry.count;
+      }
+    });
+    return { total, count };
+  }, [ordersByDateKey, zoomedFinancialData]);
+
+  const prevOrderStats = useMemo(() => {
+    if (!prevPoints) {
+      return null;
+    }
+    let total = 0;
+    let count = 0;
+    prevPoints.forEach(point => {
+      const key = formatDateInputValue(point.date);
+      const entry = ordersByDateKey.get(key);
+      if (entry) {
+        total += entry.total;
+        count += entry.count;
+      }
+    });
+    return { total, count };
+  }, [ordersByDateKey, prevPoints]);
+
+  const visibleAvgTicket = visibleOrderStats.count > 0 ? visibleOrderStats.total / visibleOrderStats.count : 0;
+  const prevAvgTicket = prevOrderStats && prevOrderStats.count > 0 ? prevOrderStats.total / prevOrderStats.count : null;
+
+  const comparisonData = useMemo(() => {
+    if (!prevMetrics) {
+      return null;
+    }
+
+    const salesChange = percentChange(metrics.sales, prevMetrics.sales);
+    const expensesChange = percentChange(metrics.expenses, prevMetrics.expenses);
+    const marginChange =
+      metrics.netMarginPct !== null && prevMetrics.netMarginPct !== null
+        ? metrics.netMarginPct - prevMetrics.netMarginPct
+        : null;
+    const ticketChange = prevAvgTicket !== null ? percentChange(visibleAvgTicket, prevAvgTicket) : null;
+
+    return {
+      salesChange,
+      expensesChange,
+      marginChange,
+      ticketChange,
+      prevMargin: prevMetrics.netMarginPct,
+      prevAvgTicket,
+    };
+  }, [metrics, prevMetrics, prevAvgTicket, visibleAvgTicket]);
+
+  const expenseThreshold = useMemo(() => {
+    const values = zoomedFinancialData.map(point => point.expenses).filter(value => value > 0);
+    if (values.length === 0) {
+      return null;
+    }
+    return percentile(values, 0.9);
+  }, [zoomedFinancialData]);
+
+  const expenseOutliers = useMemo(() => {
+    if (expenseThreshold === null) {
+      return [] as Array<{ index: number; point: FinancialChartPoint }>;
+    }
+    return zoomedFinancialData
+      .map((point, index) => ({ point, index }))
+      .filter(({ point }) => point.expenses > expenseThreshold);
+  }, [expenseThreshold, zoomedFinancialData]);
+
+  const zeroCrossIndex = useMemo(
+    () => findZeroCrossIndex(zoomedFinancialData),
     [zoomedFinancialData],
   );
+
+  const annotations = useMemo(() => {
+    const items: FinancialAnnotation[] = [];
+
+    if (metrics.bestSalesDay) {
+      const index = zoomedFinancialData.findIndex(
+        point => point.date.getTime() === metrics.bestSalesDay?.date.getTime(),
+      );
+      if (index >= 0) {
+        items.push({
+          index,
+          anchor: 'sales',
+          icon: '⭐',
+          label: 'Mejor venta',
+          color: SALES_COLOR,
+        });
+      }
+    }
+
+    expenseOutliers.forEach(({ index }) => {
+      items.push({
+        index,
+        anchor: 'expenses',
+        icon: '⚠️',
+        label: 'Gasto atípico',
+        color: EXPENSES_COLOR,
+        variant: 'outline',
+      });
+    });
+
+    if (zeroCrossIndex !== null) {
+      items.push({
+        index: zeroCrossIndex,
+        anchor: 'historical',
+        icon: '◎',
+        label: 'Balance = 0',
+        color: BALANCE_COLOR,
+      });
+    }
+
+    return items;
+  }, [expenseOutliers, metrics.bestSalesDay, zeroCrossIndex, zoomedFinancialData]);
+
+  const insights = useMemo(() => {
+    const base = buildFinancialInsights(zoomedFinancialData, prevPoints ?? undefined);
+    const list = [...base];
+    if (topSalesHour && topSalesHour.total > 0) {
+      const suggestion = `Refuerza surtido en la franja ${topSalesHour.label}, la más rentable con ${formatCOP(Math.round(topSalesHour.total))}.`;
+      list.push(suggestion);
+    }
+    return list.slice(0, 5);
+  }, [prevPoints, topSalesHour, zoomedFinancialData]);
+
+  const alerts = useMemo(() => {
+    const list: { id: string; message: string }[] = [];
+
+    if (zoomedFinancialData.length >= 3 && hasTwoConsecutiveHistoricalDrops(zoomedFinancialData)) {
+      list.push({
+        id: 'flow',
+        message: 'Dos días de deterioro consecutivo en el balance acumulado.',
+      });
+    }
+
+    if (metrics.shareTopDay && metrics.shareTopDay > 0.35 && metrics.bestSalesDay) {
+      list.push({
+        id: 'concentration',
+        message: `Un solo día (${formatShortDate(metrics.bestSalesDay.date)}) aporta ${Math.round(metrics.shareTopDay * 100)}% de las ventas. Riesgo de concentración.`,
+      });
+    }
+
+    if (expenseOutliers.length > 0) {
+      const count = expenseOutliers.length;
+      const first = expenseOutliers[0];
+      list.push({
+        id: 'outlier',
+        message: `${count === 1 ? 'Un' : `${count}`} día${count > 1 ? 's' : ''} con gasto atípico, comenzó el ${formatShortDate(first.point.date)}.`,
+      });
+    }
+
+    return list;
+  }, [expenseOutliers, metrics.bestSalesDay, metrics.shareTopDay, zoomedFinancialData]);
+
+  const isVisibleCurrentMonth = useMemo(
+    () => isCurrentMonthRange(zoomedFinancialData),
+    [zoomedFinancialData],
+  );
+
+  const daysInCurrentMonth = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  }, []);
+
+  const showMonthlyTarget = typeof targetVentasMensual === 'number' && targetVentasMensual > 0 && isVisibleCurrentMonth;
+
+  const monthlyTargetCompliance = useMemo(() => {
+    if (!showMonthlyTarget || !targetVentasMensual) {
+      return null;
+    }
+    return (metrics.sales / targetVentasMensual) * 100;
+  }, [metrics.sales, showMonthlyTarget, targetVentasMensual]);
+
+  const targetDailyLine = showMonthlyTarget && financialZoom === '30' && targetVentasMensual
+    ? targetVentasMensual / daysInCurrentMonth
+    : null;
+
+  const projection = useMemo(() => {
+    if (!isVisibleCurrentMonth || metrics.days < 5) {
+      return null;
+    }
+    const projectedSales = metrics.avgSales * daysInCurrentMonth;
+    const averageDailyBalance = metrics.days > 0 ? metrics.balance / metrics.days : 0;
+    const projectedBalance = averageDailyBalance * daysInCurrentMonth;
+    return { projectedSales, projectedBalance };
+  }, [daysInCurrentMonth, isVisibleCurrentMonth, metrics.avgSales, metrics.balance, metrics.days]);
+
+  const advancedKpis = useMemo(() => {
+    if (metrics.days === 0) {
+      return [] as Array<{ id: string; label: string; value: string; hint: string }>;
+    }
+
+    const cards: Array<{ id: string; label: string; value: string; hint: string }> = [
+      {
+        id: 'avg-sales',
+        label: 'Promedio ventas diarias',
+        value: formatCOP(Math.round(metrics.avgSales)),
+        hint: `${metrics.days} día${metrics.days > 1 ? 's' : ''} analizado${metrics.days > 1 ? 's' : ''}`,
+      },
+      {
+        id: 'avg-expenses',
+        label: 'Promedio gastos diarios',
+        value: formatCOP(Math.round(metrics.avgExpenses)),
+        hint: 'Gasto promedio en el rango visible',
+      },
+      {
+        id: 'net-margin',
+        label: 'Margen neto del periodo',
+        value:
+          metrics.netMarginPct === null
+            ? '—'
+            : `${metrics.netMarginPct >= 0 ? '+' : ''}${metrics.netMarginPct.toFixed(1).replace('.', ',')}%`,
+        hint: metrics.netMarginPct === null ? 'Se requiere al menos una venta.' : 'Balance acumulado sobre ventas.',
+      },
+      {
+        id: 'best-day',
+        label: 'Día con mayor venta',
+        value: metrics.bestSalesDay ? formatCOP(Math.round(metrics.bestSalesDay.value)) : '—',
+        hint: metrics.bestSalesDay ? `Fecha ${formatShortDate(metrics.bestSalesDay.date)}` : 'Sin datos disponibles.',
+      },
+      {
+        id: 'max-expense',
+        label: 'Día con mayor gasto',
+        value: metrics.highestExpenseDay ? formatCOP(Math.round(metrics.highestExpenseDay.value)) : '—',
+        hint: metrics.highestExpenseDay ? `Fecha ${formatShortDate(metrics.highestExpenseDay.date)}` : 'Sin datos disponibles.',
+      },
+    ];
+
+    if (metrics.stdSales !== undefined && metrics.days >= 3) {
+      cards.push({
+        id: 'volatility',
+        label: 'Volatilidad de ventas',
+        value: formatCOP(Math.round(metrics.stdSales)),
+        hint: 'Desviación estándar del ingreso diario.',
+      });
+    }
+
+    if (metrics.cvSales !== undefined && metrics.days >= 3) {
+      cards.push({
+        id: 'cv-sales',
+        label: 'Coeficiente de variación',
+        value: `${(metrics.cvSales * 100).toFixed(1).replace('.', ',')}%`,
+        hint: 'Relación entre volatilidad y promedio.',
+      });
+    }
+
+    return cards;
+  }, [metrics]);
 
   const financialRangeLabel = useMemo(() => {
     if (zoomedFinancialData.length === 0) {
@@ -969,7 +1477,13 @@ export function Analitica({ orders }: AnaliticaProps) {
         {zoomedFinancialData.length > 0 ? (
           <div className="space-y-6">
             <div className="space-y-4">
-              <FinancialPerformanceChart data={zoomedFinancialData} />
+              <FinancialPerformanceChart
+                data={zoomedFinancialData}
+                totalSales={metrics.sales}
+                annotations={annotations}
+                targetLineValue={targetDailyLine ?? undefined}
+                targetLineLabel={targetDailyLine ? 'Meta diaria' : undefined}
+              />
               <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
                 <div className="flex items-center gap-2">
                   <span className="w-3 h-3 rounded-full" style={{ backgroundColor: SALES_COLOR }} /> Ventas
@@ -983,6 +1497,11 @@ export function Analitica({ orders }: AnaliticaProps) {
                 <div className="flex items-center gap-2">
                   <span className="w-5 border-t-2" style={{ borderColor: HISTORICAL_BALANCE_COLOR }} /> Balance histórico
                 </div>
+                {targetDailyLine && (
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 border-t-2 border-dashed" style={{ borderColor: '#4b5563' }} /> Meta diaria
+                  </div>
+                )}
                 {financialRangeLabel && (
                   <div className="ml-auto text-xs text-gray-500">
                     {financialRangeLabel}
@@ -990,22 +1509,181 @@ export function Analitica({ orders }: AnaliticaProps) {
                 )}
               </div>
             </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Ventas acumuladas</p>
-                <p className="text-lg font-semibold text-gray-800">{formatCOP(Math.round(zoomedFinancialTotals.sales))}</p>
+                <p className="text-lg font-semibold text-gray-800">{formatCOP(Math.round(metrics.sales))}</p>
               </div>
               <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Gastos acumulados</p>
-                <p className="text-lg font-semibold text-gray-800">{formatCOP(Math.round(zoomedFinancialTotals.expenses))}</p>
+                <p className="text-lg font-semibold text-gray-800">{formatCOP(Math.round(metrics.expenses))}</p>
               </div>
               <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Balance</p>
-                <p className={`text-lg font-semibold ${zoomedFinancialTotals.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {formatCOP(Math.round(zoomedFinancialTotals.balance))}
+                <p className={`text-lg font-semibold ${metrics.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {formatCOP(Math.round(metrics.balance))}
                 </p>
               </div>
             </div>
+
+            {advancedKpis.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {advancedKpis.map(card => (
+                  <div key={card.id} className="ui-card p-4">
+                    <p className="text-xs uppercase tracking-wide text-gray-500">{card.label}</p>
+                    <p className="text-lg font-semibold mt-1" style={{ color: COLORS.dark }}>
+                      {card.value}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">{card.hint}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {showMonthlyTarget && monthlyTargetCompliance !== null && (
+              <div className="bg-gray-50 border border-gray-100 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Meta mensual</p>
+                  <p className="text-sm text-gray-700">Objetivo: {formatCOP(Math.round(targetVentasMensual ?? 0))}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Cumplimiento</p>
+                  <p className={`text-lg font-semibold ${monthlyTargetCompliance >= 100 ? 'text-green-600' : 'text-gray-800'}`}>
+                    {monthlyTargetCompliance.toFixed(1).replace('.', ',')}%
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {comparisonData && (
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold text-gray-700">Comparativo periodo anterior</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    {
+                      id: 'sales',
+                      label: 'Ventas',
+                      value: formatCOP(Math.round(metrics.sales)),
+                      change: comparisonData.salesChange,
+                    },
+                    {
+                      id: 'expenses',
+                      label: 'Gastos',
+                      value: formatCOP(Math.round(metrics.expenses)),
+                      change: comparisonData.expensesChange,
+                    },
+                    {
+                      id: 'margin',
+                      label: 'Margen neto',
+                      value:
+                        metrics.netMarginPct === null
+                          ? '—'
+                          : `${metrics.netMarginPct >= 0 ? '+' : ''}${metrics.netMarginPct.toFixed(1).replace('.', ',')}%`,
+                      margin: true,
+                      change: comparisonData.marginChange,
+                    },
+                    {
+                      id: 'ticket',
+                      label: 'Ticket promedio',
+                      value: visibleAvgTicket > 0 ? formatCOP(Math.round(visibleAvgTicket)) : '—',
+                      change: comparisonData.ticketChange,
+                    },
+                  ].map(item => {
+                    const isMargin = Boolean(item.margin);
+                    const changeValue = item.change;
+                    const changeText =
+                      changeValue === null || Number.isNaN(changeValue)
+                        ? '—'
+                        : isMargin
+                          ? `${changeValue >= 0 ? '+' : ''}${changeValue.toFixed(1).replace('.', ',')} pp`
+                          : `${changeValue >= 0 ? '+' : ''}${changeValue.toFixed(1).replace('.', ',')}%`;
+                    const toneClass =
+                      changeValue === null || Number.isNaN(changeValue)
+                        ? 'text-gray-500'
+                        : changeValue >= 0
+                          ? 'text-green-600'
+                          : 'text-red-600';
+                    const arrow =
+                      changeValue === null || Number.isNaN(changeValue)
+                        ? '–'
+                        : changeValue >= 0
+                          ? '▲'
+                          : '▼';
+                    return (
+                      <div key={item.id} className="ui-card p-4">
+                        <p className="text-xs uppercase tracking-wide text-gray-500">{item.label}</p>
+                        <p className="text-lg font-semibold mt-1" style={{ color: COLORS.dark }}>
+                          {item.value}
+                        </p>
+                        <p className={`text-xs font-medium mt-1 ${toneClass}`}>
+                          {arrow !== '–' && <span className="mr-1">{arrow}</span>}
+                          {changeText}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {alerts.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold text-gray-700">Alertas</h4>
+                {alerts.map(alert => (
+                  <div
+                    key={alert.id}
+                    className="flex items-start gap-2 bg-yellow-50 border border-yellow-100 rounded-md px-3 py-2 text-xs text-yellow-800"
+                  >
+                    <span className="text-base leading-none pt-0.5">⚠️</span>
+                    <span>{alert.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <h4 className="text-sm font-semibold text-gray-700">Insights del periodo</h4>
+              {insights.length > 0 ? (
+                <ul className="space-y-1 text-sm text-gray-700">
+                  {insights.map((insight, index) => {
+                    const lower = insight.toLowerCase();
+                    const isWarning = lower.includes('riesgo') || lower.includes('gasto') || lower.includes('caída') || lower.includes('retrocedió');
+                    return (
+                      <li key={`${insight}-${index}`} className="flex items-start gap-2">
+                        <span className={`${isWarning ? 'text-yellow-600' : 'text-green-600'} leading-none pt-0.5`}>
+                          {isWarning ? '⚠️' : '✓'}
+                        </span>
+                        <span>{insight}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="text-sm text-gray-500">Sin insights destacados para este rango.</p>
+              )}
+            </div>
+
+            {projection && (
+              <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500">Proyección cierre</p>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-2 text-sm text-gray-700">
+                  <span>
+                    Ventas proyectadas:{' '}
+                    <strong className="text-gray-800">{formatCOP(Math.round(projection.projectedSales))}</strong>
+                  </span>
+                  <span>
+                    Balance proyectado:{' '}
+                    <strong
+                      className={`text-gray-800 ${projection.projectedBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                    >
+                      {formatCOP(Math.round(projection.projectedBalance))}
+                    </strong>
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">Estimación lineal, no considera estacionalidad.</p>
+              </div>
+            )}
           </div>
         ) : (
           <p className="text-sm text-gray-500">No hay datos suficientes para visualizar ventas y gastos.</p>

@@ -25,6 +25,7 @@ import {
 } from '../constants/bowl';
 import { formatPaymentSummary, getOrderAllocations, isOrderPaid, isOrderPaymentHandled } from '../utils/payments';
 import { PaymentModal } from './PaymentModal';
+import { normalizeText } from '../utils/strings';
 
 const ITEMS_PER_PAGE = 30;
 
@@ -617,12 +618,12 @@ export function Comandas({
     setExpandedActionsOrderId(prev => (prev === orderId ? null : orderId));
   };
 
+  const normalizedMenuSearch = normalizeText(searchQuery);
+
   const filteredMenuItems = menuItems.filter(item => {
-    const query = searchQuery.toLowerCase();
     const matchesSearch =
-      !query ||
-      item.nombre.toLowerCase().includes(query) ||
-      (item.keywords && item.keywords.toLowerCase().includes(query));
+      !normalizedMenuSearch ||
+      normalizeText(item.nombre).includes(normalizedMenuSearch);
     const isNonInventariable = item.inventarioCategoria !== 'Inventariables';
     return matchesSearch && isNonInventariable;
   });

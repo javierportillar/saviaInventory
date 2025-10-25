@@ -24,6 +24,7 @@ import {
 } from '../constants/bowl';
 import { formatPaymentSummary, getOrderAllocations, isOrderPaid } from '../utils/payments';
 import { PaymentModal } from './PaymentModal';
+import { normalizeText } from '../utils/strings';
 
 const formatDateForInput = (date: Date): string => {
   const year = date.getFullYear();
@@ -208,11 +209,11 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     .filter(item => item.inventarioCategoria !== 'Inventariables')
     .map(item => item.categoria);
   const categories = Array.from(new Set(nonInventariableCategories));
-  
+  const normalizedSearchQuery = normalizeText(searchQuery);
+
   const filteredItems = menuItems.filter(item => {
-    const matchesSearch = !searchQuery ||
-      item.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.keywords && item.keywords.toLowerCase().includes(searchQuery.toLowerCase()));
+    const matchesSearch = !normalizedSearchQuery ||
+      normalizeText(item.nombre).includes(normalizedSearchQuery);
     const matchesCategory = !selectedCategory || item.categoria === selectedCategory;
     const isNonInventariable = item.inventarioCategoria !== 'Inventariables';
     return matchesSearch && matchesCategory && isNonInventariable;

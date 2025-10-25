@@ -3,7 +3,7 @@ import { MenuItem } from '../types';
 import { Package, AlertTriangle, Plus, Minus, Search, Edit3, Trash, Filter } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
-import { generateMenuItemCode } from '../utils/strings';
+import { generateMenuItemCode, normalizeText } from '../utils/strings';
 
 interface InventarioProps {
   menuItems: MenuItem[];
@@ -58,8 +58,10 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
     }
   }, [nonInventariableCategories, selectedCategory]);
 
+  const normalizedSearchQuery = normalizeText(searchQuery);
+
   const filteredItems = menuItems.filter(item => {
-    const matchesSearch = !searchQuery || item.nombre.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = !normalizedSearchQuery || normalizeText(item.nombre).includes(normalizedSearchQuery);
     const matchesCategory = !selectedCategory || item.categoria === selectedCategory;
     const matchesInventory = inventoryFilter === 'all' || 
       (inventoryFilter === 'inventariables' && item.inventarioCategoria === 'Inventariables') ||

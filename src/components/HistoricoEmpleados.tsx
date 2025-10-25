@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Clock, RefreshCcw, Save, RotateCcw, AlertTriangle, CheckCircle2, Users, Wallet } from 'lucide-react';
-import { Empleado, WeeklyHours, WeeklySchedule, DayKey } from '../types';
+import { Empleado, WeeklyHours, WeeklySchedule, DayKey, EmployeeShift } from '../types';
 import dataService from '../lib/dataService';
 import { COLORS } from '../data/menu';
 import {
@@ -12,9 +12,10 @@ import {
   formatDifference,
   formatHours,
   getCurrentWeekKey,
-  formatWeekRange
+  formatWeekRange,
+  getStartOfWeek
 } from '../utils/employeeHours';
-import { formatCOP } from '../utils/format';
+import { formatCOP, formatDateInputValue, formatSqlTime } from '../utils/format';
 
 interface SaveState {
   status: 'idle' | 'saving' | 'success' | 'error';
@@ -172,6 +173,7 @@ export function HistoricoEmpleados() {
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [baseSchedules, setBaseSchedules] = useState<Record<string, WeeklySchedule>>({});
   const [weeklyHours, setWeeklyHours] = useState<Record<string, WeeklyHours>>({});
+  const [weeklyShiftDetails, setWeeklyShiftDetails] = useState<Record<string, Record<DayKey, EmployeeShift | null>>>({});
   const [selectedWeek, setSelectedWeek] = useState<string>(getCurrentWeekKey());
   const [editedHours, setEditedHours] = useState<Record<string, WeeklyHours>>({});
   const [editedRanges, setEditedRanges] = useState<Record<string, WeeklyRanges>>({});
@@ -180,6 +182,13 @@ export function HistoricoEmpleados() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<Record<string, SaveState>>({});
   const timeoutsRef = useRef<Record<string, number>>({});
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const clearRowTimeout = useCallback((empleadoId: string) => {
     const timeoutId = timeoutsRef.current[empleadoId];
@@ -234,50 +243,197 @@ export function HistoricoEmpleados() {
   }, [clearRowTimeout]);
 
   useEffect(() => {
-    let isMounted = true;
-
-    const loadWeek = async () => {
-      if (!selectedWeek) {
-        return;
-      }
-
-      try {
-        setWeekLoading(true);
-        setLoadError(null);
-        const records = await dataService.fetchEmployeeWeeklyHoursForWeek(selectedWeek);
-        if (!isMounted) return;
-        setWeeklyHours(records);
-        setEditedHours({});
-        setEditedRanges({});
-        setSaveState({});
-      } catch (error) {
-        console.error('No se pudieron cargar las horas de la semana seleccionada:', error);
-        if (isMounted) {
-          setLoadError('No se pudo cargar la información de la semana.');
-          setWeeklyHours({});
-        }
-      } finally {
-        if (isMounted) {
-          setWeekLoading(false);
-        }
-      }
-    };
-
-    void loadWeek();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [selectedWeek]);
-
-  useEffect(() => {
     if (empleados.length === 0) {
       setWeeklyHours({});
       setEditedHours({});
       setEditedRanges({});
       setSaveState({});
+      setWeeklyShiftDetails({});
     }
   }, [empleados]);
+
+  const summarizeShift = useCallback(
+    (shift?: EmployeeShift | null) => {
+      if (!shift) {
+        return 'Sin turno registrado';
+      }
+      const entrada = formatSqlTime(shift.horaLlegada);
+      const salida = shift.horaSalida ? formatSqlTime(shift.horaSalida) : 'pendiente';
+      let summary = `Entrada ${entrada} · Salida ${salida}`;
+      if (shift.novedad && shift.novedadInicio) {
+        summary += shift.novedadFin
+          ? ` · Novedad ${formatSqlTime(shift.novedadInicio)}-${formatSqlTime(shift.novedadFin)}`
+          : ` · Novedad ${formatSqlTime(shift.novedadInicio)} (en curso)`;
+      }
+      return summary;
+    },
+    []
+  );
+
+  const buildShiftTooltip = useCallback(
+    (shift?: EmployeeShift | null) => {
+      if (!shift) {
+        return 'Sin turno registrado';
+      }
+      const lines = [
+        `Entrada: ${formatSqlTime(shift.horaLlegada)}`,
+        `Salida: ${shift.horaSalida ? formatSqlTime(shift.horaSalida) : 'pendiente'}`,
+      ];
+
+      if (shift.novedad && shift.novedadInicio) {
+        const novelty = shift.novedadFin
+          ? `${formatSqlTime(shift.novedadInicio)} – ${formatSqlTime(shift.novedadFin)}`
+          : `${formatSqlTime(shift.novedadInicio)} (en curso)`;
+        lines.push(`Novedad: ${novelty}`);
+      }
+
+      if (typeof shift.horasTrabajadas === 'number') {
+        lines.push(`Horas: ${formatHours(shift.horasTrabajadas)} h`);
+      }
+
+      return lines.join('\n');
+    },
+    []
+  );
+
+  const fetchWeekShiftDetails = useCallback(
+    async (weekKey: string): Promise<Record<string, Record<DayKey, EmployeeShift | null>>> => {
+      if (!weekKey) {
+        return {};
+      }
+
+      try {
+        const weekStart = getStartOfWeek(weekKey);
+        const weekEnd = new Date(weekStart.getTime());
+        weekEnd.setDate(weekEnd.getDate() + 6);
+
+        const from = formatDateInputValue(new Date(weekStart.getTime()));
+        const to = formatDateInputValue(weekEnd);
+
+        const shifts = await dataService.fetchEmployeeShiftsBetween(from, to);
+
+        const map: Record<string, Record<DayKey, EmployeeShift | null>> = {};
+
+        shifts.forEach(shift => {
+          const [yearStr, monthStr, dayStr] = shift.fecha.split('-');
+          const year = Number(yearStr);
+          const monthIndex = Number(monthStr) - 1;
+          const day = Number(dayStr);
+
+          if ([year, monthIndex, day].some(value => Number.isNaN(value))) {
+            return;
+          }
+
+          const shiftDate = new Date(year, monthIndex, day);
+          shiftDate.setHours(0, 0, 0, 0);
+
+          const diffDays = Math.floor((shiftDate.getTime() - weekStart.getTime()) / 86_400_000);
+          if (diffDays < 0 || diffDays >= DAY_ORDER.length) {
+            return;
+          }
+
+          const dayKey = DAY_ORDER[diffDays];
+          const employeeMap = map[shift.empleadoId] ?? (map[shift.empleadoId] = {} as Record<DayKey, EmployeeShift | null>);
+          const existing = employeeMap[dayKey];
+
+          if (!existing) {
+            employeeMap[dayKey] = shift;
+            return;
+          }
+
+          const existingHasExit = Boolean(existing.horaSalida);
+          const incomingHasExit = Boolean(shift.horaSalida);
+          const existingArrival = existing.horaLlegada ?? '';
+          const incomingArrival = shift.horaLlegada ?? '';
+
+          if (!existingHasExit && incomingHasExit) {
+            employeeMap[dayKey] = shift;
+            return;
+          }
+
+          if (incomingArrival >= existingArrival) {
+            employeeMap[dayKey] = shift;
+          }
+        });
+
+        return map;
+      } catch (error) {
+        console.error('No se pudieron cargar los turnos de la semana:', error);
+        return {};
+      }
+    },
+    []
+  );
+
+  const loadWeekData = useCallback(
+    async (weekKey: string, options: { preserveEdits?: boolean } = {}) => {
+      if (!weekKey || !isMountedRef.current) {
+        return;
+      }
+
+      const { preserveEdits = false } = options;
+
+      if (!preserveEdits) {
+        setWeekLoading(true);
+        setLoadError(null);
+      }
+
+      try {
+        const [hoursRecord, shiftRecord] = await Promise.all([
+          dataService.fetchEmployeeWeeklyHoursForWeek(weekKey),
+          fetchWeekShiftDetails(weekKey),
+        ]);
+
+        if (!isMountedRef.current) {
+          return;
+        }
+
+        setWeeklyHours(hoursRecord);
+        setWeeklyShiftDetails(shiftRecord);
+
+        if (!preserveEdits) {
+          setEditedHours({});
+          setEditedRanges({});
+          setSaveState({});
+        }
+      } catch (error) {
+        console.error('No se pudieron cargar las horas de la semana seleccionada:', error);
+        if (!preserveEdits && isMountedRef.current) {
+          setLoadError('No se pudo cargar la información de la semana.');
+          setWeeklyHours({});
+          setWeeklyShiftDetails({});
+        }
+      } finally {
+        if (!preserveEdits && isMountedRef.current) {
+          setWeekLoading(false);
+        }
+      }
+    },
+    [fetchWeekShiftDetails]
+  );
+
+  useEffect(() => {
+    void loadWeekData(selectedWeek);
+  }, [selectedWeek, loadWeekData]);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+
+    const setupSubscription = async () => {
+      unsubscribe = await dataService.subscribeToEmployeeShifts({
+        onChange: () => {
+          void loadWeekData(selectedWeek, { preserveEdits: true });
+        },
+        debounceMs: 400,
+      });
+    };
+
+    void setupSubscription();
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, [loadWeekData, selectedWeek]);
 
   const handleWeekChange = (value: string) => {
     setSelectedWeek(value || getCurrentWeekKey());
@@ -634,10 +790,14 @@ export function HistoricoEmpleados() {
                       const parsedPreview = trimmedRange ? parseHoursInput(trimmedRange) : null;
                       const isInvalidRange = Boolean(trimmedRange) && parsedPreview === null;
                       const ringColor = isInvalidRange ? '#F87171' : COLORS.accent;
+                      const shift = weeklyShiftDetails[empleado.id]?.[day];
+                      const shiftSummary = summarizeShift(shift);
+                      const shiftTooltip = buildShiftTooltip(shift);
+                      const hasShift = Boolean(shift);
 
                       return (
                         <td key={day} className="px-3 py-3 text-center align-top">
-                          <div className="flex flex-col items-center gap-1.5">
+                          <div className="flex flex-col items-center gap-1.5" title={shiftTooltip}>
                             <input
                               type="text"
                               value={rangeValue}
@@ -659,6 +819,11 @@ export function HistoricoEmpleados() {
                               }`}
                               style={{ '--tw-ring-color': ringColor } as React.CSSProperties}
                             />
+                            <span
+                              className={`text-[11px] ${hasShift ? 'text-gray-500' : 'text-gray-400'}`}
+                            >
+                              {shiftSummary}
+                            </span>
                             <span className="text-[11px] text-gray-500">
                               Calculadas: {formatHours(workingHours[day] ?? 0)} h
                             </span>

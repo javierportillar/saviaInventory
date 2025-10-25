@@ -114,6 +114,20 @@ export type WeeklySchedule = Record<DayKey, DaySchedule>;
 
 export type WeeklyHours = Record<DayKey, number>;
 
+export interface EmployeeShift {
+  id: string;
+  empleadoId: string;
+  fecha: string; // YYYY-MM-DD in local timezone
+  horaLlegada: string;
+  horaSalida?: string | null;
+  novedad: boolean;
+  novedadInicio?: string | null;
+  novedadFin?: string | null;
+  horasTrabajadas?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface Empleado {
   id: string;
   nombre: string;

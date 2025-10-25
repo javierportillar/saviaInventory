@@ -16,6 +16,7 @@ import {
   EmployeeCreditHistoryEntry,
   WeeklySchedule,
   WeeklyHours,
+  EmployeeShift,
   DAY_KEYS,
 } from '../types';
 import { supabase } from './supabaseClient';
@@ -81,6 +82,7 @@ const BASE_SCHEDULE_STORAGE_KEY = 'savia-horarios-base';
 const WEEKLY_HOURS_STORAGE_KEY = 'savia-horarios-semanales';
 const PROVISION_TRANSFERS_STORAGE_KEY = 'savia-provision-transfers';
 const CAJA_POCKETS_STORAGE_KEY = 'savia-caja-bolsillos';
+const EMPLOYEE_SHIFTS_STORAGE_KEY = 'savia-employee-shifts';
 
 const notifyEmployeeCreditUpdate = () => {
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
@@ -214,6 +216,278 @@ const persistLocalWeeklyHours = (empleadoId: string, weekKey: string, hours: Wee
   };
   current[empleadoId] = employeeWeeks;
   setLocalData(WEEKLY_HOURS_STORAGE_KEY, current);
+};
+
+type EmployeeShiftStore = Record<string, EmployeeShift>;
+
+const normalizeTimeValue = (value: unknown): string | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const match = trimmed.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) {
+    return null;
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = match[3] ? Number(match[3]) : 0;
+  if (
+    Number.isNaN(hours)
+    || Number.isNaN(minutes)
+    || Number.isNaN(seconds)
+    || hours < 0
+    || hours > 23
+    || minutes < 0
+    || minutes > 59
+    || seconds < 0
+    || seconds > 59
+  ) {
+    return null;
+  }
+  const hh = hours.toString().padStart(2, '0');
+  const mm = minutes.toString().padStart(2, '0');
+  const ss = seconds.toString().padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+};
+
+const normalizeDateValue = (value: unknown): string | null => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const clone = new Date(value.getTime());
+    clone.setHours(0, 0, 0, 0);
+    return formatDateInputValue(clone);
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      parsed.setHours(0, 0, 0, 0);
+      return formatDateInputValue(parsed);
+    }
+  }
+  return null;
+};
+
+const normalizeEmployeeShiftRecord = (record: unknown): EmployeeShift | null => {
+  if (!record || typeof record !== 'object') {
+    return null;
+  }
+  const input = record as Record<string, unknown>;
+  const id = typeof input.id === 'string' && input.id ? input.id : undefined;
+  const empleadoIdValue =
+    typeof input.empleado_id === 'string'
+      ? input.empleado_id
+      : typeof input.empleadoId === 'string'
+        ? input.empleadoId
+        : undefined;
+  const fechaValue = normalizeDateValue(input.fecha ?? input.dia ?? input.date);
+  const llegadaValue = normalizeTimeValue(input.hora_llegada ?? input.horaLlegada ?? input.entrada);
+
+  if (!id || !empleadoIdValue || !fechaValue || !llegadaValue) {
+    return null;
+  }
+
+  const salidaValue = normalizeTimeValue(input.hora_salida ?? input.horaSalida ?? input.salida);
+  const novedadValue = Boolean(input.novedad);
+  const novedadInicioValue = normalizeTimeValue(input.novedad_inicio ?? input.novedadInicio);
+  const novedadFinValue = normalizeTimeValue(input.novedad_fin ?? input.novedadFin);
+  const horasTrabajadasValue = Number(input.horas_trabajadas ?? input.horasTrabajadas);
+  const createdAt =
+    typeof input.created_at === 'string'
+      ? input.created_at
+      : typeof input.createdAt === 'string'
+        ? input.createdAt
+        : undefined;
+  const updatedAt =
+    typeof input.updated_at === 'string'
+      ? input.updated_at
+      : typeof input.updatedAt === 'string'
+        ? input.updatedAt
+        : undefined;
+
+  const horasTrabajadas = Number.isFinite(horasTrabajadasValue) ? horasTrabajadasValue : undefined;
+
+  return {
+    id,
+    empleadoId: empleadoIdValue,
+    fecha: fechaValue,
+    horaLlegada: llegadaValue,
+    horaSalida: salidaValue,
+    novedad: novedadValue,
+    novedadInicio: novedadInicioValue,
+    novedadFin: novedadFinValue,
+    horasTrabajadas,
+    createdAt,
+    updatedAt,
+  };
+};
+
+const readLocalEmployeeShiftsMap = (): EmployeeShiftStore => {
+  const stored = getLocalData<EmployeeShiftStore>(EMPLOYEE_SHIFTS_STORAGE_KEY, {});
+  const sanitized: EmployeeShiftStore = {};
+  Object.entries(stored || {}).forEach(([shiftId, raw]) => {
+    const normalized = normalizeEmployeeShiftRecord({ ...(raw as Record<string, unknown>), id: shiftId });
+    if (normalized) {
+      sanitized[shiftId] = normalized;
+    }
+  });
+  return sanitized;
+};
+
+const writeLocalEmployeeShiftsMap = (value: EmployeeShiftStore) => {
+  const serialized: EmployeeShiftStore = {};
+  Object.entries(value).forEach(([shiftId, shift]) => {
+    serialized[shiftId] = { ...shift };
+  });
+  setLocalData(EMPLOYEE_SHIFTS_STORAGE_KEY, serialized);
+};
+
+const upsertLocalEmployeeShifts = (shifts: EmployeeShift | EmployeeShift[]) => {
+  const items = Array.isArray(shifts) ? shifts : [shifts];
+  if (items.length === 0) {
+    return;
+  }
+  const current = readLocalEmployeeShiftsMap();
+  let changed = false;
+  items.forEach(shift => {
+    if (!shift || !shift.id) {
+      return;
+    }
+    const existing = current[shift.id];
+    if (!existing) {
+      current[shift.id] = { ...shift };
+      changed = true;
+      return;
+    }
+    if (
+      existing.horaLlegada !== shift.horaLlegada
+      || existing.horaSalida !== shift.horaSalida
+      || existing.novedad !== shift.novedad
+      || existing.novedadInicio !== shift.novedadInicio
+      || existing.novedadFin !== shift.novedadFin
+      || existing.horasTrabajadas !== shift.horasTrabajadas
+      || existing.updatedAt !== shift.updatedAt
+    ) {
+      current[shift.id] = { ...shift };
+      changed = true;
+    }
+  });
+  if (changed) {
+    writeLocalEmployeeShiftsMap(current);
+  }
+};
+
+const applyLocalEmployeeShiftPatch = (shiftId: string, patch: Partial<EmployeeShift>): EmployeeShift | null => {
+  const current = readLocalEmployeeShiftsMap();
+  const existing = current[shiftId];
+  if (!existing) {
+    return null;
+  }
+
+  const updated: EmployeeShift = {
+    ...existing,
+    ...(patch.empleadoId ? { empleadoId: patch.empleadoId } : {}),
+    ...(patch.fecha ? { fecha: patch.fecha } : {}),
+    ...(patch.horaLlegada !== undefined ? { horaLlegada: patch.horaLlegada } : {}),
+    horaSalida: 'horaSalida' in patch ? patch.horaSalida ?? null : existing.horaSalida ?? null,
+    novedad: 'novedad' in patch ? Boolean(patch.novedad) : existing.novedad,
+    novedadInicio: 'novedadInicio' in patch ? patch.novedadInicio ?? null : existing.novedadInicio ?? null,
+    novedadFin: 'novedadFin' in patch ? patch.novedadFin ?? null : existing.novedadFin ?? null,
+    horasTrabajadas: 'horasTrabajadas' in patch ? patch.horasTrabajadas : existing.horasTrabajadas,
+    updatedAt: new Date().toISOString(),
+  };
+
+  current[shiftId] = updated;
+  writeLocalEmployeeShiftsMap(current);
+  return updated;
+};
+
+const listLocalEmployeeShiftsBetween = (
+  from: string,
+  to: string,
+  options: { empleadoId?: string } = {}
+): EmployeeShift[] => {
+  const start = from;
+  const end = to;
+  const filterByEmployee = options.empleadoId;
+  const map = readLocalEmployeeShiftsMap();
+  return Object.values(map)
+    .filter(shift => {
+      if (shift.fecha < start || shift.fecha > end) {
+        return false;
+      }
+      if (filterByEmployee && shift.empleadoId !== filterByEmployee) {
+        return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      const dateDiff = a.fecha.localeCompare(b.fecha);
+      if (dateDiff !== 0) {
+        return dateDiff;
+      }
+      const aHora = a.horaLlegada ?? '';
+      const bHora = b.horaLlegada ?? '';
+      return aHora.localeCompare(bHora);
+    });
+};
+
+const generateShiftId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `shift-${Math.random().toString(36).slice(2, 12)}`;
+};
+
+const formatTimeForSupabase = (date: Date): string => {
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const seconds = date.getSeconds().toString().padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
+};
+
+const mapShiftPatchToSupabase = (patch: Partial<EmployeeShift>): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {};
+  if ('empleadoId' in patch) {
+    payload.empleado_id = patch.empleadoId;
+  }
+  if ('fecha' in patch) {
+    payload.fecha = patch.fecha;
+  }
+  if ('horaLlegada' in patch) {
+    payload.hora_llegada = patch.horaLlegada;
+  }
+  if ('horaSalida' in patch) {
+    payload.hora_salida = patch.horaSalida ?? null;
+  }
+  if ('novedad' in patch) {
+    payload.novedad = patch.novedad;
+  }
+  if ('novedadInicio' in patch) {
+    payload.novedad_inicio = patch.novedadInicio ?? null;
+  }
+  if ('novedadFin' in patch) {
+    payload.novedad_fin = patch.novedadFin ?? null;
+  }
+  if ('horasTrabajadas' in patch) {
+    payload.horas_trabajadas = patch.horasTrabajadas ?? null;
+  }
+  if (Object.keys(payload).length > 0) {
+    payload.updated_at = new Date().toISOString();
+  }
+  return payload;
 };
 
 const mapSupabaseCreditHistoryEntry = (record: any): EmployeeCreditHistoryEntry | null => {
@@ -2525,6 +2799,359 @@ export const saveEmployeeWeeklyHours = async (
   }
 };
 
+interface FetchEmployeeShiftsOptions {
+  empleadoId?: string;
+}
+
+interface FetchActiveEmployeeShiftsOptions extends FetchEmployeeShiftsOptions {
+  date?: string | Date;
+}
+
+const sortShifts = (shifts: EmployeeShift[]): EmployeeShift[] =>
+  [...shifts].sort((a, b) => {
+    const dateDiff = a.fecha.localeCompare(b.fecha);
+    if (dateDiff !== 0) {
+      return dateDiff;
+    }
+    const aHora = a.horaLlegada ?? '';
+    const bHora = b.horaLlegada ?? '';
+    return aHora.localeCompare(bHora);
+  });
+
+export const fetchEmployeeShiftsBetween = async (
+  fromDate: string,
+  toDate: string,
+  options: FetchEmployeeShiftsOptions = {}
+): Promise<EmployeeShift[]> => {
+  const from = normalizeDateValue(fromDate);
+  const to = normalizeDateValue(toDate);
+  if (!from || !to) {
+    return [];
+  }
+
+  const empleadoId = options.empleadoId?.trim() || undefined;
+
+  if (await ensureSupabaseReady()) {
+    try {
+      let query = supabase
+        .from('employee_shifts')
+        .select('*')
+        .gte('fecha', from)
+        .lte('fecha', to)
+        .order('fecha', { ascending: true })
+        .order('hora_llegada', { ascending: true });
+
+      if (empleadoId) {
+        query = query.eq('empleado_id', empleadoId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const shifts = (data ?? [])
+        .map(normalizeEmployeeShiftRecord)
+        .filter((shift): shift is EmployeeShift => Boolean(shift));
+
+      if (shifts.length > 0) {
+        upsertLocalEmployeeShifts(shifts);
+      }
+
+      return sortShifts(shifts);
+    } catch (error) {
+      console.warn('Supabase no disponible al obtener turnos, usando caché local:', error);
+    }
+  }
+
+  return listLocalEmployeeShiftsBetween(from, to, { empleadoId });
+};
+
+export const fetchEmployeeShiftsForDate = async (
+  date: string,
+  options: FetchEmployeeShiftsOptions = {}
+): Promise<EmployeeShift[]> => {
+  const normalized = normalizeDateValue(date);
+  if (!normalized) {
+    return [];
+  }
+  return fetchEmployeeShiftsBetween(normalized, normalized, options);
+};
+
+export const fetchActiveEmployeeShifts = async (
+  options: FetchActiveEmployeeShiftsOptions = {}
+): Promise<EmployeeShift[]> => {
+  const dateFilter = options.date ? normalizeDateValue(options.date) : null;
+  const empleadoId = options.empleadoId?.trim() || undefined;
+
+  if (await ensureSupabaseReady()) {
+    try {
+      let query = supabase
+        .from('employee_shifts')
+        .select('*')
+        .is('hora_salida', null)
+        .order('fecha', { ascending: true })
+        .order('hora_llegada', { ascending: true });
+
+      if (dateFilter) {
+        query = query.eq('fecha', dateFilter);
+      }
+
+      if (empleadoId) {
+        query = query.eq('empleado_id', empleadoId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const shifts = (data ?? [])
+        .map(normalizeEmployeeShiftRecord)
+        .filter((shift): shift is EmployeeShift => Boolean(shift));
+
+      if (shifts.length > 0) {
+        upsertLocalEmployeeShifts(shifts);
+      }
+
+      return sortShifts(shifts);
+    } catch (error) {
+      console.warn('Supabase no disponible al obtener turnos activos, usando caché local:', error);
+    }
+  }
+
+  const map = readLocalEmployeeShiftsMap();
+  return sortShifts(
+    Object.values(map).filter(shift => {
+      if (shift.horaSalida) {
+        return false;
+      }
+      if (dateFilter && shift.fecha !== dateFilter) {
+        return false;
+      }
+      if (empleadoId && shift.empleadoId !== empleadoId) {
+        return false;
+      }
+      return true;
+    })
+  );
+};
+
+interface StartEmployeeShiftOptions {
+  timestamp?: Date;
+}
+
+export const startEmployeeShift = async (
+  empleadoId: string,
+  options: StartEmployeeShiftOptions = {}
+): Promise<EmployeeShift> => {
+  const timestamp = options.timestamp ? new Date(options.timestamp.getTime()) : new Date();
+  const fechaDate = new Date(timestamp.getTime());
+  fechaDate.setHours(0, 0, 0, 0);
+  const fecha = formatDateInputValue(fechaDate);
+  const horaLlegada = formatTimeForSupabase(timestamp);
+
+  let createdShift: EmployeeShift | null = null;
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const { data, error } = await supabase
+        .from('employee_shifts')
+        .insert([
+          {
+            empleado_id: empleadoId,
+            fecha,
+            hora_llegada: horaLlegada,
+          },
+        ])
+        .select('*')
+        .single();
+      if (error) throw error;
+      createdShift = normalizeEmployeeShiftRecord(data);
+    } catch (error) {
+      console.warn('Supabase no disponible al crear turno, usando caché local:', error);
+    }
+  }
+
+  if (!createdShift) {
+    const nowIso = new Date().toISOString();
+    createdShift = {
+      id: generateShiftId(),
+      empleadoId,
+      fecha,
+      horaLlegada,
+      horaSalida: null,
+      novedad: false,
+      novedadInicio: null,
+      novedadFin: null,
+      horasTrabajadas: 0,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+  }
+
+  upsertLocalEmployeeShifts(createdShift);
+  return createdShift;
+};
+
+interface CompleteEmployeeShiftOptions {
+  timestamp?: Date;
+}
+
+const updateShiftWithPatch = async (
+  shiftId: string,
+  patch: Partial<EmployeeShift>,
+  fallbackMessage: string
+): Promise<EmployeeShift | null> => {
+  let updated: EmployeeShift | null = null;
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const payload = mapShiftPatchToSupabase(patch);
+      const { data, error } = await supabase
+        .from('employee_shifts')
+        .update(payload)
+        .eq('id', shiftId)
+        .select('*')
+        .single();
+      if (error) throw error;
+      updated = normalizeEmployeeShiftRecord(data);
+    } catch (error) {
+      console.warn(fallbackMessage, error);
+    }
+  }
+
+  if (!updated) {
+    updated = applyLocalEmployeeShiftPatch(shiftId, patch);
+  }
+
+  if (updated) {
+    upsertLocalEmployeeShifts(updated);
+  }
+
+  return updated;
+};
+
+export const completeEmployeeShift = async (
+  shiftId: string,
+  options: CompleteEmployeeShiftOptions = {}
+): Promise<EmployeeShift | null> => {
+  const timestamp = options.timestamp ? new Date(options.timestamp.getTime()) : new Date();
+  const patch: Partial<EmployeeShift> = {
+    horaSalida: formatTimeForSupabase(timestamp),
+  };
+
+  return updateShiftWithPatch(shiftId, patch, 'Supabase no disponible al cerrar turno, usando caché local:');
+};
+
+interface ShiftNoveltyOptions {
+  timestamp?: Date;
+}
+
+export const startEmployeeShiftNovelty = async (
+  shiftId: string,
+  options: ShiftNoveltyOptions = {}
+): Promise<EmployeeShift | null> => {
+  const timestamp = options.timestamp ? new Date(options.timestamp.getTime()) : new Date();
+  const patch: Partial<EmployeeShift> = {
+    novedad: true,
+    novedadInicio: formatTimeForSupabase(timestamp),
+    novedadFin: null,
+  };
+
+  return updateShiftWithPatch(shiftId, patch, 'Supabase no disponible al iniciar novedad, usando caché local:');
+};
+
+export const finishEmployeeShiftNovelty = async (
+  shiftId: string,
+  options: ShiftNoveltyOptions = {}
+): Promise<EmployeeShift | null> => {
+  const timestamp = options.timestamp ? new Date(options.timestamp.getTime()) : new Date();
+  const patch: Partial<EmployeeShift> = {
+    novedad: true,
+    novedadFin: formatTimeForSupabase(timestamp),
+  };
+
+  return updateShiftWithPatch(shiftId, patch, 'Supabase no disponible al finalizar novedad, usando caché local:');
+};
+
+export const clearEmployeeShiftNovelty = async (
+  shiftId: string
+): Promise<EmployeeShift | null> => {
+  const patch: Partial<EmployeeShift> = {
+    novedad: false,
+    novedadInicio: null,
+    novedadFin: null,
+  };
+
+  return updateShiftWithPatch(shiftId, patch, 'Supabase no disponible al limpiar novedad, usando caché local:');
+};
+
+interface EmployeeShiftsSubscriptionOptions {
+  onChange?: () => void;
+  empleadoId?: string;
+  debounceMs?: number;
+}
+
+export const subscribeToEmployeeShifts = async (
+  options: EmployeeShiftsSubscriptionOptions = {}
+): Promise<() => void> => {
+  if (!(await ensureSupabaseReady())) {
+    return () => {};
+  }
+
+  const { onChange, empleadoId, debounceMs = 250 } = options;
+
+  if (!onChange) {
+    return () => {};
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  const scheduleRefresh = () => {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    timeout = setTimeout(() => {
+      onChange();
+    }, debounceMs);
+  };
+
+  const changeConfig: {
+    event: '*';
+    schema: 'public';
+    table: 'employee_shifts';
+    filter?: string;
+  } = {
+    event: '*',
+    schema: 'public',
+    table: 'employee_shifts',
+  };
+
+  if (empleadoId) {
+    changeConfig.filter = `empleado_id=eq.${empleadoId}`;
+  }
+
+  const channel = supabase
+    .channel(`employee-shifts-${empleadoId ?? 'all'}`)
+    .on('postgres_changes', changeConfig, scheduleRefresh);
+
+  let realtimeChannel: RealtimeChannel | undefined;
+
+  try {
+    realtimeChannel = await channel.subscribe();
+  } catch (error) {
+    console.warn('No se pudo suscribir a cambios de turnos en Supabase:', error);
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    return () => {};
+  }
+
+  return () => {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    realtimeChannel?.unsubscribe();
+  };
+};
+
 // GASTOS
 export const fetchGastos = async (): Promise<Gasto[]> => {
   if (await ensureSupabaseReady()) {
@@ -2849,6 +3476,15 @@ export const dataService = {
   fetchEmployeeWeeklyHoursForWeek,
   fetchEmployeeWeeklyHoursHistory,
   saveEmployeeWeeklyHours,
+  fetchEmployeeShiftsBetween,
+  fetchEmployeeShiftsForDate,
+  fetchActiveEmployeeShifts,
+  startEmployeeShift,
+  completeEmployeeShift,
+  startEmployeeShiftNovelty,
+  finishEmployeeShiftNovelty,
+  clearEmployeeShiftNovelty,
+  subscribeToEmployeeShifts,
   fetchEmployeeCredits,
   fetchGastos,
   createGasto,

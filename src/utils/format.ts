@@ -47,6 +47,30 @@ export const formatDateInputValue = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
+const TIME_FORMATTER = new Intl.DateTimeFormat('es-CO', { hour: '2-digit', minute: '2-digit' });
+
+export const formatSqlTime = (value?: string | null): string => {
+  if (!value) {
+    return '—';
+  }
+
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) {
+    return value;
+  }
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+    return value;
+  }
+
+  const date = new Date();
+  date.setHours(hours, minutes, 0, 0);
+  return TIME_FORMATTER.format(date);
+};
+
 const DATE_INPUT_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export const parseDateInputValue = (

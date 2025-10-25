@@ -72,6 +72,32 @@ CREATE TYPE "public"."unidad_medida_type" AS ENUM (
 ALTER TYPE "public"."unidad_medida_type" OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."actualizar_horas_semanales"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+DECLARE
+  semana text;
+  horas_semana jsonb;
+BEGIN
+  -- clave de la semana en formato ISO (año‑semana)
+  semana := to_char(NEW.fecha, 'IYYY-IW');
+
+  -- crea o actualiza el registro de esa semana
+  INSERT INTO employee_weekly_hours (empleado_id, week_key, horas)
+  VALUES (NEW.empleado_id, semana, jsonb_build_object(to_char(NEW.fecha, 'YYYY-MM-DD'), NEW.horas_trabajadas))
+  ON CONFLICT (empleado_id, week_key) DO
+    UPDATE SET horas = employee_weekly_hours.horas ||
+                      jsonb_build_object(to_char(NEW.fecha, 'YYYY-MM-DD'), NEW.horas_trabajadas),
+           updated_at = NOW();
+
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."actualizar_horas_semanales"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."calc_total_pago"() RETURNS "trigger"
     LANGUAGE "plpgsql"
     AS $$
@@ -370,6 +396,24 @@ CREATE OR REPLACE VIEW "public"."employee_credit_totals" AS
 ALTER VIEW "public"."employee_credit_totals" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."employee_shifts" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "empleado_id" "uuid" NOT NULL,
+    "fecha" "date" NOT NULL,
+    "hora_llegada" time without time zone NOT NULL,
+    "hora_salida" time without time zone NOT NULL,
+    "novedad" boolean DEFAULT false NOT NULL,
+    "novedad_inicio" time without time zone,
+    "novedad_fin" time without time zone,
+    "horas_trabajadas" numeric GENERATED ALWAYS AS (((EXTRACT(epoch FROM ("hora_salida" - "hora_llegada")) / (3600)::numeric) - COALESCE((EXTRACT(epoch FROM ("novedad_fin" - "novedad_inicio")) / (3600)::numeric), (0)::numeric))) STORED,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."employee_shifts" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."employee_weekly_hours" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "empleado_id" "uuid" NOT NULL,
@@ -485,6 +529,11 @@ ALTER TABLE ONLY "public"."employee_credit_history"
 
 
 
+ALTER TABLE ONLY "public"."employee_shifts"
+    ADD CONSTRAINT "employee_shifts_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."employee_weekly_hours"
     ADD CONSTRAINT "employee_weekly_hours_pkey" PRIMARY KEY ("id");
 
@@ -532,6 +581,10 @@ ALTER TABLE ONLY "public"."users"
 
 ALTER TABLE ONLY "public"."users"
     ADD CONSTRAINT "users_username_key" UNIQUE ("username");
+
+
+
+CREATE OR REPLACE TRIGGER "trg_actualizar_horas_semanales" AFTER INSERT OR UPDATE ON "public"."employee_shifts" FOR EACH ROW EXECUTE FUNCTION "public"."actualizar_horas_semanales"();
 
 
 
@@ -592,6 +645,11 @@ ALTER TABLE ONLY "public"."employee_credit_history"
 
 ALTER TABLE ONLY "public"."employee_credit_history"
     ADD CONSTRAINT "employee_credit_history_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id");
+
+
+
+ALTER TABLE ONLY "public"."employee_shifts"
+    ADD CONSTRAINT "employee_shifts_empleado_id_fkey" FOREIGN KEY ("empleado_id") REFERENCES "public"."empleados"("id") ON DELETE CASCADE;
 
 
 
@@ -690,6 +748,12 @@ GRANT USAGE ON SCHEMA "public" TO "service_role";
 
 
 
+GRANT ALL ON FUNCTION "public"."actualizar_horas_semanales"() TO "anon";
+GRANT ALL ON FUNCTION "public"."actualizar_horas_semanales"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."actualizar_horas_semanales"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."calc_total_pago"() TO "anon";
 GRANT ALL ON FUNCTION "public"."calc_total_pago"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."calc_total_pago"() TO "service_role";
@@ -777,6 +841,12 @@ GRANT ALL ON TABLE "public"."employee_credit_history" TO "service_role";
 GRANT ALL ON TABLE "public"."employee_credit_totals" TO "anon";
 GRANT ALL ON TABLE "public"."employee_credit_totals" TO "authenticated";
 GRANT ALL ON TABLE "public"."employee_credit_totals" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."employee_shifts" TO "anon";
+GRANT ALL ON TABLE "public"."employee_shifts" TO "authenticated";
+GRANT ALL ON TABLE "public"."employee_shifts" TO "service_role";
 
 
 
