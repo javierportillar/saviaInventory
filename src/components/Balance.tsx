@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Gasto, Order, PaymentMethod, ProvisionTransfer } from '../types';
 import dataService from '../lib/dataService';
 import { COLORS } from '../data/menu';
-import { formatCOP } from '../utils/format';
+import { formatCOP, formatDateInputValue } from '../utils/format';
 import { Wallet, TrendingUp, TrendingDown, CalendarDays, PiggyBank } from 'lucide-react';
 import { formatPaymentSummary, getOrderAllocations, getOrderPaymentDate, isOrderPaid, PAYMENT_METHOD_LABELS } from '../utils/payments';
+import { computePeriodMetrics, FinancialChartPoint } from '../utils/analytics';
+import { Analitica } from './Analitica';
 
 type MethodSummary = {
   id: PaymentMethod;
@@ -134,38 +136,27 @@ const parseDateInput = (value?: string) => {
   return new Date(year, month - 1, day);
 };
 
-const filterAndSortByDateRange = <T,>(
-  items: T[],
-  startDate: string,
-  endDate: string,
-  getDate: (item: T) => Date,
-) => {
-  const sorted = [...items].sort((a, b) => getDate(b).getTime() - getDate(a).getTime());
-
-  const parsedStart = parseDateInput(startDate);
-  const parsedEnd = parseDateInput(endDate);
-
-  if (!parsedStart && !parsedEnd) {
-    return sorted;
-  }
-
-  const startBoundary = parsedStart ? normalizeDate(parsedStart).getTime() : null;
-  const endBoundary = parsedEnd ? endOfDay(parsedEnd).getTime() : null;
-
-  return sorted.filter((item) => {
-    const itemTime = getDate(item).getTime();
-
-    if (startBoundary !== null && itemTime < startBoundary) {
-      return false;
-    }
-
-    if (endBoundary !== null && itemTime > endBoundary) {
-      return false;
-    }
-
-    return true;
-  });
+const formatMonthInput = (value: Date) => {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, '0');
+  return `${year}-${month}`;
 };
+
+const getMonthBounds = (value: string) => {
+  const [year, month] = value.split('-').map(Number);
+  const now = new Date();
+  const safeYear = Number.isFinite(year) && year > 1900 ? year : now.getFullYear();
+  const safeMonthIndex = Number.isFinite(month) && month >= 1 && month <= 12 ? month - 1 : now.getMonth();
+
+  const start = new Date(safeYear, safeMonthIndex, 1);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(safeYear, safeMonthIndex + 1, 0);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+};
+
+const formatMonthLabel = (value: Date) =>
+  value.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
 
 export function Balance() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -176,8 +167,7 @@ export function Balance() {
     now.setHours(0, 0, 0, 0);
     return now;
   }, []);
-  const [startDate, setStartDate] = useState(() => formatDateInput(today));
-  const [endDate, setEndDate] = useState(() => formatDateInput(today));
+  const [selectedMonth, setSelectedMonth] = useState(() => formatMonthInput(today));
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -213,30 +203,59 @@ export function Balance() {
     };
   }, []);
 
-  const filteredOrders = useMemo(
-    () => filterAndSortByDateRange(orders, startDate, endDate, (order) => getOrderPaymentDate(order)),
-    [orders, startDate, endDate],
-  );
-  const filteredGastos = useMemo(
-    () => filterAndSortByDateRange(gastos, startDate, endDate, (gasto) => gasto.fecha),
-    [gastos, startDate, endDate],
-  );
-  const filteredTransfers = useMemo(
-    () => filterAndSortByDateRange(transfers, startDate, endDate, (transfer) => transfer.fecha),
-    [transfers, startDate, endDate],
-  );
+  const monthBounds = useMemo(() => getMonthBounds(selectedMonth), [selectedMonth]);
+
+  const monthOrders = useMemo(() => {
+    const { start, end } = monthBounds;
+    return orders
+      .filter((order) => {
+        if (!isOrderPaid(order)) {
+          return false;
+        }
+        const paymentDate = getOrderPaymentDate(order);
+        return paymentDate.getTime() >= start.getTime() && paymentDate.getTime() <= end.getTime();
+      })
+      .sort((a, b) => getOrderPaymentDate(b).getTime() - getOrderPaymentDate(a).getTime());
+  }, [orders, monthBounds]);
+
+  const monthGastos = useMemo(() => {
+    const { start, end } = monthBounds;
+    return gastos
+      .filter((gasto) => {
+        const expenseDate = gasto.fecha instanceof Date ? gasto.fecha : new Date(gasto.fecha);
+        return expenseDate.getTime() >= start.getTime() && expenseDate.getTime() <= end.getTime();
+      })
+      .sort((a, b) => {
+        const aDate = a.fecha instanceof Date ? a.fecha : new Date(a.fecha);
+        const bDate = b.fecha instanceof Date ? b.fecha : new Date(b.fecha);
+        return bDate.getTime() - aDate.getTime();
+      });
+  }, [gastos, monthBounds]);
+
+  const monthTransfers = useMemo(() => {
+    const { start, end } = monthBounds;
+    return transfers
+      .filter((transfer) => {
+        const transferDate = transfer.fecha instanceof Date ? transfer.fecha : new Date(transfer.fecha);
+        return transferDate.getTime() >= start.getTime() && transferDate.getTime() <= end.getTime();
+      })
+      .sort((a, b) => {
+        const aDate = a.fecha instanceof Date ? a.fecha : new Date(a.fecha);
+        const bDate = b.fecha instanceof Date ? b.fecha : new Date(b.fecha);
+        return bDate.getTime() - aDate.getTime();
+      });
+  }, [transfers, monthBounds]);
 
   const totals = useMemo(() => {
-    const paidOrders = filteredOrders.filter(isOrderPaid);
-    const ventas = paidOrders.reduce((acc, order) => acc + order.total, 0);
-    const gastosTotal = filteredGastos.reduce((acc, gasto) => acc + gasto.monto, 0);
+    const ventas = monthOrders.reduce((acc, order) => acc + order.total, 0);
+    const gastosTotal = monthGastos.reduce((acc, gasto) => acc + gasto.monto, 0);
 
     return {
       ventas,
       gastos: gastosTotal,
       balance: ventas - gastosTotal,
     };
-  }, [filteredOrders, filteredGastos]);
+  }, [monthGastos, monthOrders]);
 
   const overallTotals = useMemo(() => {
     const paidOrders = orders.filter(isOrderPaid);
@@ -251,14 +270,16 @@ export function Balance() {
   }, [orders, gastos]);
 
   const hasAnyData = orders.length > 0 || gastos.length > 0;
-  const hasFilteredData = filteredOrders.length > 0 || filteredGastos.length > 0;
+  const hasMonthlyData = monthOrders.length > 0 || monthGastos.length > 0;
 
   const lastMovementDate = useMemo(() => {
-    const latestOrder = filteredOrders[0]?.timestamp;
-    const latestExpense = filteredGastos[0]?.fecha;
+    const latestOrder = monthOrders[0] ? getOrderPaymentDate(monthOrders[0]) : null;
+    const latestExpense = monthGastos[0]
+      ? (monthGastos[0].fecha instanceof Date ? monthGastos[0].fecha : new Date(monthGastos[0].fecha))
+      : null;
 
     if (latestOrder && latestExpense) {
-      return new Date(Math.max(latestOrder.getTime(), latestExpense.getTime()));
+      return latestOrder.getTime() >= latestExpense.getTime() ? latestOrder : latestExpense;
     }
     if (latestOrder) {
       return latestOrder;
@@ -267,7 +288,7 @@ export function Balance() {
       return latestExpense;
     }
     return null;
-  }, [filteredOrders, filteredGastos]);
+  }, [monthGastos, monthOrders]);
 
   const dateFormatter = useMemo(
     () =>
@@ -277,38 +298,24 @@ export function Balance() {
     [],
   );
 
-  const selectedRangeLabel = useMemo(() => {
-    const start = parseDateInput(startDate);
-    const end = parseDateInput(endDate);
+  const selectedMonthLabel = useMemo(
+    () => formatMonthLabel(monthBounds.start),
+    [monthBounds.start],
+  );
 
-    if (start && end) {
-      return `${dateFormatter.format(start)} - ${dateFormatter.format(end)}`;
-    }
-
-    if (start) {
-      return `Desde ${dateFormatter.format(start)}`;
-    }
-
-    if (end) {
-      return `Hasta ${dateFormatter.format(end)}`;
-    }
-
-    return 'Todo el histórico';
-  }, [dateFormatter, startDate, endDate]);
-
-  const periodSummaryLabel = hasFilteredData
-    ? `Movimientos en el período (${selectedRangeLabel}): ${filteredOrders.length + filteredGastos.length}`
-    : `No hay movimientos en el período seleccionado (${selectedRangeLabel}).`;
+  const periodSummaryLabel = hasMonthlyData
+    ? `Movimientos en ${selectedMonthLabel}: ${monthOrders.length + monthGastos.length}`
+    : `No hay movimientos registrados en ${selectedMonthLabel}.`;
 
   const closingLabel = lastMovementDate
     ? `Último movimiento: ${formatDateTime(lastMovementDate)}`
     : hasAnyData
-      ? `No hay movimientos en el rango (${selectedRangeLabel}).`
+      ? `No hay movimientos en ${selectedMonthLabel}.`
       : 'Sin registros disponibles.';
 
-  const rangeMethodTotals = useMemo(
-    () => computeMethodTotals(filteredOrders, filteredGastos, filteredTransfers),
-    [filteredGastos, filteredOrders, filteredTransfers],
+  const monthlyMethodTotals = useMemo(
+    () => computeMethodTotals(monthOrders, monthGastos, monthTransfers),
+    [monthGastos, monthOrders, monthTransfers],
   );
   const overallMethodTotals = useMemo(
     () => computeMethodTotals(orders, gastos, transfers),
@@ -316,10 +323,10 @@ export function Balance() {
   );
 
   const totalProvisionDepositsRange = useMemo(
-    () => filteredTransfers
+    () => monthTransfers
       .filter((transfer) => transfer.bolsilloDestino === 'provision_caja')
       .reduce((sum, transfer) => sum + transfer.monto, 0),
-    [filteredTransfers],
+    [monthTransfers],
   );
 
   const totalProvisionDepositsOverall = useMemo(
@@ -330,10 +337,10 @@ export function Balance() {
   );
 
   const totalProvisionWithdrawalsRange = useMemo(
-    () => filteredTransfers
+    () => monthTransfers
       .filter((transfer) => transfer.bolsilloOrigen === 'provision_caja')
       .reduce((sum, transfer) => sum + transfer.monto, 0),
-    [filteredTransfers],
+    [monthTransfers],
   );
 
   const totalProvisionWithdrawalsOverall = useMemo(
@@ -353,14 +360,142 @@ export function Balance() {
       methodOrder.map((method) => ({
         id: method,
         label: methodLabels[method],
-        ventas: rangeMethodTotals[method].ingresos,
-        gastos: rangeMethodTotals[method].egresos,
-        balance: rangeMethodTotals[method].ingresos - rangeMethodTotals[method].egresos,
+        ventas: monthlyMethodTotals[method].ingresos,
+        gastos: monthlyMethodTotals[method].egresos,
+        balance: monthlyMethodTotals[method].ingresos - monthlyMethodTotals[method].egresos,
         balanceHistorico:
           overallMethodTotals[method].ingresos - overallMethodTotals[method].egresos,
       })),
-    [overallMethodTotals, rangeMethodTotals],
+    [monthlyMethodTotals, overallMethodTotals],
   );
+
+  const dailyEntries = useMemo(() => {
+    const { start, end } = monthBounds;
+    const startDay = new Date(start.getFullYear(), start.getMonth(), 1);
+    startDay.setHours(0, 0, 0, 0);
+    const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    endDay.setHours(0, 0, 0, 0);
+    const daysInMonth = endDay.getDate();
+
+    const salesByDate = new Map<string, number>();
+    monthOrders.forEach((order) => {
+      const paymentDate = getOrderPaymentDate(order);
+      const key = formatDateInputValue(paymentDate);
+      salesByDate.set(key, (salesByDate.get(key) ?? 0) + order.total);
+    });
+
+    const expensesByDate = new Map<string, number>();
+    monthGastos.forEach((gasto) => {
+      const expenseDate = gasto.fecha instanceof Date ? gasto.fecha : new Date(gasto.fecha);
+      const key = formatDateInputValue(expenseDate);
+      expensesByDate.set(key, (expensesByDate.get(key) ?? 0) + gasto.monto);
+    });
+
+    const entries: Array<{
+      date: Date;
+      label: string;
+      sales: number;
+      expenses: number;
+      balance: number;
+      cumulative: number;
+    }> = [];
+
+    let cumulative = 0;
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const date = new Date(startDay.getFullYear(), startDay.getMonth(), day);
+      date.setHours(0, 0, 0, 0);
+      const key = formatDateInputValue(date);
+      const sales = salesByDate.get(key) ?? 0;
+      const expenses = expensesByDate.get(key) ?? 0;
+      const balance = sales - expenses;
+      cumulative += balance;
+
+      entries.push({
+        date,
+        label: date.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }),
+        sales,
+        expenses,
+        balance,
+        cumulative,
+      });
+    }
+
+    return entries;
+  }, [monthBounds, monthGastos, monthOrders]);
+
+  const financialPoints = useMemo<FinancialChartPoint[]>(
+    () =>
+      dailyEntries.map((entry) => ({
+        date: entry.date,
+        label: entry.label,
+        sales: entry.sales,
+        expenses: entry.expenses,
+        balance: entry.balance,
+        historicalBalance: entry.cumulative,
+      })),
+    [dailyEntries],
+  );
+
+  const pastPoints = useMemo(
+    () => financialPoints.filter((point) => point.date.getTime() <= today.getTime()),
+    [financialPoints, today],
+  );
+
+  const pastMetrics = useMemo(
+    () => computePeriodMetrics(pastPoints),
+    [pastPoints],
+  );
+
+  const dailyRows = useMemo(
+    () => {
+      const avgSales = pastMetrics.avgSales ?? 0;
+      const effectiveEstimate = avgSales > 0 ? avgSales : 0;
+      const lastActualBalance = pastPoints.length > 0
+        ? pastPoints[pastPoints.length - 1].historicalBalance
+        : 0;
+      let projectedAdditional = 0;
+
+      return dailyEntries.map((entry) => {
+        const isFuture = entry.date.getTime() > today.getTime();
+        let estimatedSales: number | undefined;
+        let projectedBalance = entry.cumulative;
+
+        if (isFuture && effectiveEstimate > 0) {
+          estimatedSales = Math.round(effectiveEstimate);
+        }
+
+        if (isFuture) {
+          projectedAdditional += (estimatedSales ?? 0) - entry.expenses;
+          projectedBalance = lastActualBalance + projectedAdditional;
+        } else {
+          projectedAdditional = 0;
+        }
+
+        return {
+          ...entry,
+          estimatedSales,
+          projectedBalance,
+          isFuture,
+        };
+      });
+    },
+    [dailyEntries, pastMetrics.avgSales, pastPoints, today],
+  );
+
+  const projectedSalesTotal = useMemo(() => {
+    const estimatedAdditional = dailyRows
+      .filter((row) => row.isFuture)
+      .reduce((sum, row) => sum + (row.estimatedSales ?? 0), 0);
+    return totals.ventas + estimatedAdditional;
+  }, [dailyRows, totals.ventas]);
+
+  const projectedFinalBalance = useMemo(() => {
+    if (dailyRows.length === 0) {
+      return totals.balance;
+    }
+    const lastRow = dailyRows[dailyRows.length - 1];
+    return lastRow.isFuture ? lastRow.projectedBalance : lastRow.cumulative;
+  }, [dailyRows, totals.balance]);
 
   return (
     <section className="space-y-4 sm:space-y-6">
@@ -376,54 +511,23 @@ export function Balance() {
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
           <div className="flex items-center gap-3">
             <CalendarDays className="text-gray-500" size={18} />
-            <span className="text-sm text-gray-600">Filtrar por fecha</span>
+            <span className="text-sm text-gray-600">Selecciona el mes</span>
           </div>
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
-            <label className="flex flex-col text-xs text-gray-500 uppercase tracking-wide">
-              Desde
-              <input
-                type="date"
-                value={startDate}
-                max={endDate}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setStartDate(value);
-                  if (value && endDate && value > endDate) {
-                    setEndDate(value);
-                  }
-                }}
-                className="mt-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
-                style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
-              />
-            </label>
-            <label className="flex flex-col text-xs text-gray-500 uppercase tracking-wide">
-              Hasta
-              <input
-                type="date"
-                value={endDate}
-                min={startDate}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setEndDate(value);
-                  if (value && startDate && value < startDate) {
-                    setStartDate(value);
-                  }
-                }}
-                className="mt-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
-                style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
-              />
-            </label>
+            <input
+              type="month"
+              value={selectedMonth}
+              onChange={(event) => setSelectedMonth(event.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
+              style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+            />
             <button
               type="button"
-              onClick={() => {
-                const todayFormatted = formatDateInput(today);
-                setStartDate(todayFormatted);
-                setEndDate(todayFormatted);
-              }}
+              onClick={() => setSelectedMonth(formatMonthInput(today))}
               className="px-3 py-2 text-sm font-medium text-white rounded-lg"
               style={{ backgroundColor: COLORS.accent }}
             >
-              Hoy
+              Mes actual
             </button>
           </div>
         </div>
@@ -473,14 +577,29 @@ export function Balance() {
             </div>
             <div className="ui-card p-3 sm:p-4 lg:p-5 col-span-2 lg:col-span-1">
               <div className="flex items-center justify-between mb-1">
-                <p className="text-xs lg:text-sm font-medium text-gray-600">Histórico</p>
+                <p className="text-xs lg:text-sm font-medium text-gray-600">Proyección y resumen</p>
                 <PiggyBank className="text-indigo-600" size={20} />
               </div>
               <p className="text-xs text-gray-500 mb-1 hidden sm:block">{periodSummaryLabel}</p>
-              <p className="text-xs text-gray-500 mb-1 hidden sm:block">{closingLabel}</p>
-              <p className="text-sm sm:text-lg lg:text-2xl font-bold" style={{ color: COLORS.dark }}>
-                {formatCOP(overallTotals.balance)}
-              </p>
+              <p className="text-xs text-gray-500 mb-2 hidden sm:block">{closingLabel}</p>
+              <div className="space-y-1 text-xs text-gray-600">
+                <p>
+                  Ventas proyectadas:{' '}
+                  <span className="font-semibold text-green-600">{formatCOP(projectedSalesTotal)}</span>
+                </p>
+                <p>
+                  Balance proyectado:{' '}
+                  <span className={`font-semibold ${valueColor(projectedFinalBalance)}`}>
+                    {formatCOP(projectedFinalBalance)}
+                  </span>
+                </p>
+                <p>
+                  Balance histórico:{' '}
+                  <span className="font-semibold" style={{ color: COLORS.dark }}>
+                    {formatCOP(overallTotals.balance)}
+                  </span>
+                </p>
+              </div>
             </div>
           </div>
 
@@ -508,6 +627,76 @@ export function Balance() {
               ))}
             </div>
           )}
+
+          <div className="ui-card">
+            <div className="px-4 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
+                Detalle diario de {selectedMonthLabel}
+              </h3>
+              <p className="text-xs text-gray-500">
+                Las filas posteriores a hoy incluyen una estimación de ventas basada en el promedio del mes.
+              </p>
+            </div>
+            <div className="ui-card-pad ui-table-wrapper">
+              <table className="ui-table">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Fecha
+                    </th>
+                    <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Ventas
+                    </th>
+                    <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Estimado
+                    </th>
+                    <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Gastos
+                    </th>
+                    <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Balance del día
+                    </th>
+                    <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Balance acumulado
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {dailyRows.map((row) => {
+                    const dayKey = formatDateInputValue(row.date);
+                    const estimated = row.estimatedSales;
+                    const projectedBalance = row.isFuture ? row.projectedBalance : row.cumulative;
+                    const dayBalance = row.isFuture
+                      ? (estimated ?? 0) - row.expenses
+                      : row.balance;
+
+                    return (
+                      <tr key={dayKey} className={row.isFuture ? 'bg-gray-50/70' : undefined}>
+                        <td className="px-3 lg:px-6 py-3 whitespace-nowrap text-xs text-gray-900">
+                          {row.label}
+                        </td>
+                        <td className="px-3 lg:px-6 py-3 text-xs text-gray-700">
+                          {formatCOP(row.sales)}
+                        </td>
+                        <td className="px-3 lg:px-6 py-3 text-xs text-gray-600">
+                          {estimated !== undefined ? formatCOP(estimated) : '—'}
+                        </td>
+                        <td className="px-3 lg:px-6 py-3 text-xs text-gray-700">
+                          {formatCOP(row.expenses)}
+                        </td>
+                        <td className={`px-3 lg:px-6 py-3 text-xs font-semibold ${valueColor(dayBalance)}`}>
+                          {formatCOP(dayBalance)}
+                        </td>
+                        <td className={`px-3 lg:px-6 py-3 text-xs font-semibold ${valueColor(projectedBalance)}`}>
+                          {formatCOP(projectedBalance)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
           <div className="ui-card ui-card-pad space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -573,17 +762,17 @@ export function Balance() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredTransfers.length === 0 && (
+                  {monthTransfers.length === 0 && (
                     <tr>
                       <td
                         colSpan={5}
                         className="px-3 lg:px-6 py-6 text-center text-xs lg:text-sm text-gray-500"
                       >
-                        No hay movimientos de provisión en el rango seleccionado.
+                        No hay movimientos de provisión en {selectedMonthLabel}.
                       </td>
                     </tr>
                   )}
-                  {filteredTransfers.map((transfer) => (
+                  {monthTransfers.map((transfer) => (
                     <tr key={transfer.id} className="hover:bg-gray-50">
                       <td className="px-3 lg:px-6 py-3 whitespace-nowrap text-xs text-gray-900">
                         {dateFormatter.format(transfer.fecha)}
@@ -654,17 +843,17 @@ export function Balance() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredOrders.length === 0 && (
+                    {monthOrders.length === 0 && (
                       <tr>
                         <td
                           colSpan={5}
                           className="px-3 lg:px-6 py-8 text-center text-xs lg:text-sm text-gray-500"
                         >
-                          No hay ventas registradas en el rango seleccionado.
+                          No hay ventas registradas en {selectedMonthLabel}.
                         </td>
                       </tr>
                     )}
-                    {filteredOrders.map((order) => {
+                    {monthOrders.map((order) => {
                       const allocations = getOrderAllocations(order);
                       const paymentSummary = formatPaymentSummary(allocations, formatCOP);
                       const paid = isOrderPaid(order);
@@ -730,40 +919,46 @@ export function Balance() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredGastos.length === 0 && (
+                    {monthGastos.length === 0 && (
                       <tr>
                         <td
                           colSpan={5}
                           className="px-3 lg:px-6 py-8 text-center text-xs lg:text-sm text-gray-500"
                         >
-                          No hay gastos registrados en el rango seleccionado.
+                          No hay gastos registrados en {selectedMonthLabel}.
                         </td>
                       </tr>
                     )}
-                    {filteredGastos.map((gasto) => (
-                      <tr key={gasto.id} className="hover:bg-gray-50">
-                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-900">
-                          {formatDateTime(gasto.fecha)}
-                        </td>
-                        <td className="px-3 lg:px-6 py-4 text-xs text-gray-600">
-                          {gasto.descripcion || '—'}
-                        </td>
-                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-600 hidden sm:table-cell">
-                          {gasto.categoria || '—'}
-                        </td>
-                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-600 hidden lg:table-cell">
-                          {methodLabels[gasto.metodoPago ?? 'efectivo']}
-                        </td>
-                        <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs font-semibold text-red-600">
-                          {formatCOP(gasto.monto)}
-                        </td>
-                      </tr>
-                    ))}
+                    {monthGastos.map((gasto) => {
+                      const expenseDate = gasto.fecha instanceof Date ? gasto.fecha : new Date(gasto.fecha);
+
+                      return (
+                        <tr key={gasto.id} className="hover:bg-gray-50">
+                          <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-900">
+                            {formatDateTime(expenseDate)}
+                          </td>
+                          <td className="px-3 lg:px-6 py-4 text-xs text-gray-600">
+                            {gasto.descripcion || '—'}
+                          </td>
+                          <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-600 hidden sm:table-cell">
+                            {gasto.categoria || '—'}
+                          </td>
+                          <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs text-gray-600 hidden lg:table-cell">
+                            {methodLabels[gasto.metodoPago ?? 'efectivo']}
+                          </td>
+                          <td className="px-3 lg:px-6 py-4 whitespace-nowrap text-xs font-semibold text-red-600">
+                            {formatCOP(gasto.monto)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
           </div>
+
+          <Analitica orders={orders} isLoadingOrders={loading} />
         </>
       )}
     </section>

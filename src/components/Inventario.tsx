@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { MenuItem } from '../types';
-import { Package, AlertTriangle, Plus, Minus, Search, Edit3, Trash, Filter } from 'lucide-react';
+import { Package, AlertTriangle, Plus, Minus, Search, Edit3, Trash, Filter, Loader2 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
 import { generateMenuItemCode, normalizeText } from '../utils/strings';
@@ -10,9 +10,10 @@ interface InventarioProps {
   onUpdateMenuItem: (item: MenuItem) => void;
   onCreateMenuItem: (item: MenuItem) => void;
   onDeleteMenuItem: (id: string) => void;
+  isLoading: boolean;
 }
 
-export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDeleteMenuItem }: InventarioProps) {
+export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDeleteMenuItem, isLoading }: InventarioProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [inventoryFilter, setInventoryFilter] = useState<'all' | 'inventariables' | 'no-inventariables'>('all');
@@ -27,6 +28,17 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
     stock: number | null;
     descripcion?: string;
   } | null>(null);
+
+  if (isLoading) {
+    return (
+      <section className="space-y-6 sm:space-y-8">
+        <div className="ui-card ui-card-pad flex items-center gap-3 text-gray-600 text-sm">
+          <Loader2 size={18} className="animate-spin text-gray-500" />
+          <span>Cargando inventario...</span>
+        </div>
+      </section>
+    );
+  }
 
   const inventariableCategories = useMemo(
     () =>

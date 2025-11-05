@@ -25,9 +25,11 @@ import {
   DatabaseConnectionState,
   PaymentMethod,
   FocusDateRequest,
+  InventoryAdjustment,
 } from './types';
 import { initializeLocalData } from './data/localData';
 import dataService from './lib/dataService';
+import { normalizeQuantityForItem } from './utils/inventory';
 
 const SESSION_STORAGE_KEY = 'savia-user-session';
 const SESSION_DURATION_MS = 13 * 60 * 60 * 1000; // 13 horas
@@ -46,6 +48,7 @@ function App() {
   const [user, setUser] = useState<User | null>(null);
   const [module, setModule] = useState<ModuleType>('dashboard');
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [isLoadingMenuItems, setIsLoadingMenuItems] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<DatabaseConnectionState>('checking');
@@ -85,15 +88,27 @@ function App() {
 
   useEffect(() => {
     if (!user) {
+      setIsLoadingMenuItems(false);
       return;
     }
 
     let isActive = true;
 
     const fetchMenuItems = async () => {
-      const data = await dataService.fetchMenuItems();
-      if (isActive) {
-        setMenuItems(data);
+      try {
+        if (isActive) {
+          setIsLoadingMenuItems(true);
+        }
+        const data = await dataService.fetchMenuItems();
+        if (isActive) {
+          setMenuItems(data);
+        }
+      } catch (error) {
+        console.error('[App] Error obteniendo items de menú.', error);
+      } finally {
+        if (isActive) {
+          setIsLoadingMenuItems(false);
+        }
       }
     };
 
@@ -300,6 +315,52 @@ function App() {
     setModule('gastos');
   };
 
+  const handleInventoryItemsUpdated = (updatedItems: MenuItem[]) => {
+    if (!updatedItems.length) {
+      return;
+    }
+
+    setMenuItems((prevItems) => {
+      const updates = new Map(updatedItems.map((item) => [item.id, item]));
+      let hasChanges = false;
+
+      const nextItems = prevItems.map((item) => {
+        const updated = updates.get(item.id);
+        if (updated) {
+          hasChanges = true;
+          return updated;
+        }
+        return item;
+      });
+
+      return hasChanges ? nextItems : prevItems;
+    });
+  };
+
+  const buildInventoryAdjustmentsFromOrder = (order: Order): InventoryAdjustment[] => {
+    const adjustments: InventoryAdjustment[] = [];
+
+    order.items.forEach((cartItem) => {
+      const item = cartItem.item;
+      if (item.inventarioCategoria !== 'Inventariables') {
+        return;
+      }
+
+      const consumo = normalizeQuantityForItem({
+        cantidad: cartItem.cantidad,
+        tipo: item.inventarioTipo,
+        unidad: item.unidadMedida,
+        item,
+      });
+
+      if (consumo !== 0) {
+        adjustments.push({ itemId: item.id, delta: -consumo, reason: 'venta' });
+      }
+    });
+
+    return adjustments;
+  };
+
   const handleCreateMenuItem = async (newItem: MenuItem) => {
     const data = await dataService.createMenuItem(newItem);
     setMenuItems([...menuItems, data]);
@@ -320,6 +381,18 @@ function App() {
   const handleCreateOrder = async (newOrder: Order) => {
     const data = await dataService.createOrder(newOrder);
     setOrders((prev) => [...prev, data]);
+
+    const adjustments = buildInventoryAdjustmentsFromOrder(data);
+    if (adjustments.length) {
+      try {
+        const updatedItems = await dataService.applyInventoryAdjustments(adjustments);
+        if (updatedItems.length) {
+          handleInventoryItemsUpdated(updatedItems);
+        }
+      } catch (error) {
+        console.error('[App] No se pudo actualizar el inventario tras registrar la venta.', error);
+      }
+    }
   };
 
   const handleRecordOrderPayment = async (order: Order, allocations: PaymentAllocation[]) => {
@@ -460,6 +533,8 @@ function App() {
               orders={orders}
               menuItems={menuItems}
               onModuleChange={handleModuleChange}
+              isLoadingOrders={isLoadingOrders}
+              isLoadingMenuItems={isLoadingMenuItems}
             />
           )}
           {module === 'balance' && <Balance />}
@@ -492,6 +567,7 @@ function App() {
               onUpdateMenuItem={handleUpdateMenuItem}
               onCreateMenuItem={handleCreateMenuItem}
               onDeleteMenuItem={handleDeleteMenuItem}
+              isLoading={isLoadingMenuItems}
             />
           )}
           {module === 'cocina' && (
@@ -509,7 +585,13 @@ function App() {
             />
           )}
           {module === 'empleados' && <Empleados />}
-          {module === 'gastos' && <Gastos focusRequest={gastosFocus} />}
+          {module === 'gastos' && (
+            <Gastos
+              focusRequest={gastosFocus}
+              menuItems={menuItems}
+              onInventoryItemsUpdated={handleInventoryItemsUpdated}
+            />
+          )}
           {module === 'contabilidad' && user.role === 'admin' && <Contabilidad />}
           {module === 'novedades' && (
             <Novedades
@@ -525,7 +607,7 @@ function App() {
             />
           )}
           {module === 'analitica' && user.role === 'admin' && (
-            <Analitica orders={orders} />
+            <Analitica orders={orders} isLoadingOrders={isLoadingOrders} />
           )}
         </div>
       </main>

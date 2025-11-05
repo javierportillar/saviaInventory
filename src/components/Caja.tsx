@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { MenuItem, CartItem, Order, ModuleType, Customer, PaymentAllocation, BowlSaladoCustomization } from '../types';
-import { Plus, Minus, Trash2, Search, ShoppingCart, Edit2, Check } from 'lucide-react';
+import { Plus, Minus, Trash2, Search, ShoppingCart, Edit2, Check, Loader2 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, generateOrderNumber } from '../utils/format';
 import {
@@ -90,6 +90,8 @@ interface CajaProps {
 export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayment, onAssignOrderCredit }: CajaProps) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
@@ -104,6 +106,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   const [selectedBowlToppings, setSelectedBowlToppings] = useState<string[]>([]);
   const [selectedBowlProtein, setSelectedBowlProtein] = useState<string | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const isMountedRef = useRef(true);
 
   const resetBowlSelections = () => {
     setSelectedBowlBases([]);
@@ -190,20 +193,79 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     setSelectedBowlProtein(prev => (prev === protein ? null : protein));
   };
 
-  useEffect(() => {
-    fetchMenuItems();
-    fetchCustomers();
+  const loadInitialData = useCallback(async () => {
+    if (isMountedRef.current) {
+      setIsLoadingData(true);
+      setLoadError(null);
+    }
+
+    try {
+      const [items, customersData] = await Promise.all([
+        dataService.fetchMenuItems(),
+        dataService.fetchCustomers(),
+      ]);
+
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      setMenuItems(items);
+      setCustomers(customersData);
+    } catch (error) {
+      console.error('[Caja] Error cargando datos iniciales.', error);
+      if (isMountedRef.current) {
+        setLoadError('No se pudieron cargar los datos de caja. Intenta de nuevo.');
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsLoadingData(false);
+      }
+    }
   }, []);
 
-  const fetchMenuItems = async () => {
-    const data = await dataService.fetchMenuItems();
-    setMenuItems(data);
+  useEffect(() => {
+    void loadInitialData();
+
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, [loadInitialData]);
+
+  const handleRetryLoad = () => {
+    if (!isMountedRef.current) {
+      return;
+    }
+    void loadInitialData();
   };
 
-  const fetchCustomers = async () => {
-    const data = await dataService.fetchCustomers();
-    setCustomers(data);
-  };
+  if (isLoadingData) {
+    return (
+      <section className="space-y-6 sm:space-y-8">
+        <div className="ui-card ui-card-pad flex items-center gap-3 text-gray-600 text-sm">
+          <Loader2 size={18} className="animate-spin text-gray-500" />
+          <span>Cargando datos de caja...</span>
+        </div>
+      </section>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <section className="space-y-6 sm:space-y-8">
+        <div className="ui-card ui-card-pad text-center space-y-3">
+          <p className="text-sm text-gray-600">{loadError}</p>
+          <button
+            type="button"
+            onClick={handleRetryLoad}
+            className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white rounded-lg"
+            style={{ backgroundColor: COLORS.accent }}
+          >
+            Reintentar carga
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   const nonInventariableCategories = menuItems
     .filter(item => item.inventarioCategoria !== 'Inventariables')

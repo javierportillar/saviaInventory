@@ -169,6 +169,18 @@ export interface Gasto {
   fecha: Date;
   created_at?: Date;
   metodoPago?: PaymentMethod;
+  inventarioItemId?: string;
+  inventarioCantidad?: number;
+  inventarioTipo?: 'cantidad' | 'gramos';
+  inventarioUnidad?: 'kg' | 'g' | 'mg' | 'ml';
+}
+
+export type InventoryAdjustmentReason = 'gasto' | 'venta' | 'ajuste';
+
+export interface InventoryAdjustment {
+  itemId: string;
+  delta: number;
+  reason?: InventoryAdjustmentReason;
 }
 
 export type ProvisionTransferOrigin = Extract<PaymentMethod, 'efectivo' | 'nequi' | 'tarjeta'>;

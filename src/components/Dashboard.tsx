@@ -4,7 +4,8 @@ import {
   ShoppingBag,
   Clock,
   AlertTriangle,
-  DollarSign
+  DollarSign,
+  Loader2,
 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP } from '../utils/format';
@@ -14,11 +15,30 @@ interface DashboardProps {
   orders: Order[];
   menuItems: MenuItem[];
   onModuleChange: (module: ModuleType) => void;
+  isLoadingOrders: boolean;
+  isLoadingMenuItems: boolean;
 }
 
-export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps) {
+export function Dashboard({
+  orders,
+  menuItems,
+  onModuleChange,
+  isLoadingOrders,
+  isLoadingMenuItems,
+}: DashboardProps) {
   const today = new Date();
   const todayKey = today.toDateString();
+
+  if (isLoadingOrders || isLoadingMenuItems) {
+    return (
+      <section className="space-y-6 sm:space-y-8">
+        <div className="ui-card ui-card-pad flex items-center gap-3 text-gray-600 text-sm">
+          <Loader2 size={18} className="animate-spin text-gray-500" />
+          <span>Cargando información del dashboard...</span>
+        </div>
+      </section>
+    );
+  }
 
   const todayOrders = orders.filter(order =>
     order.timestamp.toDateString() === todayKey

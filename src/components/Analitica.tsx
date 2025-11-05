@@ -1,5 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarCheck, CalendarRange, Calculator, ShoppingBag, TrendingUp, Trophy, PieChart } from 'lucide-react';
+import {
+  CalendarCheck,
+  CalendarRange,
+  Calculator,
+  ShoppingBag,
+  TrendingUp,
+  Trophy,
+  PieChart,
+  Loader2,
+} from 'lucide-react';
 import { Gasto, Order } from '../types';
 import { COLORS } from '../data/menu';
 import { formatCOP, formatDateInputValue, parseDateInputValue } from '../utils/format';
@@ -17,6 +26,7 @@ import {
 interface AnaliticaProps {
   orders: Order[];
   targetVentasMensual?: number;
+  isLoadingOrders?: boolean;
 }
 
 type FilterMode = 'range' | 'single';
@@ -582,7 +592,7 @@ const getNormalizedRange = (startInput: string, endInput: string) => {
   return { start: normalizedStart, end: normalizedEnd };
 };
 
-export function Analitica({ orders, targetVentasMensual }: AnaliticaProps) {
+export function Analitica({ orders, targetVentasMensual, isLoadingOrders = false }: AnaliticaProps) {
   const today = useMemo(() => {
     const now = new Date();
     return formatDateInputValue(now);
@@ -599,12 +609,19 @@ export function Analitica({ orders, targetVentasMensual }: AnaliticaProps) {
   const [endDate, setEndDate] = useState<string>(today);
   const [singleDate, setSingleDate] = useState<string>(today);
   const [gastos, setGastos] = useState<Gasto[]>([]);
+  const [isLoadingGastos, setIsLoadingGastos] = useState(true);
   const [financialZoom, setFinancialZoom] = useState<'7' | '30' | '90' | 'all'>('30');
+
+  const isLoadingData = isLoadingOrders || isLoadingGastos;
 
   useEffect(() => {
     let isMounted = true;
 
     const loadGastos = async () => {
+      if (isMounted) {
+        setIsLoadingGastos(true);
+      }
+
       try {
         const expenses = await dataService.fetchGastos();
         if (isMounted) {
@@ -612,6 +629,10 @@ export function Analitica({ orders, targetVentasMensual }: AnaliticaProps) {
         }
       } catch (error) {
         console.error('[Analitica] Error cargando gastos:', error);
+      } finally {
+        if (isMounted) {
+          setIsLoadingGastos(false);
+        }
       }
     };
 
@@ -635,7 +656,7 @@ export function Analitica({ orders, targetVentasMensual }: AnaliticaProps) {
   const rangeEnd = rangeBoundaries.end;
 
   const filteredOrders = useMemo(() => {
-    if (orders.length === 0) {
+    if (isLoadingData || orders.length === 0) {
       return [] as Order[];
     }
 
@@ -648,10 +669,10 @@ export function Analitica({ orders, targetVentasMensual }: AnaliticaProps) {
       const timestamp = order.timestamp.getTime();
       return timestamp >= rangeStart.getTime() && timestamp <= rangeEnd.getTime();
     });
-  }, [orders, filterMode, rangeStart, rangeEnd, singleDate]);
+  }, [orders, filterMode, rangeStart, rangeEnd, singleDate, isLoadingData]);
 
   const filteredExpenses = useMemo(() => {
-    if (gastos.length === 0) {
+    if (isLoadingData || gastos.length === 0) {
       return [] as Gasto[];
     }
 
@@ -665,7 +686,7 @@ export function Analitica({ orders, targetVentasMensual }: AnaliticaProps) {
       const timestamp = expenseDate.getTime();
       return timestamp >= rangeStart.getTime() && timestamp <= rangeEnd.getTime();
     });
-  }, [gastos, filterMode, singleDate, rangeStart, rangeEnd]);
+  }, [gastos, filterMode, singleDate, rangeStart, rangeEnd, isLoadingData]);
 
   const sortedOrders = useMemo(
     () => [...filteredOrders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
@@ -1236,6 +1257,17 @@ export function Analitica({ orders, targetVentasMensual }: AnaliticaProps) {
       icon: Trophy,
     },
   ];
+
+  if (isLoadingData) {
+    return (
+      <section className="space-y-6 sm:space-y-8">
+        <div className="ui-card ui-card-pad flex items-center gap-3 text-gray-600 text-sm">
+          <Loader2 size={18} className="animate-spin text-gray-500" />
+          <span>Cargando analítica...</span>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-6 sm:space-y-8">

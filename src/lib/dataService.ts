@@ -18,6 +18,7 @@ import {
   WeeklyHours,
   EmployeeShift,
   DAY_KEYS,
+  InventoryAdjustment,
 } from '../types';
 import { supabase } from './supabaseClient';
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -706,6 +707,12 @@ const extractPaymentMethodValue = (record: any): string | null => {
 };
 
 const SUPABASE_GASTOS_PAYMENT_COLUMN = 'metodopago';
+const SUPABASE_GASTOS_INVENTORY_ITEM_COLUMN = 'inventario_item_id';
+const SUPABASE_GASTOS_INVENTORY_AMOUNT_COLUMN = 'inventario_cantidad';
+const SUPABASE_GASTOS_INVENTORY_TYPE_COLUMN = 'inventario_tipo';
+const SUPABASE_GASTOS_INVENTORY_UNIT_COLUMN = 'inventario_unidad';
+
+export const INVENTORY_UPDATED_EVENT = 'savia-inventory-updated';
 
 const SUPABASE_ORDER_PAYMENT_METHODS = ['efectivo', 'nequi', 'tarjeta'] as const;
 type SupabaseOrderPaymentMethod = typeof SUPABASE_ORDER_PAYMENT_METHODS[number];
@@ -1258,6 +1265,33 @@ const normalizeGastoRecord = (gasto: any): Gasto => ({
   metodoPago: (() => {
     const metodo = normalizePaymentMethod(extractPaymentMethodValue(gasto));
     return metodo === 'provision_caja' ? 'efectivo' : metodo;
+  })(),
+  inventarioItemId: typeof gasto?.inventarioItemId === 'string'
+    ? gasto.inventarioItemId
+    : typeof gasto?.[SUPABASE_GASTOS_INVENTORY_ITEM_COLUMN] === 'string'
+      ? gasto[SUPABASE_GASTOS_INVENTORY_ITEM_COLUMN]
+      : undefined,
+  inventarioCantidad: (() => {
+    const raw = gasto?.inventarioCantidad ?? gasto?.[SUPABASE_GASTOS_INVENTORY_AMOUNT_COLUMN];
+    if (raw === null || raw === undefined) {
+      return undefined;
+    }
+    const numeric = Number(raw);
+    return Number.isFinite(numeric) ? numeric : undefined;
+  })(),
+  inventarioTipo: (() => {
+    const raw = gasto?.inventarioTipo ?? gasto?.[SUPABASE_GASTOS_INVENTORY_TYPE_COLUMN];
+    if (raw === 'gramos') {
+      return 'gramos';
+    }
+    if (raw === 'cantidad') {
+      return 'cantidad';
+    }
+    return undefined;
+  })(),
+  inventarioUnidad: (() => {
+    const raw = gasto?.inventarioUnidad ?? gasto?.[SUPABASE_GASTOS_INVENTORY_UNIT_COLUMN];
+    return raw === 'kg' || raw === 'g' || raw === 'mg' || raw === 'ml' ? raw : undefined;
   })(),
 });
 
@@ -1837,6 +1871,84 @@ const loadMenuItemsFromLocalCache = (reason?: string): MenuItem[] => {
   }
 
   return mappedLocal;
+};
+
+const persistLocalMenuItems = (items: MenuItem[]): void => {
+  setLocalData('savia-menuItems', items);
+};
+
+const dispatchInventoryUpdate = (itemIds: string[]): void => {
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent(INVENTORY_UPDATED_EVENT, { detail: { itemIds } }));
+  }
+};
+
+export const applyInventoryAdjustments = async (
+  adjustments: InventoryAdjustment[],
+): Promise<MenuItem[]> => {
+  const meaningfulAdjustments = adjustments.filter((adjustment) =>
+    adjustment.itemId && Number.isFinite(adjustment.delta) && adjustment.delta !== 0
+  );
+
+  if (meaningfulAdjustments.length === 0) {
+    return [];
+  }
+
+  const localItems = getLocalData<MenuItem[]>('savia-menuItems', []).map(mapMenuItemRecord);
+
+  if (localItems.length === 0) {
+    return [];
+  }
+
+  const deltaById = meaningfulAdjustments.reduce<Record<string, number>>((acc, adjustment) => {
+    acc[adjustment.itemId] = (acc[adjustment.itemId] ?? 0) + adjustment.delta;
+    return acc;
+  }, {});
+
+  const updatedItems = localItems.map((item) => {
+    const delta = deltaById[item.id];
+    if (delta === undefined) {
+      return item;
+    }
+
+    const currentStock = Number.isFinite(item.stock) ? item.stock : 0;
+    const nextStock = Math.max(0, Math.round(currentStock + delta));
+    if (nextStock === currentStock) {
+      return item;
+    }
+
+    return {
+      ...item,
+      stock: nextStock,
+    };
+  });
+
+  const changedItems = updatedItems.filter((item, index) => item !== localItems[index]);
+
+  if (changedItems.length === 0) {
+    return [];
+  }
+
+  persistLocalMenuItems(updatedItems);
+
+  if (await ensureSupabaseReady()) {
+    try {
+      await Promise.all(
+        changedItems.map((item) =>
+          supabase
+            .from('menu_items')
+            .update({ stock: item.stock })
+            .eq('id', item.id),
+        ),
+      );
+    } catch (error) {
+      console.warn('[dataService] No se pudo sincronizar el ajuste de inventario con Supabase.', error);
+    }
+  }
+
+  dispatchInventoryUpdate(changedItems.map((item) => item.id));
+
+  return changedItems;
 };
 
 // MENU ITEMS
@@ -3192,6 +3304,10 @@ export const createGasto = async (gasto: Gasto): Promise<Gasto> => {
               ? gastoToPersist.created_at.toISOString()
               : gastoToPersist.created_at ?? new Date().toISOString(),
             [SUPABASE_GASTOS_PAYMENT_COLUMN]: gastoToPersist.metodoPago,
+            [SUPABASE_GASTOS_INVENTORY_ITEM_COLUMN]: gastoToPersist.inventarioItemId ?? null,
+            [SUPABASE_GASTOS_INVENTORY_AMOUNT_COLUMN]: gastoToPersist.inventarioCantidad ?? null,
+            [SUPABASE_GASTOS_INVENTORY_TYPE_COLUMN]: gastoToPersist.inventarioTipo ?? null,
+            [SUPABASE_GASTOS_INVENTORY_UNIT_COLUMN]: gastoToPersist.inventarioUnidad ?? null,
           },
         ])
         .select('*')
@@ -3227,6 +3343,10 @@ export const updateGasto = async (gasto: Gasto): Promise<Gasto> => {
           categoria: gastoToPersist.categoria,
           fecha: fechaValue,
           [SUPABASE_GASTOS_PAYMENT_COLUMN]: gastoToPersist.metodoPago,
+          [SUPABASE_GASTOS_INVENTORY_ITEM_COLUMN]: gastoToPersist.inventarioItemId ?? null,
+          [SUPABASE_GASTOS_INVENTORY_AMOUNT_COLUMN]: gastoToPersist.inventarioCantidad ?? null,
+          [SUPABASE_GASTOS_INVENTORY_TYPE_COLUMN]: gastoToPersist.inventarioTipo ?? null,
+          [SUPABASE_GASTOS_INVENTORY_UNIT_COLUMN]: gastoToPersist.inventarioUnidad ?? null,
         })
         .eq('id', gastoToPersist.id);
       if (error) throw error;
@@ -3490,6 +3610,7 @@ export const dataService = {
   createGasto,
   updateGasto,
   deleteGasto,
+  applyInventoryAdjustments,
   fetchCajaBolsillos,
   fetchProvisionTransfers,
   createProvisionTransfer,
