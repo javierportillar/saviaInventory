@@ -10,8 +10,10 @@ export const USERS: UserCredential[] = [
   { username: 'briyith', password: '123450', role: 'admin' },
   { username: 'employee', password: 'Savia123', role: 'employee' },
   { username: 'miguel', password: '1081058106', role: 'employee' },
-  { username: 'lina', password: '1004236331', role: 'admin' },
-  { username: 'daniel', password: '1193131563', role: 'employee' },
+  { username: 'erica', password: '1088798678', role: 'employee' },
+  { username: 'jonathan', password: '1004135095', role: 'employee' },
+  // { username: 'lina', password: '1004236331', role: 'admin' },
+  // { username: 'daniel', password: '1193131563', role: 'employee' },
 ];
 
 export function authenticate(username: string, password: string): User | null {
