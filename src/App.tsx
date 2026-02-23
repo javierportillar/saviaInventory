@@ -317,6 +317,11 @@ function App() {
     setMenuItems(menuItems.filter(item => item.id !== id));
   };
 
+  const handleRefreshMenuItems = async () => {
+    const data = await dataService.fetchMenuItems();
+    setMenuItems(data);
+  };
+
   const handleCreateOrder = async (newOrder: Order) => {
     const data = await dataService.createOrder(newOrder);
     setOrders((prev) => [...prev, data]);
@@ -390,18 +395,11 @@ function App() {
     updates: { items: CartItem[]; total: number }
   ) => {
     try {
-      await dataService.updateOrder(orderId, updates);
+      const updatedOrder = await dataService.updateOrder(orderId, updates);
       setOrders((prevOrders) =>
         prevOrders.map((order) =>
           order.id === orderId
-            ? {
-                ...order,
-                items: updates.items,
-                total: updates.total,
-                paymentAllocations: [],
-                paymentStatus: 'pendiente',
-                paymentRegisteredAt: undefined,
-              }
+            ? updatedOrder
             : order
         )
       );
@@ -509,7 +507,12 @@ function App() {
             />
           )}
           {module === 'empleados' && <Empleados />}
-          {module === 'gastos' && <Gastos focusRequest={gastosFocus} />}
+          {module === 'gastos' && (
+            <Gastos
+              focusRequest={gastosFocus}
+              onInventoryChanged={handleRefreshMenuItems}
+            />
+          )}
           {module === 'contabilidad' && user.role === 'admin' && <Contabilidad />}
           {module === 'novedades' && (
             <Novedades

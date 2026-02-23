@@ -537,19 +537,20 @@ export function Comandas({
       overrideTotal?: number;
     }
   ) => {
+    const latestOrder = orders.find((entry) => entry.id === order.id) ?? order;
     const shouldForce = options?.force ?? false;
 
-    if (!shouldForce && isOrderPaid(order)) {
+    if (!shouldForce && isOrderPaid(latestOrder)) {
       return;
     }
 
     const orderForPayment = options?.overrideItems
       ? {
-          ...order,
+          ...latestOrder,
           items: options.overrideItems,
           total: options.overrideTotal ?? calculateCartTotal(options.overrideItems),
         }
-      : order;
+      : latestOrder;
 
     setExpandedActionsOrderId(null);
     setPaymentOrder(orderForPayment);

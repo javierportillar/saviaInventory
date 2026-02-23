@@ -72,6 +72,32 @@ CREATE TYPE "public"."unidad_medida_type" AS ENUM (
 ALTER TYPE "public"."unidad_medida_type" OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."actualizar_horas_semanales"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+DECLARE
+  semana text;
+  horas_semana jsonb;
+BEGIN
+  -- clave de la semana en formato ISO (año‑semana)
+  semana := to_char(NEW.fecha, 'IYYY-IW');
+
+  -- crea o actualiza el registro de esa semana
+  INSERT INTO employee_weekly_hours (empleado_id, week_key, horas)
+  VALUES (NEW.empleado_id, semana, jsonb_build_object(to_char(NEW.fecha, 'YYYY-MM-DD'), NEW.horas_trabajadas))
+  ON CONFLICT (empleado_id, week_key) DO
+    UPDATE SET horas = employee_weekly_hours.horas ||
+                      jsonb_build_object(to_char(NEW.fecha, 'YYYY-MM-DD'), NEW.horas_trabajadas),
+           updated_at = NOW();
+
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."actualizar_horas_semanales"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."calc_total_pago"() RETURNS "trigger"
     LANGUAGE "plpgsql"
     AS $$
@@ -370,6 +396,24 @@ CREATE OR REPLACE VIEW "public"."employee_credit_totals" AS
 ALTER VIEW "public"."employee_credit_totals" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."employee_shifts" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "empleado_id" "uuid" NOT NULL,
+    "fecha" "date" NOT NULL,
+    "hora_llegada" time without time zone NOT NULL,
+    "hora_salida" time without time zone NOT NULL,
+    "novedad" boolean DEFAULT false NOT NULL,
+    "novedad_inicio" time without time zone,
+    "novedad_fin" time without time zone,
+    "horas_trabajadas" numeric GENERATED ALWAYS AS (((EXTRACT(epoch FROM ("hora_salida" - "hora_llegada")) / (3600)::numeric) - COALESCE((EXTRACT(epoch FROM ("novedad_fin" - "novedad_inicio")) / (3600)::numeric), (0)::numeric))) STORED,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."employee_shifts" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."employee_weekly_hours" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "empleado_id" "uuid" NOT NULL,
@@ -444,6 +488,18 @@ CREATE TABLE IF NOT EXISTS "public"."orders" (
 ALTER TABLE "public"."orders" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."product_suggestions" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "uuid",
+    "product_name" "text" NOT NULL,
+    "image_base64" "text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."product_suggestions" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."users" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "username" "text" NOT NULL,
@@ -485,6 +541,11 @@ ALTER TABLE ONLY "public"."employee_credit_history"
 
 
 
+ALTER TABLE ONLY "public"."employee_shifts"
+    ADD CONSTRAINT "employee_shifts_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."employee_weekly_hours"
     ADD CONSTRAINT "employee_weekly_hours_pkey" PRIMARY KEY ("id");
 
@@ -520,6 +581,11 @@ ALTER TABLE ONLY "public"."orders"
 
 
 
+ALTER TABLE ONLY "public"."product_suggestions"
+    ADD CONSTRAINT "product_suggestions_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."users"
     ADD CONSTRAINT "users_email_key" UNIQUE ("email");
 
@@ -532,6 +598,14 @@ ALTER TABLE ONLY "public"."users"
 
 ALTER TABLE ONLY "public"."users"
     ADD CONSTRAINT "users_username_key" UNIQUE ("username");
+
+
+
+CREATE INDEX "idx_product_suggestions_created_at" ON "public"."product_suggestions" USING "btree" ("created_at" DESC);
+
+
+
+CREATE OR REPLACE TRIGGER "trg_actualizar_horas_semanales" AFTER INSERT OR UPDATE ON "public"."employee_shifts" FOR EACH ROW EXECUTE FUNCTION "public"."actualizar_horas_semanales"();
 
 
 
@@ -595,6 +669,11 @@ ALTER TABLE ONLY "public"."employee_credit_history"
 
 
 
+ALTER TABLE ONLY "public"."employee_shifts"
+    ADD CONSTRAINT "employee_shifts_empleado_id_fkey" FOREIGN KEY ("empleado_id") REFERENCES "public"."empleados"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."employee_weekly_hours"
     ADD CONSTRAINT "employee_weekly_hours_empleado_id_fkey" FOREIGN KEY ("empleado_id") REFERENCES "public"."empleados"("id") ON DELETE CASCADE;
 
@@ -612,6 +691,11 @@ ALTER TABLE ONLY "public"."order_items"
 
 ALTER TABLE ONLY "public"."orders"
     ADD CONSTRAINT "orders_cliente_id_fkey" FOREIGN KEY ("cliente_id") REFERENCES "public"."customers"("id");
+
+
+
+ALTER TABLE ONLY "public"."product_suggestions"
+    ADD CONSTRAINT "product_suggestions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE SET NULL;
 
 
 
@@ -634,6 +718,17 @@ ALTER TABLE "public"."order_items" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."orders" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."product_suggestions" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "product_suggestions_insert" ON "public"."product_suggestions" FOR INSERT WITH CHECK (true);
+
+
+
+CREATE POLICY "product_suggestions_select" ON "public"."product_suggestions" FOR SELECT USING (true);
+
 
 
 CREATE POLICY "public_all_caja_movimientos" ON "public"."caja_movimientos" USING (true) WITH CHECK (true);
@@ -687,6 +782,12 @@ GRANT USAGE ON SCHEMA "public" TO "postgres";
 GRANT USAGE ON SCHEMA "public" TO "anon";
 GRANT USAGE ON SCHEMA "public" TO "authenticated";
 GRANT USAGE ON SCHEMA "public" TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."actualizar_horas_semanales"() TO "anon";
+GRANT ALL ON FUNCTION "public"."actualizar_horas_semanales"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."actualizar_horas_semanales"() TO "service_role";
 
 
 
@@ -780,6 +881,12 @@ GRANT ALL ON TABLE "public"."employee_credit_totals" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."employee_shifts" TO "anon";
+GRANT ALL ON TABLE "public"."employee_shifts" TO "authenticated";
+GRANT ALL ON TABLE "public"."employee_shifts" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."employee_weekly_hours" TO "anon";
 GRANT ALL ON TABLE "public"."employee_weekly_hours" TO "authenticated";
 GRANT ALL ON TABLE "public"."employee_weekly_hours" TO "service_role";
@@ -807,6 +914,12 @@ GRANT ALL ON TABLE "public"."order_items" TO "service_role";
 GRANT ALL ON TABLE "public"."orders" TO "anon";
 GRANT ALL ON TABLE "public"."orders" TO "authenticated";
 GRANT ALL ON TABLE "public"."orders" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."product_suggestions" TO "anon";
+GRANT ALL ON TABLE "public"."product_suggestions" TO "authenticated";
+GRANT ALL ON TABLE "public"."product_suggestions" TO "service_role";
 
 
 

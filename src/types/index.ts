@@ -50,10 +50,14 @@ export type PaymentStatus = 'pendiente' | 'pagado';
 
 export type DatabaseConnectionState = 'checking' | 'online' | 'local';
 
-export interface BowlSaladoCustomization {
+export interface BowlCustomization {
+  kind?: 'salado' | 'frutal';
   bases: string[];
   toppings: string[];
-  proteina: string;
+  proteina?: string;
+  yogurtGriego?: boolean;
+  toppingExtraCount?: number;
+  extraCost?: number;
 }
 
 export interface CartItem {
@@ -61,7 +65,7 @@ export interface CartItem {
   cantidad: number;
   notas?: string;
   customKey?: string;
-  bowlCustomization?: BowlSaladoCustomization;
+  bowlCustomization?: BowlCustomization;
   precioUnitario?: number;
   studentDiscount?: boolean;
 }
@@ -155,6 +159,38 @@ export interface Gasto {
   fecha: Date;
   created_at?: Date;
   metodoPago?: PaymentMethod;
+  esInventariable?: boolean;
+  menuItemId?: string;
+  cantidadInventario?: number;
+  inventarioTipo?: 'cantidad' | 'peso' | 'volumen';
+  unidadInventario?: string;
+  lugarCompra?: string;
+  inventarioItems?: GastoInventarioItem[];
+}
+
+export interface GastoInventarioItem {
+  id?: string;
+  gastoId?: string;
+  menuItemId: string;
+  nombre: string;
+  cantidad: number;
+  inventarioTipo?: 'cantidad' | 'peso' | 'volumen';
+  unidadInventario?: string;
+  precioUnitario?: number;
+}
+
+export interface InventoryPriceHistoryRecord {
+  id?: string;
+  gastoId?: string;
+  menuItemId: string;
+  cantidad: number;
+  unidadTipo: 'cantidad' | 'peso';
+  unidad: string;
+  precioTotal: number;
+  precioUnitario: number;
+  lugarCompra?: string;
+  menuItemNombre?: string;
+  createdAt: string;
 }
 
 export type ProvisionTransferOrigin = Extract<PaymentMethod, 'efectivo' | 'nequi' | 'tarjeta'>;

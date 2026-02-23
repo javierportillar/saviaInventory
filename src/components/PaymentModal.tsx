@@ -40,6 +40,7 @@ interface SplitPersonState {
   name: string;
   method: PaymentMethod;
   itemQuantities: Record<string, number>;
+  manualAmount?: string;
   employeeId?: string;
 }
 
@@ -47,6 +48,59 @@ interface DragState {
   personId: string;
   personName: string;
 }
+
+interface PersistedSplitPerson {
+  name: string;
+  method: PaymentMethod;
+  itemQuantities: Record<string, number>;
+  manualAmount?: string;
+  employeeId?: string;
+}
+
+interface PersistedPaymentUiState {
+  single?: {
+    selectedMethods: Record<PaymentMethod, boolean>;
+    methodAmounts: Record<PaymentMethod, string>;
+    selectedCreditEmployeeId?: string;
+  };
+  split?: {
+    usesManualAmounts: boolean;
+    persons: PersistedSplitPerson[];
+  };
+}
+
+const PAYMENT_UI_STATE_KEY = 'savia-order-payment-ui-state';
+
+const loadPersistedPaymentUiState = (orderId: string): PersistedPaymentUiState | undefined => {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+  try {
+    const raw = window.localStorage.getItem(PAYMENT_UI_STATE_KEY);
+    if (!raw) {
+      return undefined;
+    }
+    const parsed = JSON.parse(raw) as Record<string, PersistedPaymentUiState>;
+    return parsed[orderId];
+  } catch (error) {
+    console.warn('[PaymentModal] No se pudo leer estado de pago local.', error);
+    return undefined;
+  }
+};
+
+const persistPaymentUiState = (orderId: string, state: PersistedPaymentUiState) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    const raw = window.localStorage.getItem(PAYMENT_UI_STATE_KEY);
+    const parsed = raw ? JSON.parse(raw) as Record<string, PersistedPaymentUiState> : {};
+    parsed[orderId] = state;
+    window.localStorage.setItem(PAYMENT_UI_STATE_KEY, JSON.stringify(parsed));
+  } catch (error) {
+    console.warn('[PaymentModal] No se pudo guardar estado de pago local.', error);
+  }
+};
 
 const emptySelection = (): Record<PaymentMethod, boolean> => ({
   efectivo: false,
@@ -225,6 +279,7 @@ export function PaymentModal({
         name?: string;
         method?: PaymentMethod;
         itemQuantities?: Record<string, number>;
+        manualAmount?: string;
         employeeId?: string;
       }
     ) => {
@@ -234,6 +289,7 @@ export function PaymentModal({
         name: options?.name ?? `Persona ${index}`,
         method: options?.method ?? 'efectivo',
         itemQuantities: options?.itemQuantities ?? {},
+        manualAmount: options?.manualAmount,
         employeeId: options?.employeeId,
       };
     },
@@ -241,6 +297,7 @@ export function PaymentModal({
   );
 
   const existingAllocations = useMemo(() => getOrderAllocations(order), [order]);
+  const persistedPaymentUiState = useMemo(() => loadPersistedPaymentUiState(order.id), [order.id]);
 
   useEffect(() => {
     let active = true;
@@ -288,6 +345,9 @@ export function PaymentModal({
   const [mode, setMode] = useState<PaymentMode>('single');
   const [selectedMethods, setSelectedMethods] = useState<Record<PaymentMethod, boolean>>(() => emptySelection());
   const [methodAmounts, setMethodAmounts] = useState<Record<PaymentMethod, string>>(() => emptyAmounts());
+  const [splitUsesManualAmounts, setSplitUsesManualAmounts] = useState<boolean>(
+    () => persistedPaymentUiState?.split?.usesManualAmounts ?? false
+  );
   const [feedback, setFeedback] = useState<string | null>(null);
   const [draggedItem, setDraggedItem] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -296,6 +356,22 @@ export function PaymentModal({
 
   const buildInitialSplitState = useCallback((): SplitPersonState[] => {
     personCounterRef.current = 1;
+
+    if (persistedPaymentUiState?.split?.persons?.length) {
+      const peopleFromStorage = persistedPaymentUiState.split.persons.map((person) =>
+        createSplitPerson({
+          name: person.name,
+          method: person.method,
+          itemQuantities: person.itemQuantities ?? {},
+          manualAmount: person.manualAmount,
+          employeeId: person.employeeId,
+        })
+      );
+
+      if (peopleFromStorage.length > 0) {
+        return peopleFromStorage;
+      }
+    }
 
     const primaryAllocation = existingAllocations[0];
     const secondaryAllocation = existingAllocations[1];
@@ -313,16 +389,18 @@ export function PaymentModal({
         name: 'Persona 1',
         method: primaryMethod,
         itemQuantities: {},
+        manualAmount: '',
         employeeId: primaryEmployeeId,
       }),
       createSplitPerson({
         name: 'Persona 2',
         method: secondaryMethod,
         itemQuantities: {},
+        manualAmount: '',
         employeeId: secondaryEmployeeId,
       }),
     ];
-  }, [createSplitPerson, existingAllocations]);
+  }, [createSplitPerson, existingAllocations, persistedPaymentUiState?.split?.persons]);
 
   const [splitPersons, setSplitPersons] = useState<SplitPersonState[]>(buildInitialSplitState);
 
@@ -331,6 +409,14 @@ export function PaymentModal({
   }, [buildInitialSplitState]);
 
   useEffect(() => {
+    if (persistedPaymentUiState?.single) {
+      setSelectedMethods(persistedPaymentUiState.single.selectedMethods);
+      setMethodAmounts(persistedPaymentUiState.single.methodAmounts);
+      setSelectedCreditEmployeeId(persistedPaymentUiState.single.selectedCreditEmployeeId ?? '');
+      setFeedback(null);
+      return;
+    }
+
     if (existingAllocations.length === 0) {
       const baseSelected = emptySelection();
       baseSelected.efectivo = true;
@@ -357,7 +443,7 @@ export function PaymentModal({
     setMethodAmounts(nextAmounts);
     setSelectedCreditEmployeeId(creditEmployeeId ?? '');
     setFeedback(null);
-  }, [existingAllocations, total]);
+  }, [existingAllocations, persistedPaymentUiState?.single, total]);
 
   useEffect(() => {
     if (!selectedMethods['credito_empleados']) {
@@ -425,11 +511,15 @@ export function PaymentModal({
     if (previousOrderIdRef.current !== order.id) {
       previousOrderIdRef.current = order.id;
       setMode('single');
+      setSplitUsesManualAmounts(persistedPaymentUiState?.split?.usesManualAmounts ?? false);
       setFeedback(null);
     }
-  }, [order.id]);
+  }, [order.id, persistedPaymentUiState?.split?.usesManualAmounts]);
 
   const handleModeChange = (nextMode: PaymentMode) => {
+    if (nextMode === 'split') {
+      setSplitUsesManualAmounts(persistedPaymentUiState?.split?.usesManualAmounts ?? false);
+    }
     setMode(nextMode);
     setFeedback(null);
   };
@@ -486,14 +576,16 @@ export function PaymentModal({
 
   const splitTotalsByPerson = useMemo(() => {
     return splitPersons.reduce<Record<string, number>>((acc, person) => {
-      const totalForPerson = assignableItems.reduce((sum, item) => {
-        const quantity = person.itemQuantities[item.key] ?? 0;
-        return sum + quantity * item.unitPrice;
-      }, 0);
+      const totalForPerson = splitUsesManualAmounts
+        ? toPositiveInteger(person.manualAmount ?? '')
+        : assignableItems.reduce((sum, item) => {
+            const quantity = person.itemQuantities[item.key] ?? 0;
+            return sum + quantity * item.unitPrice;
+          }, 0);
       acc[person.id] = Math.round(totalForPerson);
       return acc;
     }, {});
-  }, [assignableItems, splitPersons]);
+  }, [assignableItems, splitPersons, splitUsesManualAmounts]);
 
   const splitAllocations = useMemo(() => {
     return splitPersons
@@ -517,8 +609,8 @@ export function PaymentModal({
 
   const splitPaidTotal = useMemo(() => getAllocationsTotal(splitAllocations), [splitAllocations]);
   const splitAllItemsAssigned = useMemo(
-    () => assignableItems.every((item) => (splitItemStatus[item.key]?.assigned ?? 0) === item.quantity),
-    [assignableItems, splitItemStatus]
+    () => splitUsesManualAmounts || assignableItems.every((item) => (splitItemStatus[item.key]?.assigned ?? 0) === item.quantity),
+    [assignableItems, splitItemStatus, splitUsesManualAmounts]
   );
   const splitHasAssignments = splitAllocations.length > 0;
   const splitTotalsMatch = Math.abs(splitPaidTotal - total) <= 1;
@@ -676,7 +768,10 @@ export function PaymentModal({
   };
 
   const handleAddSplitPerson = () => {
-    setSplitPersons((prev) => [...prev, createSplitPerson()]);
+    setSplitPersons((prev) => [
+      ...prev,
+      createSplitPerson({ manualAmount: splitUsesManualAmounts ? '' : undefined }),
+    ]);
     setFeedback(null);
   };
 
@@ -693,6 +788,16 @@ export function PaymentModal({
   const handleSplitPersonNameChange = (personId: string, value: string) => {
     setSplitPersons((prev) =>
       prev.map((person) => (person.id === personId ? { ...person, name: value } : person))
+    );
+    setFeedback(null);
+  };
+
+  const handleSplitPersonAmountChange = (personId: string, value: string) => {
+    if (!/^[0-9]*$/.test(value)) {
+      return;
+    }
+    setSplitPersons((prev) =>
+      prev.map((person) => (person.id === personId ? { ...person, manualAmount: value } : person))
     );
     setFeedback(null);
   };
@@ -928,6 +1033,24 @@ export function PaymentModal({
       setFeedback('Los montos registrados no coinciden con el total del pedido.');
       return;
     }
+
+    persistPaymentUiState(order.id, {
+      single: {
+        selectedMethods,
+        methodAmounts,
+        selectedCreditEmployeeId: selectedCreditEmployeeId || undefined,
+      },
+      split: {
+        usesManualAmounts: splitUsesManualAmounts,
+        persons: splitPersons.map((person) => ({
+          name: person.name,
+          method: person.method,
+          itemQuantities: person.itemQuantities,
+          manualAmount: person.manualAmount,
+          employeeId: person.employeeId,
+        })),
+      },
+    });
 
     setFeedback(null);
     await onSubmit(sanitized);
@@ -1204,106 +1327,129 @@ export function PaymentModal({
                             {formatCOP(amount)}
                           </span>
                         </div>
+                        {splitUsesManualAmounts && (
+                          <div>
+                            <label className="text-xs font-semibold text-gray-600">Monto</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="100"
+                              value={person.manualAmount ?? ''}
+                              onChange={(event) => handleSplitPersonAmountChange(person.id, event.target.value)}
+                              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:border-transparent"
+                              style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+                              placeholder="Monto asignado"
+                            />
+                          </div>
+                        )}
                       </div>
                     );
                   })}
                 </div>
               </div>
 
-              <div>
-                <h4 className="text-sm font-semibold mb-2" style={{ color: COLORS.dark }}>
-                  Asignar productos
-                </h4>
-                <div className="space-y-4">
-                  {assignableItems.map((item) => {
-                    const status = splitItemStatus[item.key];
-                    const assigned = status?.assigned ?? 0;
-                    const remainingQty = status?.remaining ?? 0;
-                    const canReceiveDrop = remainingQty > 0;
-                    const isDropTarget = dropTarget === item.key;
-                    return (
-                      <div
-                        key={item.key}
-                        onDragOver={(e) => handleItemDragOver(e, item.key)}
-                        onDragLeave={handleDragLeave}
-                        onDrop={(e) => handleItemDrop(e, item.key)}
-                        className={`border rounded-lg p-3 space-y-3 transition-all ${
-                          isDropTarget && canReceiveDrop
-                            ? 'border-2 border-green-500 bg-green-50 shadow-lg'
-                            : 'border-gray-200'
-                        }`}
-                      >
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <p className="text-sm font-medium" style={{ color: COLORS.dark }}>
-                                {item.label}
-                              </p>
-                              {canReceiveDrop && (
-                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
-                                  Suelta persona aquí
-                                </span>
-                              )}
-                              {isDropTarget && draggedItem && (
-                                <span className="text-xs bg-green-500 text-white px-2 py-1 rounded font-medium animate-pulse">
-                                  Asignar a {draggedItem.personName}
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-xs text-gray-500">
-                              Cantidad: {item.quantity} · Precio unidad: {formatCOP(item.unitPrice)} · Subtotal:{' '}
-                              {formatCOP(item.subtotal)}
-                            </p>
-                            {item.details.map((detail, detailIndex) => (
-                              <p key={detailIndex} className="text-xs text-gray-500">
-                                {detail}
-                              </p>
-                            ))}
-                          </div>
-                          <div className="text-xs font-medium text-gray-600">
-                            Asignado: {assigned}/{item.quantity}
-                            {remainingQty > 0 && <span className="text-red-600"> · Pendiente: {remainingQty}</span>}
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {splitPersons.map((person, index) => {
-                            const personAssigned = person.itemQuantities[item.key] ?? 0;
-                            if (personAssigned === 0) {
-                              return null;
-                            }
-                            const amount = personAssigned * item.unitPrice;
-                            const displayName = person.name.trim() ? person.name : `Persona ${index + 1}`;
-                            return (
-                              <div
-                                key={person.id}
-                                className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-full"
-                              >
-                                <span className="text-sm font-medium text-blue-900">{displayName}</span>
-                                <span className="text-xs text-blue-700">×{personAssigned}</span>
-                                <span className="text-xs text-blue-600">({formatCOP(amount)})</span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleSplitQuantityAdjust(person.id, item.key, -personAssigned)}
-                                  className="ml-1 text-blue-600 hover:text-blue-800 focus:outline-none"
-                                  title="Quitar asignación"
-                                >
-                                  ×
-                                </button>
-                              </div>
-                            );
-                          })}
-                          {assigned === 0 && (
-                            <span className="text-xs text-gray-400 italic py-1.5">Sin asignar - arrastra una persona aquí</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+              {splitUsesManualAmounts ? (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-xs text-gray-600">
+                    Se cargaron los pagos anteriores. Ajusta montos o agrega personas para cubrir el nuevo total.
+                  </p>
                 </div>
-                {!splitAllItemsAssigned && (
-                  <p className="text-xs text-red-600">Aún hay productos sin asignar.</p>
-                )}
-              </div>
+              ) : (
+                <div>
+                  <h4 className="text-sm font-semibold mb-2" style={{ color: COLORS.dark }}>
+                    Asignar productos
+                  </h4>
+                  <div className="space-y-4">
+                    {assignableItems.map((item) => {
+                      const status = splitItemStatus[item.key];
+                      const assigned = status?.assigned ?? 0;
+                      const remainingQty = status?.remaining ?? 0;
+                      const canReceiveDrop = remainingQty > 0;
+                      const isDropTarget = dropTarget === item.key;
+                      return (
+                        <div
+                          key={item.key}
+                          onDragOver={(e) => handleItemDragOver(e, item.key)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleItemDrop(e, item.key)}
+                          className={`border rounded-lg p-3 space-y-3 transition-all ${
+                            isDropTarget && canReceiveDrop
+                              ? 'border-2 border-green-500 bg-green-50 shadow-lg'
+                              : 'border-gray-200'
+                          }`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-medium" style={{ color: COLORS.dark }}>
+                                  {item.label}
+                                </p>
+                                {canReceiveDrop && (
+                                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                                    Suelta persona aquí
+                                  </span>
+                                )}
+                                {isDropTarget && draggedItem && (
+                                  <span className="text-xs bg-green-500 text-white px-2 py-1 rounded font-medium animate-pulse">
+                                    Asignar a {draggedItem.personName}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-500">
+                                Cantidad: {item.quantity} · Precio unidad: {formatCOP(item.unitPrice)} · Subtotal:{' '}
+                                {formatCOP(item.subtotal)}
+                              </p>
+                              {item.details.map((detail, detailIndex) => (
+                                <p key={detailIndex} className="text-xs text-gray-500">
+                                  {detail}
+                                </p>
+                              ))}
+                            </div>
+                            <div className="text-xs font-medium text-gray-600">
+                              Asignado: {assigned}/{item.quantity}
+                              {remainingQty > 0 && <span className="text-red-600"> · Pendiente: {remainingQty}</span>}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {splitPersons.map((person, index) => {
+                              const personAssigned = person.itemQuantities[item.key] ?? 0;
+                              if (personAssigned === 0) {
+                                return null;
+                              }
+                              const amount = personAssigned * item.unitPrice;
+                              const displayName = person.name.trim() ? person.name : `Persona ${index + 1}`;
+                              return (
+                                <div
+                                  key={person.id}
+                                  className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-full"
+                                >
+                                  <span className="text-sm font-medium text-blue-900">{displayName}</span>
+                                  <span className="text-xs text-blue-700">×{personAssigned}</span>
+                                  <span className="text-xs text-blue-600">({formatCOP(amount)})</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSplitQuantityAdjust(person.id, item.key, -personAssigned)}
+                                    className="ml-1 text-blue-600 hover:text-blue-800 focus:outline-none"
+                                    title="Quitar asignación"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              );
+                            })}
+                            {assigned === 0 && (
+                              <span className="text-xs text-gray-400 italic py-1.5">Sin asignar - arrastra una persona aquí</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {!splitAllItemsAssigned && (
+                    <p className="text-xs text-red-600">Aún hay productos sin asignar.</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

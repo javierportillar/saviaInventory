@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { MenuItem, CartItem, Order, ModuleType, Customer, PaymentAllocation, BowlSaladoCustomization } from '../types';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { MenuItem, CartItem, Order, ModuleType, Customer, PaymentAllocation, BowlCustomization } from '../types';
 import { Plus, Minus, Trash2, Search, ShoppingCart, Edit2, Check } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, generateOrderNumber } from '../utils/format';
@@ -8,7 +8,6 @@ import {
   getCartItemBaseUnitPrice,
   getCartItemEffectiveUnitPrice,
   getCartItemSubtotal,
-  isSandwichItem,
   STUDENT_DISCOUNT_NOTE,
 } from '../utils/cart';
 import dataService from '../lib/dataService';
@@ -16,10 +15,20 @@ import {
   BOWL_BASE_MIN,
   BOWL_BASE_LIMIT,
   BOWL_BASE_OPTIONS,
+  BOWL_FRUTAL_BASE_LIMIT,
+  BOWL_FRUTAL_BASE_MIN,
+  BOWL_FRUTAL_BASE_OPTIONS,
+  BOWL_FRUTAL_BASE_PRICES,
+  BOWL_FRUTAL_TOPPING_EXTRA_COST,
+  BOWL_FRUTAL_TOPPING_INCLUDED,
+  BOWL_FRUTAL_TOPPING_MIN,
+  BOWL_FRUTAL_TOPPING_OPTIONS,
+  BOWL_FRUTAL_YOGURT_COST,
   BOWL_PROTEIN_OPTIONS,
   BOWL_TOPPING_MIN,
   BOWL_TOPPING_LIMIT,
   BOWL_TOPPING_OPTIONS,
+  isBowlFrutal,
   isBowlSalado,
 } from '../constants/bowl';
 import { formatPaymentSummary, getOrderAllocations, isOrderPaid } from '../utils/payments';
@@ -102,16 +111,24 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   const [selectedBowlBases, setSelectedBowlBases] = useState<string[]>([]);
   const [selectedBowlToppings, setSelectedBowlToppings] = useState<string[]>([]);
   const [selectedBowlProtein, setSelectedBowlProtein] = useState<string | null>(null);
+  const [includeGreekYogurt, setIncludeGreekYogurt] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const resetBowlSelections = () => {
     setSelectedBowlBases([]);
     setSelectedBowlToppings([]);
     setSelectedBowlProtein(null);
+    setIncludeGreekYogurt(false);
   };
 
   const handleAddToCart = (item: MenuItem) => {
     if (isBowlSalado(item)) {
+      resetBowlSelections();
+      setBowlModalItem(item);
+      return;
+    }
+    if (isBowlFrutal(item)) {
       resetBowlSelections();
       setBowlModalItem(item);
       return;
@@ -137,7 +154,60 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   };
 
   const confirmBowlSelection = () => {
-    if (!bowlModalItem || !selectedBowlProtein) return;
+    if (!bowlModalItem) return;
+
+    const isFrutal = isBowlFrutal(bowlModalItem);
+    if (isFrutal) {
+      if (
+        selectedBowlBases.length < BOWL_FRUTAL_BASE_MIN ||
+        selectedBowlBases.length > BOWL_FRUTAL_BASE_LIMIT ||
+        selectedBowlToppings.length < BOWL_FRUTAL_TOPPING_MIN
+      ) {
+        return;
+      }
+
+      const selectedBase = selectedBowlBases[0] as keyof typeof BOWL_FRUTAL_BASE_PRICES;
+      const basePrice = BOWL_FRUTAL_BASE_PRICES[selectedBase] ?? bowlModalItem.precio;
+      const toppingExtraCount = Math.max(0, selectedBowlToppings.length - BOWL_FRUTAL_TOPPING_INCLUDED);
+      const extraCost = toppingExtraCount * BOWL_FRUTAL_TOPPING_EXTRA_COST + (includeGreekYogurt ? BOWL_FRUTAL_YOGURT_COST : 0);
+      const finalPrice = basePrice + extraCost;
+
+      const notas = [
+        `Base: ${selectedBase}`,
+        `Toppings: ${selectedBowlToppings.join(', ')}`,
+        includeGreekYogurt ? 'Adición: Yogurt Griego' : undefined,
+        toppingExtraCount > 0 ? `Toppings extra: ${toppingExtraCount}` : undefined,
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      const customKey = [
+        bowlModalItem.id,
+        selectedBase,
+        [...selectedBowlToppings].sort().join('-'),
+        includeGreekYogurt ? 'yogurt' : 'sin-yogurt',
+      ].join('|');
+
+      addToCart(bowlModalItem, {
+        notas,
+        customKey,
+        bowlCustomization: {
+          kind: 'frutal',
+          bases: [selectedBase],
+          toppings: selectedBowlToppings,
+          yogurtGriego: includeGreekYogurt,
+          toppingExtraCount,
+          extraCost,
+        },
+        precioUnitario: finalPrice,
+      });
+
+      setBowlModalItem(null);
+      resetBowlSelections();
+      return;
+    }
+
+    if (!selectedBowlProtein) return;
 
     if (
       selectedBowlBases.length < BOWL_BASE_MIN ||
@@ -165,6 +235,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
       notas,
       customKey,
       bowlCustomization: {
+        kind: 'salado',
         bases: selectedBowlBases,
         toppings: selectedBowlToppings,
         proteina: selectedBowlProtein,
@@ -229,7 +300,8 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     options?: {
       notas?: string;
       customKey?: string;
-      bowlCustomization?: BowlSaladoCustomization;
+      bowlCustomization?: BowlCustomization;
+      precioUnitario?: number;
     }
   ) => {
     setCart(prev => {
@@ -255,11 +327,15 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
           notas: options?.notas,
           customKey: options?.customKey,
           bowlCustomization: options?.bowlCustomization,
-          precioUnitario: item.precio,
+          precioUnitario: typeof options?.precioUnitario === 'number' ? options.precioUnitario : item.precio,
           studentDiscount: false,
         },
       ];
     });
+    setSearchQuery('');
+    window.setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 0);
   };
 
   const updateQuantity = (
@@ -294,24 +370,21 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     );
   };
 
-  const toggleStudentDiscount = (itemId: string, customKey: string | undefined) => {
-    setCart(prev =>
-      prev.map(cartItem =>
-        cartItem.item.id === itemId && cartItem.customKey === customKey
-          ? { ...cartItem, studentDiscount: !cartItem.studentDiscount }
-          : cartItem
-      )
-    );
-  };
-
-  const baseLimitReached = selectedBowlBases.length >= BOWL_BASE_LIMIT;
-  const toppingLimitReached = selectedBowlToppings.length >= BOWL_TOPPING_LIMIT;
-  const isBowlSelectionValid =
-    selectedBowlBases.length >= BOWL_BASE_MIN &&
-    selectedBowlBases.length <= BOWL_BASE_LIMIT &&
-    selectedBowlToppings.length >= BOWL_TOPPING_MIN &&
-    selectedBowlToppings.length <= BOWL_TOPPING_LIMIT &&
-    !!selectedBowlProtein;
+  const isFrutalModal = bowlModalItem ? isBowlFrutal(bowlModalItem) : false;
+  const baseLimitReached = selectedBowlBases.length >= (isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : BOWL_BASE_LIMIT);
+  const toppingLimitReached = !isFrutalModal && selectedBowlToppings.length >= BOWL_TOPPING_LIMIT;
+  const selectedFrutalBase = selectedBowlBases[0] as keyof typeof BOWL_FRUTAL_BASE_PRICES | undefined;
+  const frutalBasePrice = selectedFrutalBase ? BOWL_FRUTAL_BASE_PRICES[selectedFrutalBase] ?? 0 : 0;
+  const frutalExtraToppings = Math.max(0, selectedBowlToppings.length - BOWL_FRUTAL_TOPPING_INCLUDED);
+  const frutalExtrasCost = frutalExtraToppings * BOWL_FRUTAL_TOPPING_EXTRA_COST + (includeGreekYogurt ? BOWL_FRUTAL_YOGURT_COST : 0);
+  const frutalPreviewPrice = frutalBasePrice + frutalExtrasCost;
+  const isBowlSelectionValid = isFrutalModal
+    ? selectedBowlBases.length === BOWL_FRUTAL_BASE_LIMIT && selectedBowlToppings.length >= BOWL_FRUTAL_TOPPING_MIN
+    : selectedBowlBases.length >= BOWL_BASE_MIN &&
+        selectedBowlBases.length <= BOWL_BASE_LIMIT &&
+        selectedBowlToppings.length >= BOWL_TOPPING_MIN &&
+        selectedBowlToppings.length <= BOWL_TOPPING_LIMIT &&
+        !!selectedBowlProtein;
 
   const total = calculateCartTotal(cart);
 
@@ -481,6 +554,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
                 <input
+                  ref={searchInputRef}
                   type="text"
                   placeholder="Buscar productos..."
                   value={searchQuery}
@@ -608,6 +682,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                               {cartItem.notas}
                             </p>
                           )}
+                          {/* Descuento estudiantil desactivado temporalmente.
                           {isSandwichItem(cartItem.item) && (
                             <button
                               onClick={() => toggleStudentDiscount(cartItem.item.id, cartItem.customKey)}
@@ -619,7 +694,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                             >
                               {cartItem.studentDiscount ? 'Quitar descuento' : 'Aplicar descuento estudiante'}
                             </button>
-                          )}
+                          )} */}
                         </div>
                         <div className="flex items-center gap-2 self-start">
                           <button
@@ -733,17 +808,19 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
         )}
       </div>
 
-      {/* Modal personalización Bowl Salado */}
+      {/* Modal personalización Bowls */}
       {bowlModalItem && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h3 className="text-lg lg:text-xl font-bold" style={{ color: COLORS.dark }}>
-                  Personaliza tu Bowl Salado
+                  {isFrutalModal ? 'Personaliza tu Bowl Frutal' : 'Personaliza tu Bowl Salado'}
                 </h3>
                 <p className="text-sm text-gray-600">
-                  Selecciona entre {BOWL_BASE_MIN} y {BOWL_BASE_LIMIT} bases, entre {BOWL_TOPPING_MIN} y {BOWL_TOPPING_LIMIT} toppings y 1 proteína.
+                  {isFrutalModal
+                    ? `Elige ${BOWL_FRUTAL_BASE_LIMIT} base, mínimo ${BOWL_FRUTAL_TOPPING_MIN} toppings. Yogurt griego +${formatCOP(BOWL_FRUTAL_YOGURT_COST)}.`
+                    : `Selecciona entre ${BOWL_BASE_MIN} y ${BOWL_BASE_LIMIT} bases, entre ${BOWL_TOPPING_MIN} y ${BOWL_TOPPING_LIMIT} toppings y 1 proteína.`}
                 </p>
               </div>
               <button
@@ -761,18 +838,25 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                     Elige tu base
                   </h4>
                   <span className="text-xs text-gray-500">
-                    {selectedBowlBases.length}/{BOWL_BASE_LIMIT}
+                    {selectedBowlBases.length}/{isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : BOWL_BASE_LIMIT}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {BOWL_BASE_OPTIONS.map((base) => {
+                  {(isFrutalModal ? BOWL_FRUTAL_BASE_OPTIONS : BOWL_BASE_OPTIONS).map((base) => {
                     const selected = selectedBowlBases.includes(base);
                     const disabled = !selected && baseLimitReached;
                     return (
                       <button
                         key={base}
                         type="button"
-                        onClick={() => toggleBowlOption(base, selectedBowlBases, setSelectedBowlBases, BOWL_BASE_LIMIT)}
+                        onClick={() =>
+                          toggleBowlOption(
+                            base,
+                            selectedBowlBases,
+                            setSelectedBowlBases,
+                            isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : BOWL_BASE_LIMIT
+                          )
+                        }
                         disabled={disabled}
                         className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
                           selected
@@ -802,18 +886,26 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                     Elige tus toppings
                   </h4>
                   <span className="text-xs text-gray-500">
-                    {selectedBowlToppings.length}/{BOWL_TOPPING_LIMIT}
+                    {selectedBowlToppings.length}
+                    {isFrutalModal ? ` (incluye ${BOWL_FRUTAL_TOPPING_INCLUDED})` : `/${BOWL_TOPPING_LIMIT}`}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {BOWL_TOPPING_OPTIONS.map((topping) => {
+                  {(isFrutalModal ? BOWL_FRUTAL_TOPPING_OPTIONS : BOWL_TOPPING_OPTIONS).map((topping) => {
                     const selected = selectedBowlToppings.includes(topping);
                     const disabled = !selected && toppingLimitReached;
                     return (
                       <button
                         key={topping}
                         type="button"
-                        onClick={() => toggleBowlOption(topping, selectedBowlToppings, setSelectedBowlToppings, BOWL_TOPPING_LIMIT)}
+                        onClick={() =>
+                          toggleBowlOption(
+                            topping,
+                            selectedBowlToppings,
+                            setSelectedBowlToppings,
+                            isFrutalModal ? 99 : BOWL_TOPPING_LIMIT
+                          )
+                        }
                         disabled={disabled}
                         className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
                           selected
@@ -837,41 +929,62 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                 </div>
               </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
-                    Elige tu proteína
-                  </h4>
+              {isFrutalModal ? (
+                <div className="rounded-lg border border-gray-200 p-4 space-y-2">
+                  <label className="flex items-center justify-between gap-3 cursor-pointer">
+                    <span className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                      Adición Yogurt Griego
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={includeGreekYogurt}
+                      onChange={(e) => setIncludeGreekYogurt(e.target.checked)}
+                    />
+                  </label>
+                  <p className="text-xs text-gray-500">
+                    Toppings extra: {frutalExtraToppings} x {formatCOP(BOWL_FRUTAL_TOPPING_EXTRA_COST)} = {formatCOP(frutalExtraToppings * BOWL_FRUTAL_TOPPING_EXTRA_COST)}
+                  </p>
+                  <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>
+                    Precio final: {formatCOP(frutalPreviewPrice)}
+                  </p>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {BOWL_PROTEIN_OPTIONS.map((protein) => {
-                    const selected = selectedBowlProtein === protein;
-                    return (
-                      <button
-                        key={protein}
-                        type="button"
-                        onClick={() => handleProteinSelection(protein)}
-                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
-                          selected
-                            ? 'border-transparent shadow-sm'
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                        style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
-                      >
-                        <span>{protein}</span>
-                        {selected && (
-                          <span
-                            className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"
-                            style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
-                          >
-                            <Check size={16} />
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                      Elige tu proteína
+                    </h4>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {BOWL_PROTEIN_OPTIONS.map((protein) => {
+                      const selected = selectedBowlProtein === protein;
+                      return (
+                        <button
+                          key={protein}
+                          type="button"
+                          onClick={() => handleProteinSelection(protein)}
+                          className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
+                            selected
+                              ? 'border-transparent shadow-sm'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                          style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
+                        >
+                          <span>{protein}</span>
+                          {selected && (
+                            <span
+                              className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"
+                              style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
+                            >
+                              <Check size={16} />
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="mt-6 flex flex-col sm:flex-row gap-3 sm:justify-end border-t pt-4">

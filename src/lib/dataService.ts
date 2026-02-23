@@ -4,6 +4,7 @@ import {
   Customer,
   Empleado,
   Gasto,
+  GastoInventarioItem,
   BalanceResumen,
   PaymentMethod,
   ProvisionTransfer,
@@ -14,6 +15,7 @@ import {
   DatabaseConnectionState,
   EmployeeCreditRecord,
   EmployeeCreditHistoryEntry,
+  InventoryPriceHistoryRecord,
   WeeklySchedule,
   WeeklyHours,
   DAY_KEYS,
@@ -26,6 +28,7 @@ import { slugify, generateMenuItemCode } from '../utils/strings';
 import {
   buildNotesWithStudentDiscount,
   extractStudentDiscountFromNotes,
+  getCartItemBaseUnitPrice,
   getCartItemSubtotal,
   normalizeCartTotal,
 } from '../utils/cart';
@@ -81,6 +84,8 @@ const BASE_SCHEDULE_STORAGE_KEY = 'savia-horarios-base';
 const WEEKLY_HOURS_STORAGE_KEY = 'savia-horarios-semanales';
 const PROVISION_TRANSFERS_STORAGE_KEY = 'savia-provision-transfers';
 const CAJA_POCKETS_STORAGE_KEY = 'savia-caja-bolsillos';
+const GASTO_INVENTARIO_ITEMS_STORAGE_KEY = 'savia-gasto-inventario-items';
+const INVENTORY_PRICE_HISTORY_STORAGE_KEY = 'savia-inventory-price-history';
 
 const notifyEmployeeCreditUpdate = () => {
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
@@ -89,6 +94,81 @@ const notifyEmployeeCreditUpdate = () => {
 };
 
 type EmployeeWeeklyRecords = Record<string, WeeklyHours>;
+type GastoInventarioItemDraft = {
+  menuItemId: string;
+  cantidad: number;
+  inventarioTipo?: 'cantidad' | 'peso' | 'volumen';
+  unidadInventario?: string;
+  precioUnitario?: number;
+  lugarCompra?: string;
+};
+
+type InventoryPriceHistoryEntry = InventoryPriceHistoryRecord;
+
+type InventoryPriceStat = {
+  lastTotalPrice: number;
+  lastUnitPrice: number;
+  bestUnitPrice: number;
+  lastPlace?: string;
+  bestPlace?: string;
+};
+
+const normalizeGastoInventarioItemRecord = (item: any): GastoInventarioItem | null => {
+  if (!item || typeof item !== 'object') {
+    return null;
+  }
+
+  const menuItemIdRaw = item.menuItemId ?? item.menu_item_id;
+  const menuItemId = typeof menuItemIdRaw === 'string' ? menuItemIdRaw : undefined;
+  if (!menuItemId) {
+    return null;
+  }
+
+  const rawCantidad = item.cantidad;
+  const cantidad = typeof rawCantidad === 'number' ? rawCantidad : Number(rawCantidad ?? 0);
+  if (!Number.isFinite(cantidad) || cantidad <= 0) {
+    return null;
+  }
+
+  const rawTipo = item.inventarioTipo ?? item.inventario_tipo;
+  const inventarioTipo = rawTipo === 'cantidad' || rawTipo === 'peso' || rawTipo === 'volumen'
+    ? rawTipo
+    : undefined;
+
+  const nombre = (() => {
+    if (typeof item?.nombre === 'string' && item.nombre.trim()) {
+      return item.nombre.trim();
+    }
+    if (typeof item?.menu_item?.nombre === 'string' && item.menu_item.nombre.trim()) {
+      return item.menu_item.nombre.trim();
+    }
+    if (typeof item?.menuItem?.nombre === 'string' && item.menuItem.nombre.trim()) {
+      return item.menuItem.nombre.trim();
+    }
+    return 'Producto';
+  })();
+
+  const rawPrice = item.precioUnitario ?? item.precio_unitario ?? item?.menu_item?.precio ?? item?.menuItem?.precio;
+  const priceValue = typeof rawPrice === 'number' ? rawPrice : Number(rawPrice ?? 0);
+  const precioUnitario = Number.isFinite(priceValue) && priceValue >= 0 ? priceValue : undefined;
+
+  const gastoIdRaw = item.gastoId ?? item.gasto_id;
+  const gastoId = typeof gastoIdRaw === 'string' ? gastoIdRaw : undefined;
+  const id = typeof item.id === 'string' ? item.id : undefined;
+  const unidadRaw = item.unidadInventario ?? item.unidad_inventario;
+  const unidadInventario = typeof unidadRaw === 'string' ? unidadRaw : undefined;
+
+  return {
+    id,
+    gastoId,
+    menuItemId,
+    nombre,
+    cantidad,
+    inventarioTipo,
+    unidadInventario,
+    precioUnitario,
+  };
+};
 
 const normalizeWeeklySchedule = (value: unknown): WeeklySchedule | null => {
   if (!value || typeof value !== 'object') {
@@ -623,6 +703,47 @@ const ensureMenuItemCode = (
   return combined || idPart || 'item';
 };
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isUuid = (value: string | undefined | null): value is string => {
+  return typeof value === 'string' && UUID_PATTERN.test(value.trim());
+};
+
+const CUSTOM_UNIT_PRICE_NOTE_PREFIX = '__unit_price__:';
+
+const extractCustomUnitPriceFromNotes = (notes?: string | null): { price?: number; cleanedNotes?: string } => {
+  if (!notes) {
+    return { price: undefined, cleanedNotes: undefined };
+  }
+  const lines = notes.split('\n');
+  let detectedPrice: number | undefined;
+  const cleanedLines = lines.filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed.toLowerCase().startsWith(CUSTOM_UNIT_PRICE_NOTE_PREFIX)) {
+      return true;
+    }
+    const raw = trimmed.slice(CUSTOM_UNIT_PRICE_NOTE_PREFIX.length).trim();
+    const value = Number(raw);
+    if (Number.isFinite(value) && value >= 0) {
+      detectedPrice = value;
+    }
+    return false;
+  });
+  const cleanedNotes = cleanedLines.join('\n').trim();
+  return { price: detectedPrice, cleanedNotes: cleanedNotes || undefined };
+};
+
+const appendCustomUnitPriceToNotes = (notes: string | undefined, unitPrice: number, fallbackPrice: number): string | undefined => {
+  if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+    return notes;
+  }
+  if (Math.abs(unitPrice - fallbackPrice) < 1) {
+    return notes;
+  }
+  const priceLine = `${CUSTOM_UNIT_PRICE_NOTE_PREFIX}${Math.round(unitPrice)}`;
+  return notes ? `${notes}\n${priceLine}` : priceLine;
+};
+
 const ensureMenuItemShape = (item: MenuItem): MenuItem => {
   const codigo = item.codigo?.trim() || generateMenuItemCode(item.nombre, item.categoria);
   const precio = typeof item.precio === 'number' ? item.precio : Number(item.precio ?? 0);
@@ -634,7 +755,7 @@ const ensureMenuItemShape = (item: MenuItem): MenuItem => {
     ? item.inventarioTipo
     : undefined;
   const unidadMedida = inventarioCategoria === 'Inventariables' && inventarioTipo === 'gramos'
-    ? item.unidadMedida
+    ? 'g'
     : undefined;
 
   return {
@@ -666,9 +787,7 @@ const toMenuItemPayload = (item: MenuItem) => {
 };
 
 const isValidUnidadMedida = (value: unknown): MenuItem['unidadMedida'] | undefined => {
-  return value === 'kg' || value === 'g' || value === 'mg' || value === 'ml'
-    ? (value as MenuItem['unidadMedida'])
-    : undefined;
+  return value === 'g' ? 'g' : undefined;
 };
 
 const mapMenuItemRecord = (record: any): MenuItem => {
@@ -697,7 +816,7 @@ const mapMenuItemRecord = (record: any): MenuItem => {
   const rawUnidadMedida = record?.unidadMedida ?? record?.unidadmedida;
 
   const unidadMedida = inventarioTipo === 'gramos'
-    ? isValidUnidadMedida(rawUnidadMedida)
+    ? isValidUnidadMedida(rawUnidadMedida) ?? 'g'
     : undefined;
 
   const menuItem: MenuItem = {
@@ -730,16 +849,184 @@ const parseUnitPrice = (value: unknown, fallback: number): number => {
   return fallback;
 };
 
+const createFallbackMenuItem = (menuItemId: string, rawName?: string): MenuItem => {
+  return ensureMenuItemShape({
+    id: menuItemId,
+    codigo: ensureMenuItemCode({ id: menuItemId, nombre: rawName ?? 'producto' }, 'fallback'),
+    nombre: rawName && rawName.trim() ? rawName : 'Producto no disponible',
+    precio: 0,
+    categoria: 'Sin categoría',
+    stock: 0,
+    inventarioCategoria: 'No inventariables',
+  });
+};
+
+const normalizeLookupKey = (value: string | undefined | null): string => {
+  if (!value) {
+    return '';
+  }
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ');
+};
+
+const resolveOrderItemsForSupabase = async (items: CartItem[]): Promise<CartItem[]> => {
+  const unresolved = items.filter((cartItem) => !isUuid(cartItem.item.id));
+  if (unresolved.length === 0) {
+    return items;
+  }
+
+  const { data, error } = await supabase
+    .from('menu_items')
+    .select('id, codigo, nombre, categoria');
+  if (error) {
+    throw error;
+  }
+
+  const byCode = new Map<string, string>();
+  const byNameAndCategory = new Map<string, string>();
+  (data ?? []).forEach((row) => {
+    const id = typeof row?.id === 'string' ? row.id : undefined;
+    if (!isUuid(id)) {
+      return;
+    }
+    const code = normalizeLookupKey(typeof row?.codigo === 'string' ? row.codigo : '');
+    const name = normalizeLookupKey(typeof row?.nombre === 'string' ? row.nombre : '');
+    const category = normalizeLookupKey(typeof row?.categoria === 'string' ? row.categoria : '');
+    if (code) {
+      byCode.set(code, id);
+    }
+    if (name) {
+      byNameAndCategory.set(`${name}|${category}`, id);
+      byNameAndCategory.set(`${name}|`, id);
+    }
+  });
+
+  const mappedItems = items.map((cartItem) => {
+    if (isUuid(cartItem.item.id)) {
+      return cartItem;
+    }
+    const codeKey = normalizeLookupKey(cartItem.item.codigo ?? '');
+    const nameKey = normalizeLookupKey(cartItem.item.nombre ?? '');
+    const categoryKey = normalizeLookupKey(cartItem.item.categoria ?? '');
+    const mappedId = byCode.get(codeKey)
+      ?? byNameAndCategory.get(`${nameKey}|${categoryKey}`)
+      ?? byNameAndCategory.get(`${nameKey}|`);
+    if (!mappedId) {
+      return cartItem;
+    }
+    return {
+      ...cartItem,
+      item: {
+        ...cartItem.item,
+        id: mappedId,
+      },
+    };
+  });
+
+  const stillUnresolved = mappedItems.filter((cartItem) => !isUuid(cartItem.item.id));
+  if (stillUnresolved.length === 0) {
+    return mappedItems;
+  }
+
+  const toUpsert = Array.from(
+    new Map(
+      stillUnresolved.map((cartItem) => {
+        const codigo = ensureMenuItemCode(cartItem.item);
+        return [
+          codigo,
+          {
+            codigo,
+            nombre: cartItem.item.nombre?.trim() || 'Producto',
+            precio: Math.max(0, Math.round(cartItem.precioUnitario ?? cartItem.item.precio ?? 0)),
+            categoria: cartItem.item.categoria?.trim() || 'Sin categoría',
+            stock: 0,
+            inventariocategoria: 'No inventariables',
+            inventariotipo: null,
+            unidadmedida: null,
+            descripcion: cartItem.item.descripcion ?? null,
+            keywords: cartItem.item.keywords ?? null,
+          },
+        ];
+      })
+    ).values()
+  );
+
+  if (toUpsert.length > 0) {
+    const { data: upserted, error: upsertError } = await supabase
+      .from('menu_items')
+      .upsert(toUpsert, { onConflict: 'codigo' })
+      .select('id, codigo, nombre, categoria');
+    if (upsertError) {
+      throw upsertError;
+    }
+
+    (upserted ?? []).forEach((row) => {
+      const id = typeof row?.id === 'string' ? row.id : undefined;
+      if (!isUuid(id)) {
+        return;
+      }
+      const code = normalizeLookupKey(typeof row?.codigo === 'string' ? row.codigo : '');
+      const name = normalizeLookupKey(typeof row?.nombre === 'string' ? row.nombre : '');
+      const category = normalizeLookupKey(typeof row?.categoria === 'string' ? row.categoria : '');
+      if (code) {
+        byCode.set(code, id);
+      }
+      if (name) {
+        byNameAndCategory.set(`${name}|${category}`, id);
+        byNameAndCategory.set(`${name}|`, id);
+      }
+    });
+  }
+
+  return mappedItems.map((cartItem) => {
+    if (isUuid(cartItem.item.id)) {
+      return cartItem;
+    }
+    const codeKey = normalizeLookupKey(cartItem.item.codigo ?? '');
+    const nameKey = normalizeLookupKey(cartItem.item.nombre ?? '');
+    const categoryKey = normalizeLookupKey(cartItem.item.categoria ?? '');
+    const mappedId = byCode.get(codeKey)
+      ?? byNameAndCategory.get(`${nameKey}|${categoryKey}`)
+      ?? byNameAndCategory.get(`${nameKey}|`);
+    if (!mappedId) {
+      return cartItem;
+    }
+    return {
+      ...cartItem,
+      item: {
+        ...cartItem.item,
+        id: mappedId,
+      },
+    };
+  });
+};
+
 
 const mapCartItemsFromRecord = (record: any): CartItem[] => {
   if (Array.isArray(record?.order_items)) {
     return record.order_items
       .map((item: any): CartItem | null => {
         const menuRecord = item?.menu_item ?? item?.menu_items ?? item?.item;
-        if (!menuRecord) {
-          return null;
-        }
-        const menuItem = mapMenuItemRecord(menuRecord);
+        const menuItem = menuRecord
+          ? mapMenuItemRecord(menuRecord)
+          : (() => {
+              const rawMenuItemId = typeof item?.menu_item_id === 'string' ? item.menu_item_id : undefined;
+              if (rawMenuItemId && isUuid(rawMenuItemId)) {
+                const localMatch = getLocalData<MenuItem[]>('savia-menuItems', [])
+                  .map(mapMenuItemRecord)
+                  .find((entry) => entry.id === rawMenuItemId);
+                if (localMatch) {
+                  return localMatch;
+                }
+                return createFallbackMenuItem(rawMenuItemId);
+              }
+              return createFallbackMenuItem(`missing-${Math.random().toString(36).slice(2, 8)}`);
+            })();
         const rawQuantity = typeof item?.cantidad === 'number'
           ? item.cantidad
           : Number(item?.cantidad ?? 0);
@@ -749,12 +1036,13 @@ const mapCartItemsFromRecord = (record: any): CartItem[] => {
           menuItem.precio
         );
         const rawNotes = typeof item?.notas === 'string' ? item.notas : undefined;
-        const { studentDiscount, cleanedNotes } = extractStudentDiscountFromNotes(rawNotes);
+        const { price: notesPrice, cleanedNotes: cleanedPriceNotes } = extractCustomUnitPriceFromNotes(rawNotes);
+        const { studentDiscount, cleanedNotes } = extractStudentDiscountFromNotes(cleanedPriceNotes);
         return {
           item: menuItem,
           cantidad: cantidad,
           notas: cleanedNotes,
-          precioUnitario: unitPrice,
+          precioUnitario: typeof notesPrice === 'number' ? notesPrice : unitPrice,
           studentDiscount,
         };
       })
@@ -770,12 +1058,17 @@ const mapCartItemsFromRecord = (record: any): CartItem[] => {
         }
         const menuItem = mapMenuItemRecord(menuRecord);
         const rawNotes = typeof item?.notas === 'string' ? item.notas : undefined;
-        const { studentDiscount, cleanedNotes } = extractStudentDiscountFromNotes(rawNotes);
+        const { price: notesPrice, cleanedNotes: cleanedPriceNotes } = extractCustomUnitPriceFromNotes(rawNotes);
+        const { studentDiscount, cleanedNotes } = extractStudentDiscountFromNotes(cleanedPriceNotes);
         return {
           item: menuItem,
           cantidad: typeof item?.cantidad === 'number' ? item.cantidad : Number(item?.cantidad ?? 0),
           notas: cleanedNotes,
-          precioUnitario: typeof item?.precioUnitario === 'number' ? item.precioUnitario : undefined,
+          precioUnitario: typeof notesPrice === 'number'
+            ? notesPrice
+            : typeof item?.precioUnitario === 'number'
+              ? item.precioUnitario
+              : undefined,
           studentDiscount: typeof item?.studentDiscount === 'boolean' ? item.studentDiscount : studentDiscount,
         };
       })
@@ -936,6 +1229,7 @@ const ORDER_SELECT_COLUMNS = `
   customer:customers ( id, nombre ),
   order_items (
     id,
+    menu_item_id,
     cantidad,
     notas,
     menu_item:menu_items (
@@ -985,7 +1279,194 @@ const normalizeGastoRecord = (gasto: any): Gasto => ({
     const metodo = normalizePaymentMethod(extractPaymentMethodValue(gasto));
     return metodo === 'provision_caja' ? 'efectivo' : metodo;
   })(),
+  esInventariable: Boolean(gasto?.esInventariable ?? gasto?.es_inventariable),
+  menuItemId: typeof (gasto?.menuItemId ?? gasto?.menu_item_id) === 'string'
+    ? (gasto?.menuItemId ?? gasto?.menu_item_id)
+    : undefined,
+  cantidadInventario: (() => {
+    const raw = gasto?.cantidadInventario ?? gasto?.cantidad_inventario;
+    const value = typeof raw === 'number' ? raw : Number(raw ?? 0);
+    return Number.isFinite(value) && value > 0 ? value : undefined;
+  })(),
+  inventarioTipo: (() => {
+    const raw = gasto?.inventarioTipo ?? gasto?.inventario_tipo;
+    if (raw === 'cantidad' || raw === 'peso' || raw === 'volumen') {
+      return raw;
+    }
+    return undefined;
+  })(),
+  unidadInventario: typeof (gasto?.unidadInventario ?? gasto?.unidad_inventario) === 'string'
+    ? (gasto?.unidadInventario ?? gasto?.unidad_inventario)
+    : undefined,
+  lugarCompra: (() => {
+    const raw = gasto?.lugarCompra ?? gasto?.lugar_compra;
+    return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined;
+  })(),
+  inventarioItems: Array.isArray(gasto?.inventarioItems)
+    ? gasto.inventarioItems
+        .map(normalizeGastoInventarioItemRecord)
+        .filter((item): item is GastoInventarioItem => item !== null)
+    : Array.isArray(gasto?.gasto_inventario_items)
+      ? gasto.gasto_inventario_items
+          .map(normalizeGastoInventarioItemRecord)
+          .filter((item): item is GastoInventarioItem => item !== null)
+      : undefined,
 });
+
+const applyLocalInventoryDeltaFromGasto = (gasto: Gasto, direction: 1 | -1) => {
+  if (!gasto.esInventariable || !gasto.menuItemId) {
+    return;
+  }
+
+  const rawQty = Number(gasto.cantidadInventario ?? 0);
+  const quantity = Number.isFinite(rawQty) ? Math.max(0, rawQty) : 0;
+  if (quantity <= 0) {
+    return;
+  }
+
+  const items = getLocalData<MenuItem[]>('savia-menuItems', []).map(mapMenuItemRecord);
+  const updatedItems = items.map((item) => {
+    if (item.id !== gasto.menuItemId) {
+      return item;
+    }
+    const nextStock = Math.max(0, Number(item.stock ?? 0) + (quantity * direction));
+    return ensureMenuItemShape({
+      ...item,
+      stock: nextStock,
+    });
+  });
+
+  setLocalData('savia-menuItems', updatedItems);
+};
+
+const readLocalGastoInventarioItemsMap = (): Record<string, GastoInventarioItemDraft[]> => {
+  return getLocalData<Record<string, GastoInventarioItemDraft[]>>(GASTO_INVENTARIO_ITEMS_STORAGE_KEY, {});
+};
+
+const persistLocalGastoInventarioItemsMap = (value: Record<string, GastoInventarioItemDraft[]>) => {
+  setLocalData(GASTO_INVENTARIO_ITEMS_STORAGE_KEY, value);
+};
+
+const readLocalInventoryPriceHistory = (): InventoryPriceHistoryEntry[] => {
+  return getLocalData<InventoryPriceHistoryEntry[]>(INVENTORY_PRICE_HISTORY_STORAGE_KEY, [])
+    .filter((entry) => entry && typeof entry === 'object')
+    .map((entry) => ({
+      id: typeof entry.id === 'string' ? entry.id : undefined,
+      gastoId: typeof entry.gastoId === 'string' ? entry.gastoId : undefined,
+      menuItemId: typeof entry.menuItemId === 'string' ? entry.menuItemId : '',
+      cantidad: Number(entry.cantidad ?? 0),
+      unidadTipo: entry.unidadTipo === 'cantidad' ? 'cantidad' : 'peso',
+      unidad: typeof entry.unidad === 'string' && entry.unidad.trim()
+        ? entry.unidad.trim()
+        : (entry.unidadTipo === 'cantidad' ? 'unidad' : 'g'),
+      precioTotal: Number(entry.precioTotal ?? 0),
+      precioUnitario: Number(entry.precioUnitario ?? 0),
+      lugarCompra: typeof entry.lugarCompra === 'string' && entry.lugarCompra.trim()
+        ? entry.lugarCompra.trim()
+        : undefined,
+      createdAt: typeof entry.createdAt === 'string' && entry.createdAt
+        ? entry.createdAt
+        : new Date().toISOString(),
+    }))
+    .filter((entry) =>
+      !!entry.menuItemId
+      && Number.isFinite(entry.cantidad)
+      && entry.cantidad > 0
+      && Number.isFinite(entry.precioTotal)
+      && entry.precioTotal >= 0
+      && Number.isFinite(entry.precioUnitario)
+      && entry.precioUnitario > 0
+    );
+};
+
+const persistLocalInventoryPriceHistory = (entries: InventoryPriceHistoryEntry[]) => {
+  setLocalData(INVENTORY_PRICE_HISTORY_STORAGE_KEY, entries);
+};
+
+const normalizePricePerUnit = (entry: GastoInventarioItemDraft): number => {
+  const quantity = Math.max(0, Number(entry.cantidad ?? 0));
+  const value = Math.max(0, Number(entry.precioUnitario ?? 0));
+  if (quantity <= 0) {
+    return 0;
+  }
+  if (entry.inventarioTipo === 'peso') {
+    return value / quantity;
+  }
+  return value;
+};
+
+const getInventoryItemTotalPrice = (entry: GastoInventarioItemDraft): number => {
+  const quantity = Math.max(0, Number(entry.cantidad ?? 0));
+  const value = Math.max(0, Number(entry.precioUnitario ?? 0));
+  if (entry.inventarioTipo === 'peso') {
+    return value;
+  }
+  return quantity * value;
+};
+
+const buildInventoryPriceStats = (
+  entries: InventoryPriceHistoryEntry[],
+  filterIds?: Set<string>
+): Record<string, InventoryPriceStat> => {
+  const sorted = [...entries].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const stats: Record<string, InventoryPriceStat> = {};
+
+  sorted.forEach((entry) => {
+    if (filterIds && !filterIds.has(entry.menuItemId)) {
+      return;
+    }
+    const current = stats[entry.menuItemId];
+    if (!current) {
+      stats[entry.menuItemId] = {
+        lastTotalPrice: entry.precioTotal,
+        lastUnitPrice: entry.precioUnitario,
+        bestUnitPrice: entry.precioUnitario,
+        lastPlace: entry.lugarCompra,
+        bestPlace: entry.lugarCompra,
+      };
+      return;
+    }
+
+    if (entry.precioUnitario < current.bestUnitPrice) {
+      current.bestUnitPrice = entry.precioUnitario;
+      current.bestPlace = entry.lugarCompra;
+    }
+  });
+
+  return stats;
+};
+
+const applyLocalInventoryDeltaFromItems = (items: GastoInventarioItemDraft[], direction: 1 | -1) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return;
+  }
+
+  const menuItems = getLocalData<MenuItem[]>('savia-menuItems', []).map(mapMenuItemRecord);
+  const byId = new Map(menuItems.map((item) => [item.id, item]));
+
+  items.forEach((entry) => {
+    const target = byId.get(entry.menuItemId);
+    if (!target) {
+      return;
+    }
+    const rawQty = Number(entry.cantidad ?? 0);
+    const qty = Number.isFinite(rawQty) ? Math.max(0, rawQty) : 0;
+    if (qty <= 0) {
+      return;
+    }
+
+    const maybePrice = Number(entry.precioUnitario ?? 0);
+    const shouldUpdatePrice = Number.isFinite(maybePrice) && maybePrice > 0;
+    const updated = ensureMenuItemShape({
+      ...target,
+      stock: Math.max(0, Number(target.stock ?? 0) + qty * direction),
+      precio: shouldUpdatePrice ? maybePrice : target.precio,
+    });
+    byId.set(target.id, updated);
+  });
+
+  setLocalData('savia-menuItems', Array.from(byId.values()));
+};
 
 const normalizeCajaPocket = (raw: any): CajaPocket | null => {
   if (!raw) {
@@ -1769,6 +2250,12 @@ export const createOrder = async (order: Order): Promise<Order> => {
 
   if (await ensureSupabaseReady()) {
     try {
+      const itemsForPersistence = await resolveOrderItemsForSupabase(sanitizedOrder.items);
+      const invalidItems = itemsForPersistence.filter((cartItem) => !isUuid(cartItem.item.id));
+      if (invalidItems.length > 0) {
+        const detail = invalidItems.map((item) => item.item.nombre || item.item.codigo || item.item.id).join(', ');
+        throw new Error(`No se pudo mapear menu_item_id para: ${detail}`);
+      }
       const { data, error } = await supabase
         .from('orders')
         .insert([
@@ -1786,14 +2273,18 @@ export const createOrder = async (order: Order): Promise<Order> => {
       .single();
       if (error) throw error;
 
-      if (sanitizedOrder.items.length > 0) {
-        const orderItemsPayload = sanitizedOrder.items.map((cartItem) => ({
+      if (itemsForPersistence.length > 0) {
+        const orderItemsPayload = itemsForPersistence.map((cartItem) => ({
           order_id: data.id,
           menu_item_id: cartItem.item.id,
           cantidad: cartItem.cantidad,
-          notas: buildNotesWithStudentDiscount(
-            cartItem.notas,
-            cartItem.studentDiscount ?? false
+          notas: appendCustomUnitPriceToNotes(
+            buildNotesWithStudentDiscount(
+              cartItem.notas,
+              cartItem.studentDiscount ?? false
+            ),
+            getCartItemBaseUnitPrice(cartItem),
+            cartItem.item.precio
           ) ?? null,
         }));
         const { error: itemsError } = await supabase.from('order_items').insert(orderItemsPayload);
@@ -1805,6 +2296,7 @@ export const createOrder = async (order: Order): Promise<Order> => {
 
       const createdOrder: Order = {
         ...sanitizedOrder,
+        items: itemsForPersistence,
         id: data.id,
         timestamp: new Date(data.timestamp),
         cliente_id: data.cliente_id ?? undefined,
@@ -1814,7 +2306,8 @@ export const createOrder = async (order: Order): Promise<Order> => {
       upsertLocalOrder(createdOrder);
       return createdOrder;
     } catch (error) {
-      console.warn('Supabase not available, using local data:', error);
+      console.error('[dataService] No se pudo guardar la orden en Supabase.', error);
+      throw error;
     }
   }
 
@@ -2091,7 +2584,33 @@ export const updateOrderStatus = async (order: Order, status: Order['estado']): 
   return updatedOrder;
 };
 
-export const updateOrder = async (orderId: string, updates: { items?: CartItem[]; total?: number }): Promise<void> => {
+export const updateOrder = async (orderId: string, updates: { items?: CartItem[]; total?: number }): Promise<Order> => {
+  const localOrdersSnapshot = loadLocalOrders();
+  const existingOrder = localOrdersSnapshot.find((entry) => entry.id === orderId);
+  if (!existingOrder) {
+    throw new Error(`No se encontró la orden ${orderId} para actualizar.`);
+  }
+
+  const nextItems = updates.items ?? existingOrder.items;
+  const nextTotal = typeof updates.total === 'number' ? updates.total : existingOrder.total;
+  const metadataAllocations = sanitizeAllocations(getOrderMetadata(orderId)?.paymentAllocations);
+  const orderAllocations = getOrderAllocations(existingOrder);
+  const persistedAllocations = orderAllocations.length > 0 ? orderAllocations : metadataAllocations;
+  const paidAmount = getAllocationsTotal(persistedAllocations);
+  const nextPaymentStatus: PaymentStatus = Math.abs(paidAmount - Math.round(nextTotal)) <= 1
+    ? 'pagado'
+    : 'pendiente';
+  const nextMetodoPago = getPrimaryMethodFromAllocations(persistedAllocations) ?? existingOrder.metodoPago;
+
+  const updatedOrder: Order = {
+    ...existingOrder,
+    items: nextItems,
+    total: nextTotal,
+    metodoPago: nextMetodoPago,
+    paymentAllocations: persistedAllocations,
+    paymentStatus: nextPaymentStatus,
+  };
+
   if (await ensureSupabaseReady()) {
     try {
       // Actualizar la orden principal
@@ -2105,6 +2624,12 @@ export const updateOrder = async (orderId: string, updates: { items?: CartItem[]
 
       // Si hay items para actualizar, primero eliminar los existentes y luego insertar los nuevos
       if (updates.items) {
+        const itemsForPersistence = await resolveOrderItemsForSupabase(updates.items);
+        const invalidItems = itemsForPersistence.filter((cartItem) => !isUuid(cartItem.item.id));
+        if (invalidItems.length > 0) {
+          const detail = invalidItems.map((item) => item.item.nombre || item.item.codigo || item.item.id).join(', ');
+          throw new Error(`No se pudo mapear menu_item_id para: ${detail}`);
+        }
         // Eliminar items existentes
         const { error: deleteError } = await supabase
           .from('order_items')
@@ -2113,14 +2638,18 @@ export const updateOrder = async (orderId: string, updates: { items?: CartItem[]
         if (deleteError) throw deleteError;
 
         // Insertar nuevos items
-        if (updates.items.length > 0) {
-          const orderItemsPayload = updates.items.map((cartItem) => ({
+        if (itemsForPersistence.length > 0) {
+          const orderItemsPayload = itemsForPersistence.map((cartItem) => ({
             order_id: orderId,
             menu_item_id: cartItem.item.id,
             cantidad: cartItem.cantidad,
-            notas: buildNotesWithStudentDiscount(
-              cartItem.notas,
-              cartItem.studentDiscount ?? false
+            notas: appendCustomUnitPriceToNotes(
+              buildNotesWithStudentDiscount(
+                cartItem.notas,
+                cartItem.studentDiscount ?? false
+              ),
+              getCartItemBaseUnitPrice(cartItem),
+              cartItem.item.precio
             ) ?? null,
           }));
           const { error: insertError } = await supabase.from('order_items').insert(orderItemsPayload);
@@ -2129,13 +2658,17 @@ export const updateOrder = async (orderId: string, updates: { items?: CartItem[]
       }
 
       mergeOrderMetadata(orderId, {
-        paymentStatus: 'pendiente',
-        paymentAllocations: [],
-        paymentRegisteredAt: undefined,
+        paymentStatus: nextPaymentStatus,
+        paymentAllocations: persistedAllocations,
+        paymentRegisteredAt: existingOrder.paymentRegisteredAt
+          ? existingOrder.paymentRegisteredAt.toISOString()
+          : undefined,
       });
-      return;
+      upsertLocalOrder(updatedOrder);
+      return updatedOrder;
     } catch (error) {
-      console.warn('Supabase not available, using local data:', error);
+      console.error('[dataService] No se pudo actualizar la orden en Supabase.', error);
+      throw error;
     }
   }
 
@@ -2145,18 +2678,24 @@ export const updateOrder = async (orderId: string, updates: { items?: CartItem[]
     if (order.id === orderId) {
       return {
         ...order,
-        ...(updates.items && { items: updates.items }),
-        ...(updates.total !== undefined && { total: updates.total })
+        items: nextItems,
+        total: nextTotal,
+        metodoPago: nextMetodoPago,
+        paymentAllocations: persistedAllocations,
+        paymentStatus: nextPaymentStatus,
       };
     }
     return order;
   });
   setLocalData('savia-orders', updatedOrders);
   mergeOrderMetadata(orderId, {
-    paymentStatus: 'pendiente',
-    paymentAllocations: [],
-    paymentRegisteredAt: undefined,
+    paymentStatus: nextPaymentStatus,
+    paymentAllocations: persistedAllocations,
+    paymentRegisteredAt: existingOrder.paymentRegisteredAt
+      ? existingOrder.paymentRegisteredAt.toISOString()
+      : undefined,
   });
+  return updatedOrder;
 };
 
 export const deleteOrder = async (orderId: string): Promise<void> => {
@@ -2526,12 +3065,298 @@ export const saveEmployeeWeeklyHours = async (
 };
 
 // GASTOS
+export const fetchInventoryPriceHistory = async (menuItemId: string): Promise<InventoryPriceHistoryRecord[]> => {
+  if (!menuItemId) {
+    return [];
+  }
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const { data, error } = await supabase
+        .from('inventario_compra_historial')
+        .select(`
+          id,
+          gasto_id,
+          menu_item_id,
+          cantidad,
+          unidad_tipo,
+          unidad,
+          precio_total,
+          precio_unitario,
+          lugar_compra,
+          created_at
+        `)
+        .eq('menu_item_id', menuItemId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      return (data ?? [])
+        .map((row) => {
+          const id = typeof row?.id === 'string' ? row.id : undefined;
+          const gastoId = typeof row?.gasto_id === 'string' ? row.gasto_id : undefined;
+          const cantidad = Number(row?.cantidad ?? 0);
+          const unidadTipo = row?.unidad_tipo === 'cantidad' ? 'cantidad' : 'peso';
+          const unidad = typeof row?.unidad === 'string' && row.unidad.trim()
+            ? row.unidad.trim()
+            : (unidadTipo === 'cantidad' ? 'unidad' : 'g');
+          const precioTotal = Number(row?.precio_total ?? 0);
+          const precioUnitario = Number(row?.precio_unitario ?? 0);
+          const lugarCompra = typeof row?.lugar_compra === 'string' && row.lugar_compra.trim()
+            ? row.lugar_compra.trim()
+            : undefined;
+          const createdAt = typeof row?.created_at === 'string'
+            ? row.created_at
+            : new Date().toISOString();
+
+          if (!Number.isFinite(cantidad) || cantidad <= 0 || !Number.isFinite(precioUnitario) || precioUnitario <= 0) {
+            return null;
+          }
+
+          return {
+            id,
+            gastoId,
+            menuItemId,
+            cantidad,
+            unidadTipo,
+            unidad,
+            precioTotal: Number.isFinite(precioTotal) ? Math.max(0, precioTotal) : 0,
+            precioUnitario,
+            lugarCompra,
+            createdAt,
+          } as InventoryPriceHistoryRecord;
+        })
+        .filter((entry): entry is InventoryPriceHistoryRecord => entry !== null);
+    } catch (error) {
+      console.warn('[dataService] No se pudo obtener el histórico de compras del inventario desde Supabase.', error);
+    }
+  }
+
+  return readLocalInventoryPriceHistory()
+    .filter((entry) => entry.menuItemId === menuItemId)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+};
+
+export const fetchInventoryPriceHistorySummary = async (limit = 200): Promise<InventoryPriceHistoryRecord[]> => {
+  const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(Math.round(limit), 1000) : 200;
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const { data, error } = await supabase
+        .from('inventario_compra_historial')
+        .select(`
+          id,
+          gasto_id,
+          menu_item_id,
+          cantidad,
+          unidad_tipo,
+          unidad,
+          precio_total,
+          precio_unitario,
+          lugar_compra,
+          created_at,
+          menu_item:menu_items (
+            nombre
+          )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(safeLimit);
+
+      if (error) throw error;
+
+      return (data ?? [])
+        .map((row) => {
+          const menuItemId = typeof row?.menu_item_id === 'string' ? row.menu_item_id : '';
+          if (!menuItemId) {
+            return null;
+          }
+          const cantidad = Number(row?.cantidad ?? 0);
+          const unidadTipo = row?.unidad_tipo === 'cantidad' ? 'cantidad' : 'peso';
+          const unidad = typeof row?.unidad === 'string' && row.unidad.trim()
+            ? row.unidad.trim()
+            : unidadTipo === 'cantidad' ? 'unidad' : 'g';
+          const precioTotal = Number(row?.precio_total ?? 0);
+          const precioUnitario = Number(row?.precio_unitario ?? 0);
+          if (!Number.isFinite(cantidad) || cantidad <= 0 || !Number.isFinite(precioUnitario) || precioUnitario <= 0) {
+            return null;
+          }
+
+          return {
+            id: typeof row?.id === 'string' ? row.id : undefined,
+            gastoId: typeof row?.gasto_id === 'string' ? row.gasto_id : undefined,
+            menuItemId,
+            menuItemNombre: typeof row?.menu_item?.nombre === 'string' ? row.menu_item.nombre : undefined,
+            cantidad,
+            unidadTipo,
+            unidad,
+            precioTotal: Number.isFinite(precioTotal) ? Math.max(0, precioTotal) : 0,
+            precioUnitario,
+            lugarCompra: typeof row?.lugar_compra === 'string' && row.lugar_compra.trim()
+              ? row.lugar_compra.trim()
+              : undefined,
+            createdAt: typeof row?.created_at === 'string' ? row.created_at : new Date().toISOString(),
+          } as InventoryPriceHistoryRecord;
+        })
+        .filter((entry): entry is InventoryPriceHistoryRecord => entry !== null);
+    } catch (error) {
+      console.warn('[dataService] No se pudo obtener el resumen histórico de compras desde Supabase.', error);
+    }
+  }
+
+  const menuItemsById = new Map(
+    getLocalData<MenuItem[]>('savia-menuItems', [])
+      .map(mapMenuItemRecord)
+      .map((item) => [item.id, item.nombre])
+  );
+
+  return readLocalInventoryPriceHistory()
+    .map((entry) => ({
+      ...entry,
+      menuItemNombre: menuItemsById.get(entry.menuItemId),
+    }))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, safeLimit);
+};
+
+export const fetchInventoryPriceStats = async (menuItemIds?: string[]): Promise<Record<string, InventoryPriceStat>> => {
+  const filterSet = menuItemIds && menuItemIds.length > 0 ? new Set(menuItemIds) : undefined;
+
+  if (await ensureSupabaseReady()) {
+    try {
+      let query = supabase
+        .from('inventario_compra_historial')
+        .select('menu_item_id, precio_total, precio_unitario, lugar_compra, created_at')
+        .order('created_at', { ascending: false });
+
+      if (filterSet && filterSet.size > 0) {
+        query = query.in('menu_item_id', Array.from(filterSet));
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const entries: InventoryPriceHistoryEntry[] = (data ?? [])
+        .map((row) => {
+          const menuItemId = typeof row?.menu_item_id === 'string' ? row.menu_item_id : '';
+          const precioTotal = Number(row?.precio_total ?? 0);
+          const precioUnitario = Number(row?.precio_unitario ?? 0);
+          if (!menuItemId || !Number.isFinite(precioUnitario) || precioUnitario <= 0) {
+            return null;
+          }
+          return {
+            menuItemId,
+            cantidad: 1,
+            unidadTipo: 'cantidad',
+            unidad: 'unidad',
+            precioTotal: Number.isFinite(precioTotal) ? Math.max(0, precioTotal) : 0,
+            precioUnitario,
+            lugarCompra: typeof row?.lugar_compra === 'string' ? row.lugar_compra : undefined,
+            createdAt: typeof row?.created_at === 'string' ? row.created_at : new Date().toISOString(),
+          } as InventoryPriceHistoryEntry;
+        })
+        .filter((entry): entry is InventoryPriceHistoryEntry => entry !== null);
+
+      return buildInventoryPriceStats(entries, filterSet);
+    } catch (error) {
+      console.warn('[dataService] No se pudo obtener el histórico de precios de inventario desde Supabase.', error);
+    }
+  }
+
+  return buildInventoryPriceStats(readLocalInventoryPriceHistory(), filterSet);
+};
+
+const persistInventoryPriceHistoryEntries = async (
+  gastoId: string,
+  items: GastoInventarioItemDraft[],
+  defaultLugarCompra?: string
+): Promise<void> => {
+  const entries = items
+    .map((entry) => {
+      const quantity = Math.max(0, Number(entry.cantidad ?? 0));
+      const unitPrice = normalizePricePerUnit(entry);
+      const totalPrice = getInventoryItemTotalPrice(entry);
+      if (!entry.menuItemId || quantity <= 0 || unitPrice <= 0) {
+        return null;
+      }
+
+      return {
+        gasto_id: gastoId,
+        menu_item_id: entry.menuItemId,
+        cantidad: quantity,
+        unidad_tipo: entry.inventarioTipo === 'cantidad' ? 'cantidad' : 'peso',
+        unidad: entry.inventarioTipo === 'cantidad' ? 'unidad' : (entry.unidadInventario || 'g'),
+        precio_total: totalPrice,
+        precio_unitario: unitPrice,
+        lugar_compra: entry.lugarCompra?.trim() || defaultLugarCompra?.trim() || null,
+      };
+    })
+    .filter((entry): entry is {
+      gasto_id: string;
+      menu_item_id: string;
+      cantidad: number;
+      unidad_tipo: 'cantidad' | 'peso';
+      unidad: string;
+      precio_total: number;
+      precio_unitario: number;
+      lugar_compra: string | null;
+    } => entry !== null);
+
+  if (entries.length === 0) {
+    return;
+  }
+
+  const current = readLocalInventoryPriceHistory();
+  const now = new Date().toISOString();
+  const next = [
+    ...current,
+    ...entries.map((entry) => ({
+      gastoId: entry.gasto_id,
+      menuItemId: entry.menu_item_id,
+      cantidad: entry.cantidad,
+      unidadTipo: entry.unidad_tipo,
+      unidad: entry.unidad,
+      precioTotal: entry.precio_total,
+      precioUnitario: entry.precio_unitario,
+      lugarCompra: entry.lugar_compra ?? undefined,
+      createdAt: now,
+    })),
+  ];
+  persistLocalInventoryPriceHistory(next);
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const { error } = await supabase.from('inventario_compra_historial').insert(entries);
+      if (error) {
+        throw error;
+      }
+    } catch (error) {
+      console.warn('[dataService] No se pudo guardar el histórico de compra en Supabase. Se guardó localmente.', error);
+    }
+  }
+};
+
 export const fetchGastos = async (): Promise<Gasto[]> => {
   if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase
         .from('gastos')
-        .select('*')
+        .select(`
+          *,
+          gasto_inventario_items (
+            id,
+            gasto_id,
+            menu_item_id,
+            cantidad,
+            inventario_tipo,
+            unidad_inventario,
+            precio_unitario,
+            menu_item:menu_items (
+              id,
+              nombre,
+              precio
+            )
+          )
+        `)
         .order('fecha', { ascending: false });
       if (error) throw error;
       return (data || []).map(normalizeGastoRecord);
@@ -2539,13 +3364,50 @@ export const fetchGastos = async (): Promise<Gasto[]> => {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  const gastos = getLocalData<Gasto[]>('savia-gastos', []);
-  return gastos.map(normalizeGastoRecord);
+  const gastos = getLocalData<Gasto[]>('savia-gastos', []).map(normalizeGastoRecord);
+  const itemsMap = readLocalGastoInventarioItemsMap();
+  const itemsByMenuId = new Map(
+    getLocalData<MenuItem[]>('savia-menuItems', [])
+      .map(mapMenuItemRecord)
+      .map((item) => [item.id, item])
+  );
+
+  return gastos.map((gasto) => {
+    const localItems = itemsMap[gasto.id] ?? [];
+    if (localItems.length === 0) {
+      return gasto;
+    }
+    const inventarioItems = localItems
+      .map((entry) => {
+        const matched = itemsByMenuId.get(entry.menuItemId);
+        return normalizeGastoInventarioItemRecord({
+          gasto_id: gasto.id,
+          menu_item_id: entry.menuItemId,
+          nombre: matched?.nombre ?? 'Producto',
+          cantidad: entry.cantidad,
+          inventario_tipo: entry.inventarioTipo,
+          unidad_inventario: entry.unidadInventario,
+          precio_unitario: entry.precioUnitario ?? matched?.precio ?? 0,
+        });
+      })
+      .filter((item): item is GastoInventarioItem => item !== null);
+
+    return { ...gasto, inventarioItems };
+  });
 };
 
 export const createGasto = async (gasto: Gasto): Promise<Gasto> => {
   const sanitized = normalizeGastoRecord(gasto);
-  const gastoToPersist: Gasto = { ...sanitized };
+  const normalizedQuantity = Number(sanitized.cantidadInventario ?? 0);
+  const isInventariable = Boolean(sanitized.esInventariable && sanitized.menuItemId && normalizedQuantity > 0);
+  const gastoToPersist: Gasto = {
+    ...sanitized,
+    esInventariable: isInventariable,
+    menuItemId: isInventariable ? sanitized.menuItemId : undefined,
+    cantidadInventario: isInventariable ? normalizedQuantity : undefined,
+    inventarioTipo: isInventariable ? sanitized.inventarioTipo : undefined,
+    unidadInventario: isInventariable ? sanitized.unidadInventario : undefined,
+  };
   if (await ensureSupabaseReady()) {
     try {
       const fechaValue = formatDateInputValue(
@@ -2565,6 +3427,12 @@ export const createGasto = async (gasto: Gasto): Promise<Gasto> => {
               ? gastoToPersist.created_at.toISOString()
               : gastoToPersist.created_at ?? new Date().toISOString(),
             [SUPABASE_GASTOS_PAYMENT_COLUMN]: gastoToPersist.metodoPago,
+            lugar_compra: gastoToPersist.lugarCompra ?? null,
+            es_inventariable: Boolean(gastoToPersist.esInventariable),
+            menu_item_id: gastoToPersist.menuItemId ?? null,
+            cantidad_inventario: gastoToPersist.cantidadInventario ?? null,
+            inventario_tipo: gastoToPersist.inventarioTipo ?? null,
+            unidad_inventario: gastoToPersist.unidadInventario ?? null,
           },
         ])
         .select('*')
@@ -2580,12 +3448,133 @@ export const createGasto = async (gasto: Gasto): Promise<Gasto> => {
   const gastos = getLocalData<Gasto[]>('savia-gastos', []).map(normalizeGastoRecord);
   const newGastos = [...gastos, gastoToPersist];
   setLocalData('savia-gastos', newGastos);
+  applyLocalInventoryDeltaFromGasto(gastoToPersist, 1);
+  return gastoToPersist;
+};
+
+export const createGastoWithInventarioItems = async (
+  gasto: Gasto,
+  items: GastoInventarioItemDraft[]
+): Promise<Gasto> => {
+  const sanitized = normalizeGastoRecord(gasto);
+  const sanitizedItems = items
+    .map((entry) => ({
+      menuItemId: entry.menuItemId,
+      cantidad: Math.max(0, Number(entry.cantidad ?? 0)),
+      inventarioTipo: entry.inventarioTipo,
+      unidadInventario: entry.unidadInventario,
+      precioUnitario: Number(entry.precioUnitario ?? 0),
+      lugarCompra: typeof entry.lugarCompra === 'string' ? entry.lugarCompra.trim() : undefined,
+    }))
+    .filter((entry) => entry.menuItemId && entry.cantidad > 0);
+
+  if (sanitizedItems.length === 0) {
+    throw new Error('Debes seleccionar al menos un producto inventariable con cantidad válida.');
+  }
+
+  const gastoToPersist: Gasto = {
+    ...sanitized,
+    esInventariable: true,
+    menuItemId: undefined,
+    cantidadInventario: undefined,
+    inventarioTipo: undefined,
+    unidadInventario: undefined,
+  };
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const fechaValue = formatDateInputValue(
+        gastoToPersist.fecha instanceof Date ? gastoToPersist.fecha : new Date(gastoToPersist.fecha)
+      );
+
+      const { data, error } = await supabase
+        .from('gastos')
+        .insert([
+          {
+            id: gastoToPersist.id,
+            descripcion: gastoToPersist.descripcion,
+            monto: gastoToPersist.monto,
+            categoria: gastoToPersist.categoria,
+            fecha: fechaValue,
+            created_at: gastoToPersist.created_at instanceof Date
+              ? gastoToPersist.created_at.toISOString()
+              : gastoToPersist.created_at ?? new Date().toISOString(),
+            [SUPABASE_GASTOS_PAYMENT_COLUMN]: gastoToPersist.metodoPago,
+            lugar_compra: gastoToPersist.lugarCompra ?? null,
+            es_inventariable: true,
+            menu_item_id: null,
+            cantidad_inventario: null,
+            inventario_tipo: null,
+            unidad_inventario: null,
+          },
+        ])
+        .select('*')
+        .single();
+
+      if (error) throw error;
+
+      const gastoId = data.id;
+      const detailPayload = sanitizedItems.map((entry) => ({
+        gasto_id: gastoId,
+        menu_item_id: entry.menuItemId,
+        cantidad: entry.cantidad,
+        inventario_tipo: entry.inventarioTipo ?? null,
+        unidad_inventario: entry.unidadInventario ?? null,
+        precio_unitario: Number.isFinite(entry.precioUnitario) ? entry.precioUnitario : 0,
+      }));
+
+      const { error: detailError } = await supabase
+        .from('gasto_inventario_items')
+        .insert(detailPayload);
+      if (detailError) throw detailError;
+
+      await persistInventoryPriceHistoryEntries(gastoId, sanitizedItems, gastoToPersist.lugarCompra);
+
+      const priceUpdates = sanitizedItems
+        .map((entry) => ({ id: entry.menuItemId, precio: Number(entry.precioUnitario ?? 0) }))
+        .filter((entry) => Number.isFinite(entry.precio) && entry.precio > 0);
+
+      for (const update of priceUpdates) {
+        const { error: menuUpdateError } = await supabase
+          .from('menu_items')
+          .update({ precio: update.precio })
+          .eq('id', update.id);
+        if (menuUpdateError) {
+          throw menuUpdateError;
+        }
+      }
+
+      return normalizeGastoRecord(data);
+    } catch (error) {
+      console.warn('[dataService] No se pudo guardar gasto con items en Supabase. Usando modo local.', error);
+    }
+  }
+
+  const gastos = getLocalData<Gasto[]>('savia-gastos', []).map(normalizeGastoRecord);
+  const newGastos = [...gastos, gastoToPersist];
+  setLocalData('savia-gastos', newGastos);
+
+  const itemsMap = readLocalGastoInventarioItemsMap();
+  itemsMap[gastoToPersist.id] = sanitizedItems;
+  persistLocalGastoInventarioItemsMap(itemsMap);
+  applyLocalInventoryDeltaFromItems(sanitizedItems, 1);
+  await persistInventoryPriceHistoryEntries(gastoToPersist.id, sanitizedItems, gastoToPersist.lugarCompra);
+
   return gastoToPersist;
 };
 
 export const updateGasto = async (gasto: Gasto): Promise<Gasto> => {
   const sanitized = normalizeGastoRecord(gasto);
-  const gastoToPersist: Gasto = { ...sanitized };
+  const normalizedQuantity = Number(sanitized.cantidadInventario ?? 0);
+  const isInventariable = Boolean(sanitized.esInventariable && sanitized.menuItemId && normalizedQuantity > 0);
+  const gastoToPersist: Gasto = {
+    ...sanitized,
+    esInventariable: isInventariable,
+    menuItemId: isInventariable ? sanitized.menuItemId : undefined,
+    cantidadInventario: isInventariable ? normalizedQuantity : undefined,
+    inventarioTipo: isInventariable ? sanitized.inventarioTipo : undefined,
+    unidadInventario: isInventariable ? sanitized.unidadInventario : undefined,
+  };
   if (await ensureSupabaseReady()) {
     try {
       const fechaValue = formatDateInputValue(
@@ -2600,6 +3589,12 @@ export const updateGasto = async (gasto: Gasto): Promise<Gasto> => {
           categoria: gastoToPersist.categoria,
           fecha: fechaValue,
           [SUPABASE_GASTOS_PAYMENT_COLUMN]: gastoToPersist.metodoPago,
+          lugar_compra: gastoToPersist.lugarCompra ?? null,
+          es_inventariable: Boolean(gastoToPersist.esInventariable),
+          menu_item_id: gastoToPersist.menuItemId ?? null,
+          cantidad_inventario: gastoToPersist.cantidadInventario ?? null,
+          inventario_tipo: gastoToPersist.inventarioTipo ?? null,
+          unidad_inventario: gastoToPersist.unidadInventario ?? null,
         })
         .eq('id', gastoToPersist.id);
       if (error) throw error;
@@ -2611,6 +3606,11 @@ export const updateGasto = async (gasto: Gasto): Promise<Gasto> => {
 
   // Local storage fallback
   const gastos = getLocalData<Gasto[]>('savia-gastos', []).map(normalizeGastoRecord);
+  const previous = gastos.find((entry) => entry.id === gastoToPersist.id);
+  if (previous) {
+    applyLocalInventoryDeltaFromGasto(previous, -1);
+  }
+  applyLocalInventoryDeltaFromGasto(gastoToPersist, 1);
   const updatedGastos = gastos.map(g => g.id === gastoToPersist.id ? gastoToPersist : g);
   setLocalData('savia-gastos', updatedGastos);
   return gastoToPersist;
@@ -2619,6 +3619,12 @@ export const updateGasto = async (gasto: Gasto): Promise<Gasto> => {
 export const deleteGasto = async (id: string): Promise<void> => {
   if (await ensureSupabaseReady()) {
     try {
+      const { error: deleteHistoryError } = await supabase
+        .from('inventario_compra_historial')
+        .delete()
+        .eq('gasto_id', id);
+      if (deleteHistoryError) throw deleteHistoryError;
+
       const { error } = await supabase.from('gastos').delete().eq('id', id);
       if (error) throw error;
       return;
@@ -2629,6 +3635,22 @@ export const deleteGasto = async (id: string): Promise<void> => {
 
   // Local storage fallback
   const gastos = getLocalData<Gasto[]>('savia-gastos', []).map(normalizeGastoRecord);
+  const itemsMap = readLocalGastoInventarioItemsMap();
+  const multiItems = itemsMap[id] ?? [];
+  if (multiItems.length > 0) {
+    applyLocalInventoryDeltaFromItems(multiItems, -1);
+    delete itemsMap[id];
+    persistLocalGastoInventarioItemsMap(itemsMap);
+  }
+  const deleted = gastos.find((gasto) => gasto.id === id);
+  if (deleted && multiItems.length === 0) {
+    applyLocalInventoryDeltaFromGasto(deleted, -1);
+  }
+  const localHistory = readLocalInventoryPriceHistory();
+  const filteredHistory = localHistory.filter((entry) => entry.gastoId !== id);
+  if (filteredHistory.length !== localHistory.length) {
+    persistLocalInventoryPriceHistory(filteredHistory);
+  }
   const filteredGastos = gastos.filter(gasto => gasto.id !== id);
   setLocalData('savia-gastos', filteredGastos);
 };
@@ -2850,8 +3872,12 @@ export const dataService = {
   fetchEmployeeWeeklyHoursHistory,
   saveEmployeeWeeklyHours,
   fetchEmployeeCredits,
+  fetchInventoryPriceHistory,
+  fetchInventoryPriceHistorySummary,
+  fetchInventoryPriceStats,
   fetchGastos,
   createGasto,
+  createGastoWithInventarioItems,
   updateGasto,
   deleteGasto,
   fetchCajaBolsillos,

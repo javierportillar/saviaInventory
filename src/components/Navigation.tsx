@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ModuleType, User, DatabaseConnectionState } from '../types';
 import {
   Home,
@@ -46,7 +46,9 @@ const modules = [
 
 export function Navigation({ activeModule, onModuleChange, user, onLogout, connectionStatus }: NavigationProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isDesktopMenuHovered, setIsDesktopMenuHovered] = useState(false);
   const [isDesktopMenuExpanded, setIsDesktopMenuExpanded] = useState(false);
+  const desktopExpandTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const allowedModules =
     user.role === 'admin'
@@ -83,6 +85,34 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
     setIsMobileMenuOpen(false);
   };
 
+  const handleDesktopMouseEnter = () => {
+    if (desktopExpandTimeoutRef.current) {
+      clearTimeout(desktopExpandTimeoutRef.current);
+    }
+    setIsDesktopMenuHovered(true);
+    desktopExpandTimeoutRef.current = setTimeout(() => {
+      setIsDesktopMenuExpanded(true);
+      desktopExpandTimeoutRef.current = null;
+    }, 150);
+  };
+
+  const handleDesktopMouseLeave = () => {
+    if (desktopExpandTimeoutRef.current) {
+      clearTimeout(desktopExpandTimeoutRef.current);
+      desktopExpandTimeoutRef.current = null;
+    }
+    setIsDesktopMenuExpanded(false);
+    setIsDesktopMenuHovered(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (desktopExpandTimeoutRef.current) {
+        clearTimeout(desktopExpandTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const desktopIconSize = isDesktopMenuExpanded ? 26 : 20;
   const desktopLogoClass = isDesktopMenuExpanded ? 'w-10 h-10 text-lg' : 'w-8 h-8 text-base';
 
@@ -91,14 +121,14 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
       <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
         <div
           className={`ui-page transition-all duration-300 ease-out ${
-            isDesktopMenuExpanded ? 'mx-0 px-6' : ''
+            isDesktopMenuHovered ? 'mx-0 px-6' : ''
           }`}
-          style={isDesktopMenuExpanded ? { maxWidth: '100%' } : undefined}
+          style={isDesktopMenuHovered ? { maxWidth: '100%' } : undefined}
         >
           <div
             className="hidden lg:block"
-            onMouseEnter={() => setIsDesktopMenuExpanded(true)}
-            onMouseLeave={() => setIsDesktopMenuExpanded(false)}
+            onMouseEnter={handleDesktopMouseEnter}
+            onMouseLeave={handleDesktopMouseLeave}
           >
             {isDesktopMenuExpanded ? (
               <div className="flex items-center justify-between gap-6 py-4">
@@ -110,13 +140,13 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
                     S
                   </div>
                 </div>
-                <div className="flex flex-1 flex-wrap items-end justify-center gap-3 min-w-0">
+                <div className="flex flex-1 items-end justify-center gap-3 min-w-0 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                   {allowedModules.map(({ id, label, icon: Icon }) => (
                     <button
                       key={id}
                       onClick={() => handleModuleClick(id)}
                       className={`
-                        group flex flex-col items-center gap-1 rounded-xl px-3 py-2 transition-all duration-200
+                        group flex flex-col items-center gap-1 rounded-xl px-3 py-2 transition-all duration-200 flex-shrink-0
                         ${
                           activeModule === id
                             ? 'text-white shadow-md'
@@ -138,7 +168,7 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
                   ))}
                   <button
                     onClick={handleLogout}
-                    className="group flex flex-col items-center gap-1 rounded-xl px-3 py-2 text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-all duration-200"
+                    className="group flex flex-col items-center gap-1 rounded-xl px-3 py-2 text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-all duration-200 flex-shrink-0"
                   >
                     <LogOut
                       size={desktopIconSize}

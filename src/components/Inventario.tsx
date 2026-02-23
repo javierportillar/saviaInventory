@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { MenuItem } from '../types';
-import { Package, AlertTriangle, Plus, Minus, Search, Edit3, Trash, Filter } from 'lucide-react';
+import { InventoryPriceHistoryRecord, MenuItem } from '../types';
+import { Package, AlertTriangle, Plus, Minus, Search, Edit3, Trash, Filter, Clock3, MapPin } from 'lucide-react';
 import { COLORS } from '../data/menu';
-import { formatCOP } from '../utils/format';
+import { formatCOP, formatDateTime } from '../utils/format';
 import { generateMenuItemCode } from '../utils/strings';
+import dataService from '../lib/dataService';
 
 interface InventarioProps {
   menuItems: MenuItem[];
@@ -17,13 +18,16 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [inventoryFilter, setInventoryFilter] = useState<'all' | 'inventariables' | 'no-inventariables'>('all');
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
+  const [showHistorySummary, setShowHistorySummary] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyRows, setHistoryRows] = useState<InventoryPriceHistoryRecord[]>([]);
   const [newItem, setNewItem] = useState<{
     nombre: string;
     precio: number | null;
     categoria: string;
     inventarioCategoria: 'Inventariables' | 'No inventariables';
     inventarioTipo: 'cantidad' | 'gramos';
-    unidadMedida: 'kg' | 'g' | 'mg' | 'ml';
+    unidadMedida: 'g';
     stock: number | null;
     descripcion?: string;
   } | null>(null);
@@ -77,6 +81,93 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
   const lowStockItems = filteredItems.filter((item) => (item.stock ?? 0) < 10);
   const outOfStockItems = filteredItems.filter((item) => (item.stock ?? 0) === 0);
 
+  const groupedHistory = useMemo(() => {
+    const byProduct = new Map<string, { productName: string; rows: InventoryPriceHistoryRecord[] }>();
+
+    historyRows.forEach((row) => {
+      const productName = row.menuItemNombre?.trim() || row.menuItemId;
+      const key = `${row.menuItemId}::${productName}`;
+      const current = byProduct.get(key);
+      if (current) {
+        current.rows.push(row);
+      } else {
+        byProduct.set(key, { productName, rows: [row] });
+      }
+    });
+
+    return Array.from(byProduct.values())
+      .map((product) => {
+        const rows = [...product.rows].sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+
+        const places = new Map<string, InventoryPriceHistoryRecord[]>();
+        rows.forEach((row) => {
+          const placeKey = row.lugarCompra?.trim() || 'Sin lugar';
+          const current = places.get(placeKey);
+          if (current) {
+            current.push(row);
+          } else {
+            places.set(placeKey, [row]);
+          }
+        });
+
+        const placeComparison = Array.from(places.entries()).map(([place, placeRows]) => {
+          const sortedByDate = [...placeRows].sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+          const unitPrices = sortedByDate.map((row) => row.precioUnitario);
+          const bestUnitPrice = Math.min(...unitPrices);
+          const lastUnitPrice = sortedByDate[0]?.precioUnitario ?? bestUnitPrice;
+          const avgUnitPrice = unitPrices.reduce((acc, value) => acc + value, 0) / unitPrices.length;
+          const previousPrices = unitPrices.slice(1);
+          const previousAvgUnitPrice = previousPrices.length > 0
+            ? previousPrices.reduce((acc, value) => acc + value, 0) / previousPrices.length
+            : avgUnitPrice;
+          const lastPurchase = sortedByDate[0];
+          const lastPurchaseTime = new Date(lastPurchase?.createdAt ?? 0).getTime();
+          const previousGlobalPurchase = rows
+            .filter((row) => new Date(row.createdAt).getTime() < lastPurchaseTime)
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+          const previousGlobalUnitPrice = Number(previousGlobalPurchase?.precioUnitario ?? 0);
+          // Variación en clave de ahorro: positivo (verde) = más barato, negativo (rojo) = más caro.
+          const variationVsPreviousAvg = previousGlobalUnitPrice > 0
+            ? ((previousGlobalUnitPrice - lastUnitPrice) / previousGlobalUnitPrice) * 100
+            : 0;
+
+          return {
+            place,
+            count: sortedByDate.length,
+            bestUnitPrice,
+            lastUnitPrice,
+            avgUnitPrice,
+            previousAvgUnitPrice,
+            variationVsPreviousAvg,
+            previousGlobalUnitPrice,
+            lastDate: sortedByDate[0]?.createdAt,
+            lastQuantity: Number(lastPurchase?.cantidad ?? 0),
+            lastQuantityUnit: lastPurchase?.unidad || (lastPurchase?.unidadTipo === 'cantidad' ? 'unidad' : 'g'),
+            lastPurchaseTotal: Number(lastPurchase?.precioTotal ?? 0),
+          };
+        });
+
+        placeComparison.sort((a, b) => a.bestUnitPrice - b.bestUnitPrice);
+
+        const globalBest = placeComparison.length > 0
+          ? Math.min(...placeComparison.map((entry) => entry.bestUnitPrice))
+          : 0;
+
+        return {
+          productName: product.productName,
+          rows,
+          placeComparison,
+          globalBest,
+          unitLabel: rows[0]?.unidadTipo === 'cantidad' ? 'unidad' : 'g',
+        };
+      })
+      .sort((a, b) => a.productName.localeCompare(b.productName, 'es', { sensitivity: 'base' }));
+  }, [historyRows]);
+
   const quickAdjustStock = (itemId: string, adjustment: number) => {
     const item = menuItems.find((i) => i.id === itemId);
     if (item) {
@@ -87,9 +178,31 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
 
   const handleSaveEdit = () => {
     if (editingItem) {
-      onUpdateMenuItem(editingItem);
+      const normalizedEditingItem: MenuItem = {
+        ...editingItem,
+        unidadMedida:
+          editingItem.inventarioCategoria === 'Inventariables' && editingItem.inventarioTipo === 'gramos'
+            ? 'g'
+            : undefined,
+      };
+      onUpdateMenuItem(normalizedEditingItem);
       setEditingItem(null);
+      return;
     }
+  };
+
+  const getItemTypeLabel = (item: Pick<MenuItem, 'inventarioCategoria' | 'inventarioTipo'>) => {
+    if (item.inventarioCategoria !== 'Inventariables') {
+      return 'No inventariable';
+    }
+    return item.inventarioTipo === 'cantidad' ? 'Unidad' : 'Peso (g)';
+  };
+
+  const getStockUnitLabel = (item: Pick<MenuItem, 'inventarioCategoria' | 'inventarioTipo'>) => {
+    if (item.inventarioCategoria !== 'Inventariables') {
+      return '';
+    }
+    return item.inventarioTipo === 'cantidad' ? 'unidades' : 'g';
   };
 
   const handleSaveNew = () => {
@@ -107,11 +220,29 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
         inventarioTipo: newItem.inventarioCategoria === 'Inventariables' ? newItem.inventarioTipo : undefined,
         unidadMedida:
           newItem.inventarioCategoria === 'Inventariables' && newItem.inventarioTipo === 'gramos'
-            ? newItem.unidadMedida
+            ? 'g'
             : undefined,
       });
       setNewItem(null);
     }
+  };
+
+  const openHistorySummary = async () => {
+    setShowHistorySummary(true);
+    setHistoryRows([]);
+    setHistoryLoading(true);
+    try {
+      const rows = await dataService.fetchInventoryPriceHistorySummary(300);
+      setHistoryRows(rows);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const closeHistorySummary = () => {
+    setShowHistorySummary(false);
+    setHistoryRows([]);
+    setHistoryLoading(false);
   };
 
   const renderItemCard = (item: MenuItem) => (
@@ -175,6 +306,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
                     setEditingItem({
                       ...editingItem,
                       inventarioTipo: e.target.value as 'cantidad' | 'gramos',
+                      unidadMedida: e.target.value === 'gramos' ? 'g' : undefined,
                     })
                   }
                 >
@@ -182,27 +314,15 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
                   <option value="gramos">Gramos</option>
                 </select>
                 {editingItem.inventarioTipo === 'gramos' && (
-                  <select
-                    className="border border-gray-300 rounded px-3 py-2"
-                    value={editingItem.unidadMedida ?? 'kg'}
-                    onChange={e =>
-                      setEditingItem({
-                        ...editingItem,
-                        unidadMedida: e.target.value as 'kg' | 'g' | 'mg' | 'ml',
-                      })
-                    }
-                  >
-                    <option value="kg">kg</option>
-                    <option value="g">g</option>
-                    <option value="mg">mg</option>
-                    <option value="ml">ml</option>
-                  </select>
+                  <div className="border border-gray-300 rounded px-3 py-2 bg-gray-50 text-sm text-gray-600">
+                    Unidad fija: gramos (g)
+                  </div>
                 )}
                 <input
                   type="number"
                   min={0}
                   className="border border-gray-300 rounded px-3 py-2"
-                  placeholder={editingItem.inventarioTipo === 'gramos' ? 'Peso (ej. 10)' : 'Cantidad (ej. 10)'}
+                  placeholder={editingItem.inventarioTipo === 'gramos' ? 'Peso en gramos (ej. 500)' : 'Cantidad (ej. 10)'}
                   value={editingItem.stock === 0 ? '' : editingItem.stock}
                   onChange={e => {
                     const value = parseInt(e.target.value, 10);
@@ -232,6 +352,9 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
               <p className="text-sm text-gray-600 mb-1">
                 {item.categoria} • {item.inventarioCategoria ?? 'No inventariables'}
               </p>
+              <p className="text-xs text-gray-500 mb-1">
+                Tipo: {getItemTypeLabel(item)}
+              </p>
               <p className="text-sm font-medium" style={{ color: COLORS.accent }}>
                 {formatCOP(item.precio)}
               </p>
@@ -248,7 +371,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
                 <Package size={12} />
                 <span>
                   Stock: {item.stock ?? 0}
-                  {item.inventarioTipo === 'gramos' && item.unidadMedida ? ` ${item.unidadMedida}` : ''}
+                  {getStockUnitLabel(item) ? ` ${getStockUnitLabel(item)}` : ''}
                 </span>
               </div>
             </div>
@@ -343,7 +466,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
                 {lowStockItems.slice(0,3).map(item => (
                   <p key={item.id} className="text-sm text-yellow-700">
                     {item.nombre} ({item.stock}
-                    {item.inventarioTipo === 'gramos' && item.unidadMedida ? ` ${item.unidadMedida}` : ''})
+                    {getStockUnitLabel(item) ? ` ${getStockUnitLabel(item)}` : ''})
                   </p>
                 ))}
                 {lowStockItems.length > 3 && (
@@ -400,24 +523,32 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
           </div>
 
           <div className="sm:ml-auto w-full sm:w-auto">
-            <button
-              onClick={() =>
-                setNewItem({
-                  nombre: '',
-                  precio: null,
-                  categoria: '',
-                  inventarioCategoria: 'No inventariables',
-                  inventarioTipo: 'cantidad',
-                  unidadMedida: 'kg',
-                  stock: null,
-                  descripcion: '',
-                })
-              }
-              className="flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium shadow-sm"
-              style={{ backgroundColor: COLORS.accent }}
-            >
-              <Plus size={16} /> Agregar producto
-            </button>
+            <div className="flex w-full sm:w-auto gap-2">
+              <button
+                onClick={openHistorySummary}
+                className="flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <Clock3 size={16} /> Historial general
+              </button>
+              <button
+                onClick={() =>
+                  setNewItem({
+                    nombre: '',
+                    precio: null,
+                    categoria: '',
+                    inventarioCategoria: 'No inventariables',
+                    inventarioTipo: 'cantidad',
+                    unidadMedida: 'g',
+                    stock: null,
+                    descripcion: '',
+                  })
+                }
+                className="flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium shadow-sm"
+                style={{ backgroundColor: COLORS.accent }}
+              >
+                <Plus size={16} /> Agregar producto
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -474,6 +605,7 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
                     setNewItem({
                       ...newItem,
                       inventarioTipo: e.target.value as 'cantidad' | 'gramos',
+                      unidadMedida: 'g',
                     })
                   }
                 >
@@ -481,27 +613,15 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
                   <option value="gramos">Gramos</option>
                 </select>
                 {newItem.inventarioTipo === 'gramos' && (
-                  <select
-                    className="border border-gray-300 rounded px-3 py-2"
-                    value={newItem.unidadMedida}
-                    onChange={e =>
-                      setNewItem({
-                        ...newItem,
-                        unidadMedida: e.target.value as 'kg' | 'g' | 'mg' | 'ml',
-                      })
-                    }
-                  >
-                    <option value="kg">kg</option>
-                    <option value="g">g</option>
-                    <option value="mg">mg</option>
-                    <option value="ml">ml</option>
-                  </select>
+                  <div className="border border-gray-300 rounded px-3 py-2 bg-gray-50 text-sm text-gray-600">
+                    Unidad fija: gramos (g)
+                  </div>
                 )}
                 <input
                   type="number"
                   min={0}
                   className="border border-gray-300 rounded px-3 py-2"
-                  placeholder={newItem.inventarioTipo === 'gramos' ? 'Peso (ej. 10)' : 'Cantidad (ej. 10)'}
+                  placeholder={newItem.inventarioTipo === 'gramos' ? 'Peso en gramos (ej. 500)' : 'Cantidad (ej. 10)'}
                   value={newItem.stock ?? ''}
                   onChange={e => {
                     const value = parseInt(e.target.value, 10);
@@ -519,6 +639,108 @@ export function Inventario({ menuItems, onUpdateMenuItem, onCreateMenuItem, onDe
           <div className="mt-4 flex gap-2">
             <button onClick={handleSaveNew} className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">Guardar</button>
             <button onClick={() => setNewItem(null)} className="px-3 py-1 bg-gray-400 text-white rounded text-sm hover:bg-gray-500">Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {showHistorySummary && (
+        <div className="fixed inset-0 z-50 bg-black/50 p-4 flex items-center justify-center">
+          <div className="bg-white w-full max-w-3xl rounded-xl shadow-xl border border-gray-200 max-h-[85vh] overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+              <div>
+                <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
+                  Historial general de compras
+                </h3>
+                <p className="text-sm text-gray-600">
+                  Registros históricos de inventariables
+                </p>
+              </div>
+              <button
+                onClick={closeHistorySummary}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm hover:bg-gray-50"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="p-4 overflow-auto max-h-[calc(85vh-72px)]">
+              {historyLoading ? (
+                <p className="text-sm text-gray-500">Cargando historial...</p>
+              ) : historyRows.length === 0 ? (
+                <p className="text-sm text-gray-500">No hay compras registradas todavía.</p>
+              ) : (
+                <div className="space-y-4">
+                  {groupedHistory.map((group) => (
+                    <div key={group.productName} className="rounded-xl border border-slate-200 overflow-hidden">
+                      <div className="px-4 py-3 bg-gradient-to-r from-slate-50 to-white border-b border-slate-200">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                          <h4 className="text-base font-semibold" style={{ color: COLORS.dark }}>
+                            {group.productName}
+                          </h4>
+                          <div className="text-xs text-slate-500">
+                            Mejor referencia: <span className="font-semibold text-emerald-700">{formatCOP(group.globalBest)} / {group.unitLabel}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="px-4 py-3 overflow-x-auto">
+                        <table className="min-w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-slate-500 border-b border-slate-200">
+                              <th className="py-2 pr-3">Lugar</th>
+                              <th className="py-2 pr-3">Mejor precio</th>
+                              <th className="py-2 pr-3">Último precio</th>
+                              <th className="py-2 pr-3">Promedio</th>
+                              <th className="py-2 pr-3">Compra reciente</th>
+                              <th className="py-2 pr-3">Variación</th>
+                              <th className="py-2">Fecha compra</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.placeComparison.map((place) => {
+                              const delta = place.variationVsPreviousAvg;
+                              const deltaLabel = `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%`;
+                              const deltaClass = delta < 0
+                                ? 'text-rose-700'
+                                : delta > 0
+                                  ? 'text-emerald-700'
+                                  : 'text-slate-500';
+                              const isBest = Math.abs(place.bestUnitPrice - group.globalBest) < 0.0001;
+
+                              return (
+                                <tr key={`${group.productName}-${place.place}`} className="border-b border-slate-100 last:border-b-0">
+                                  <td className="py-2 pr-3">
+                                    <span className="inline-flex items-center gap-1">
+                                      <MapPin size={13} className="text-slate-400" />
+                                      <span>{place.place}</span>
+                                      {isBest && (
+                                        <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                          Mejor
+                                        </span>
+                                      )}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 pr-3 font-medium">{formatCOP(place.bestUnitPrice)} / {group.unitLabel}</td>
+                                  <td className="py-2 pr-3">{formatCOP(place.lastUnitPrice)} / {group.unitLabel}</td>
+                                  <td className="py-2 pr-3">{formatCOP(place.avgUnitPrice)} / {group.unitLabel}</td>
+                                  <td className="py-2 pr-3 whitespace-nowrap text-slate-700">
+                                    {place.lastQuantity} {place.lastQuantityUnit} por {formatCOP(place.lastPurchaseTotal)}
+                                  </td>
+                                  <td className={`py-2 pr-3 font-medium ${deltaClass}`}>{deltaLabel}</td>
+                                  <td className="py-2 text-slate-600 whitespace-nowrap">
+                                    {place.lastDate ? formatDateTime(new Date(place.lastDate)) : '-'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
