@@ -18,10 +18,12 @@ import {
   BOWL_BASE_LIMIT,
   BOWL_BASE_OPTIONS,
   BOWL_PROTEIN_OPTIONS,
+  BOWL_SALADO_COMBO_EXTRA_COST,
   BOWL_SALADO_TUNA_EXTRA_COST,
   BOWL_TOPPING_MIN,
   BOWL_TOPPING_LIMIT,
   BOWL_TOPPING_OPTIONS,
+  getBowlSaladoComboExtraCost,
   getBowlSaladoProteinExtraCost,
   isBowlSalado,
 } from '../constants/bowl';
@@ -82,6 +84,7 @@ export function Comandas({
   const [selectedBowlBases, setSelectedBowlBases] = useState<string[]>([]);
   const [selectedBowlToppings, setSelectedBowlToppings] = useState<string[]>([]);
   const [selectedBowlProtein, setSelectedBowlProtein] = useState<string | null>(null);
+  const [includeSaladoCombo, setIncludeSaladoCombo] = useState(false);
   const [selectedDateKey, setSelectedDateKey] = useState<string>(() => getDateKey(new Date()));
   const [currentPage, setCurrentPage] = useState(1);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
@@ -205,6 +208,7 @@ export function Comandas({
     setSelectedBowlBases([]);
     setSelectedBowlToppings([]);
     setSelectedBowlProtein(null);
+    setIncludeSaladoCombo(false);
   };
 
   const toggleBowlOption = (
@@ -448,6 +452,9 @@ export function Comandas({
       getBowlSaladoProteinExtraCost(selectedBowlProtein) > 0
         ? `Adición proteína (Atún): +${formatCOP(BOWL_SALADO_TUNA_EXTRA_COST)}`
         : undefined,
+      includeSaladoCombo
+        ? `Combo bowl (+${formatCOP(BOWL_SALADO_COMBO_EXTRA_COST)}): incluye bebida`
+        : undefined,
     ]
       .filter(Boolean)
       .join('\n');
@@ -457,6 +464,7 @@ export function Comandas({
       [...selectedBowlBases].sort().join('-'),
       [...selectedBowlToppings].sort().join('-'),
       selectedBowlProtein,
+      includeSaladoCombo ? 'combo' : 'sin-combo',
     ].join('|');
 
     addMenuItemToEditingOrder(bowlModalItem, {
@@ -466,8 +474,12 @@ export function Comandas({
         bases: selectedBowlBases,
         toppings: selectedBowlToppings,
         proteina: selectedBowlProtein,
+        esCombo: includeSaladoCombo,
       },
-      precioUnitario: bowlModalItem.precio + getBowlSaladoProteinExtraCost(selectedBowlProtein),
+      precioUnitario:
+        bowlModalItem.precio +
+        getBowlSaladoProteinExtraCost(selectedBowlProtein) +
+        getBowlSaladoComboExtraCost(includeSaladoCombo),
     });
 
     setBowlModalItem(null);
@@ -487,6 +499,11 @@ export function Comandas({
     selectedBowlToppings.length >= BOWL_TOPPING_MIN &&
     selectedBowlToppings.length <= BOWL_TOPPING_LIMIT &&
     !!selectedBowlProtein;
+  const saladoPreviewPrice = bowlModalItem
+    ? bowlModalItem.precio +
+      getBowlSaladoProteinExtraCost(selectedBowlProtein) +
+      getBowlSaladoComboExtraCost(includeSaladoCombo)
+    : 0;
 
   const saveOrderChanges = async () => {
     if (!editingOrder || isSavingOrderChanges) return;
@@ -1397,42 +1414,62 @@ export function Comandas({
                 </div>
               </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
-                    Elige tu proteína
-                  </h4>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {BOWL_PROTEIN_OPTIONS.map((protein) => {
-                    const selected = selectedBowlProtein === protein;
-                    return (
-                      <button
-                        key={protein}
-                        type="button"
-                        onClick={() => handleProteinSelection(protein)}
-                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
-                          selected
-                            ? 'border-transparent shadow-sm'
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                        style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
-                      >
-                        <span>
-                          {protein}
-                          {getBowlSaladoProteinExtraCost(protein) > 0 ? ` (+${formatCOP(BOWL_SALADO_TUNA_EXTRA_COST)})` : ''}
-                        </span>
-                        {selected && (
-                          <span
-                            className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"
-                            style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
-                          >
-                            <Check size={16} />
+              <div className="space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                      Elige tu proteína
+                    </h4>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {BOWL_PROTEIN_OPTIONS.map((protein) => {
+                      const selected = selectedBowlProtein === protein;
+                      return (
+                        <button
+                          key={protein}
+                          type="button"
+                          onClick={() => handleProteinSelection(protein)}
+                          className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
+                            selected
+                              ? 'border-transparent shadow-sm'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                          style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
+                        >
+                          <span>
+                            {protein}
+                            {getBowlSaladoProteinExtraCost(protein) > 0 ? ` (+${formatCOP(BOWL_SALADO_TUNA_EXTRA_COST)})` : ''}
                           </span>
-                        )}
-                      </button>
-                    );
-                  })}
+                          {selected && (
+                            <span
+                              className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"
+                              style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
+                            >
+                              <Check size={16} />
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-4 space-y-2">
+                  <label className="flex items-center justify-between gap-3 cursor-pointer">
+                    <span className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                      Pedir en combo (incluye bebida)
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={includeSaladoCombo}
+                      onChange={(e) => setIncludeSaladoCombo(e.target.checked)}
+                    />
+                  </label>
+                  <p className="text-xs text-gray-500">
+                    Combo bowl: +{formatCOP(BOWL_SALADO_COMBO_EXTRA_COST)}
+                  </p>
+                  <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>
+                    Precio final: {formatCOP(saladoPreviewPrice)}
+                  </p>
                 </div>
               </div>
             </div>

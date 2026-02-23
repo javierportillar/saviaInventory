@@ -55,6 +55,7 @@ export interface BowlCustomization {
   bases: string[];
   toppings: string[];
   proteina?: string;
+  esCombo?: boolean;
   yogurtGriego?: boolean;
   toppingExtraCount?: number;
   extraCost?: number;
