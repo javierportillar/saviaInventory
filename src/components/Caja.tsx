@@ -25,9 +25,11 @@ import {
   BOWL_FRUTAL_TOPPING_OPTIONS,
   BOWL_FRUTAL_YOGURT_COST,
   BOWL_PROTEIN_OPTIONS,
+  BOWL_SALADO_TUNA_EXTRA_COST,
   BOWL_TOPPING_MIN,
   BOWL_TOPPING_LIMIT,
   BOWL_TOPPING_OPTIONS,
+  getBowlSaladoProteinExtraCost,
   isBowlFrutal,
   isBowlSalado,
 } from '../constants/bowl';
@@ -222,7 +224,12 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
       `Bases: ${selectedBowlBases.join(', ')}`,
       `Toppings: ${selectedBowlToppings.join(', ')}`,
       `Proteína: ${selectedBowlProtein}`,
-    ].join('\n');
+      getBowlSaladoProteinExtraCost(selectedBowlProtein) > 0
+        ? `Adición proteína (Atún): +${formatCOP(BOWL_SALADO_TUNA_EXTRA_COST)}`
+        : undefined,
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     const customKey = [
       bowlModalItem.id,
@@ -240,6 +247,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
         toppings: selectedBowlToppings,
         proteina: selectedBowlProtein,
       },
+      precioUnitario: bowlModalItem.precio + getBowlSaladoProteinExtraCost(selectedBowlProtein),
     });
 
     setBowlModalItem(null);
@@ -970,7 +978,10 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                           }`}
                           style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
                         >
-                          <span>{protein}</span>
+                          <span>
+                            {protein}
+                            {getBowlSaladoProteinExtraCost(protein) > 0 ? ` (+${formatCOP(BOWL_SALADO_TUNA_EXTRA_COST)})` : ''}
+                          </span>
                           {selected && (
                             <span
                               className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"

@@ -18,9 +18,11 @@ import {
   BOWL_BASE_LIMIT,
   BOWL_BASE_OPTIONS,
   BOWL_PROTEIN_OPTIONS,
+  BOWL_SALADO_TUNA_EXTRA_COST,
   BOWL_TOPPING_MIN,
   BOWL_TOPPING_LIMIT,
   BOWL_TOPPING_OPTIONS,
+  getBowlSaladoProteinExtraCost,
   isBowlSalado,
 } from '../constants/bowl';
 import { formatPaymentSummary, getOrderAllocations, isOrderPaid, isOrderPaymentHandled } from '../utils/payments';
@@ -247,6 +249,7 @@ export function Comandas({
       notas?: string;
       customKey?: string;
       bowlCustomization?: CartItem['bowlCustomization'];
+      precioUnitario?: number;
     }
   ) => {
     setEditingOrder(prev => {
@@ -265,10 +268,12 @@ export function Comandas({
             ? {
                 ...cartItem,
                 cantidad: cartItem.cantidad + 1,
-                precioUnitario: typeof cartItem.precioUnitario === 'number'
-                  ? cartItem.precioUnitario
-                  : menuItem.precio,
-              }
+            precioUnitario: typeof cartItem.precioUnitario === 'number'
+              ? cartItem.precioUnitario
+              : typeof options?.precioUnitario === 'number'
+                ? options.precioUnitario
+                : menuItem.precio,
+          }
             : cartItem
         );
       } else {
@@ -280,7 +285,7 @@ export function Comandas({
             notas: options?.notas,
             customKey: options?.customKey,
             bowlCustomization: options?.bowlCustomization,
-            precioUnitario: menuItem.precio,
+            precioUnitario: typeof options?.precioUnitario === 'number' ? options.precioUnitario : menuItem.precio,
             studentDiscount: false,
           },
         ];
@@ -440,7 +445,12 @@ export function Comandas({
       `Bases: ${selectedBowlBases.join(', ')}`,
       `Toppings: ${selectedBowlToppings.join(', ')}`,
       `Proteína: ${selectedBowlProtein}`,
-    ].join('\n');
+      getBowlSaladoProteinExtraCost(selectedBowlProtein) > 0
+        ? `Adición proteína (Atún): +${formatCOP(BOWL_SALADO_TUNA_EXTRA_COST)}`
+        : undefined,
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     const customKey = [
       bowlModalItem.id,
@@ -457,6 +467,7 @@ export function Comandas({
         toppings: selectedBowlToppings,
         proteina: selectedBowlProtein,
       },
+      precioUnitario: bowlModalItem.precio + getBowlSaladoProteinExtraCost(selectedBowlProtein),
     });
 
     setBowlModalItem(null);
@@ -1407,7 +1418,10 @@ export function Comandas({
                         }`}
                         style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
                       >
-                        <span>{protein}</span>
+                        <span>
+                          {protein}
+                          {getBowlSaladoProteinExtraCost(protein) > 0 ? ` (+${formatCOP(BOWL_SALADO_TUNA_EXTRA_COST)})` : ''}
+                        </span>
                         {selected && (
                           <span
                             className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"
