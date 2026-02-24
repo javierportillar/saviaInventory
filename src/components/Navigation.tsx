@@ -55,25 +55,26 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
       ? modules
       : modules.filter(m => ['caja', 'comandas', 'cocina', 'clientes', 'gastos', 'inventario'].includes(m.id));
 
-  const statusConfig: Record<DatabaseConnectionState, { label: string; dotClass: string; textClass: string }> = {
+  const statusConfig: Record<DatabaseConnectionState, { label: string; ringClass: string; textClass: string }> = {
     checking: {
       label: 'Verificando conexión…',
-      dotClass: 'bg-yellow-400 animate-pulse',
-      textClass: 'text-yellow-700',
+      ringClass: 'border-orange-500',
+      textClass: 'text-orange-700',
     },
     online: {
       label: 'Conectado a Base de Datos',
-      dotClass: 'bg-green-500',
+      ringClass: 'border-green-500',
       textClass: 'text-green-700',
     },
     local: {
       label: 'Modo sin conexión (local)',
-      dotClass: 'bg-red-500',
+      ringClass: 'border-red-500',
       textClass: 'text-red-600',
     },
   };
 
   const currentStatus = statusConfig[connectionStatus];
+  const showStatusTextOnIdleDesktop = connectionStatus !== 'online';
 
   const handleModuleClick = (moduleId: ModuleType) => {
     onModuleChange(moduleId);
@@ -178,8 +179,11 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
                   </button>
                 </div>
                 <div className={`flex items-center gap-2 text-sm font-medium flex-shrink-0 ${currentStatus.textClass}`}>
-                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${currentStatus.dotClass}`} />
-                  <span>{currentStatus.label}</span>
+                  <span
+                    className={`inline-flex h-3.5 w-3.5 rounded-full border-2 border-t-transparent animate-spin ${currentStatus.ringClass}`}
+                    aria-label={currentStatus.label}
+                    title={currentStatus.label}
+                  />
                 </div>
               </div>
             ) : (
@@ -197,8 +201,12 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
                 </div>
                 <div className="flex items-center gap-4">
                   <div className={`flex items-center gap-2 text-sm font-medium ${currentStatus.textClass}`}>
-                    <span className={`inline-flex h-2.5 w-2.5 rounded-full ${currentStatus.dotClass}`} />
-                    <span>{currentStatus.label}</span>
+                    <span
+                      className={`inline-flex h-3.5 w-3.5 rounded-full border-2 border-t-transparent animate-spin ${currentStatus.ringClass}`}
+                      aria-label={currentStatus.label}
+                      title={currentStatus.label}
+                    />
+                    {showStatusTextOnIdleDesktop && <span>{currentStatus.label}</span>}
                   </div>
                   <div className="flex items-center gap-2 flex-nowrap">
                     {allowedModules.map(({ id, label, icon: Icon }) => (
@@ -294,7 +302,7 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
 
             <div className="py-4 flex-1 overflow-y-auto">
               <div className={`px-4 pb-4 text-sm font-medium flex items-center gap-2 ${currentStatus.textClass}`}>
-                <span className={`inline-flex h-2.5 w-2.5 rounded-full ${currentStatus.dotClass}`} />
+                <span className={`inline-flex h-3.5 w-3.5 rounded-full border-2 border-t-transparent animate-spin ${currentStatus.ringClass}`} />
                 <span>{currentStatus.label}</span>
               </div>
               {allowedModules.map(({ id, label, icon: Icon }) => (
