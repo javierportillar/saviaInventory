@@ -25,12 +25,14 @@ import {
   BOWL_FRUTAL_TOPPING_OPTIONS,
   BOWL_FRUTAL_YOGURT_COST,
   BOWL_SALADO_COMBO_EXTRA_COST,
+  BOWL_SALADO_EXTRA_PROTEIN_COST,
   BOWL_PROTEIN_OPTIONS,
   BOWL_SALADO_TUNA_EXTRA_COST,
   BOWL_TOPPING_MIN,
   BOWL_TOPPING_LIMIT,
   BOWL_TOPPING_OPTIONS,
   getBowlSaladoComboExtraCost,
+  getBowlSaladoAdditionalProteinsCost,
   getBowlSaladoProteinExtraCost,
   isBowlFrutal,
   isBowlSalado,
@@ -114,7 +116,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   const [bowlModalItem, setBowlModalItem] = useState<MenuItem | null>(null);
   const [selectedBowlBases, setSelectedBowlBases] = useState<string[]>([]);
   const [selectedBowlToppings, setSelectedBowlToppings] = useState<string[]>([]);
-  const [selectedBowlProtein, setSelectedBowlProtein] = useState<string | null>(null);
+  const [selectedBowlProteins, setSelectedBowlProteins] = useState<string[]>([]);
   const [includeSaladoCombo, setIncludeSaladoCombo] = useState(false);
   const [includeGreekYogurt, setIncludeGreekYogurt] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
@@ -123,7 +125,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   const resetBowlSelections = () => {
     setSelectedBowlBases([]);
     setSelectedBowlToppings([]);
-    setSelectedBowlProtein(null);
+    setSelectedBowlProteins([]);
     setIncludeSaladoCombo(false);
     setIncludeGreekYogurt(false);
   };
@@ -213,8 +215,6 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
       return;
     }
 
-    if (!selectedBowlProtein) return;
-
     if (
       selectedBowlBases.length < BOWL_BASE_MIN ||
       selectedBowlBases.length > BOWL_BASE_LIMIT ||
@@ -227,9 +227,12 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     const notas = [
       `Bases: ${selectedBowlBases.join(', ')}`,
       `Toppings: ${selectedBowlToppings.join(', ')}`,
-      `Proteína: ${selectedBowlProtein}`,
-      getBowlSaladoProteinExtraCost(selectedBowlProtein) > 0
+      selectedBowlProteins.length > 0 ? `Proteínas: ${selectedBowlProteins.join(', ')}` : 'Sin proteína',
+      getBowlSaladoProteinExtraCost(selectedBowlProteins.includes('Atún') ? 'Atún' : null) > 0
         ? `Adición proteína (Atún): +${formatCOP(BOWL_SALADO_TUNA_EXTRA_COST)}`
+        : undefined,
+      getBowlSaladoAdditionalProteinsCost(selectedBowlProteins) > 0
+        ? `Proteínas adicionales: +${formatCOP(getBowlSaladoAdditionalProteinsCost(selectedBowlProteins))}`
         : undefined,
       includeSaladoCombo
         ? `Combo bowl (+${formatCOP(BOWL_SALADO_COMBO_EXTRA_COST)}): incluye bebida`
@@ -242,7 +245,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
       bowlModalItem.id,
       [...selectedBowlBases].sort().join('-'),
       [...selectedBowlToppings].sort().join('-'),
-      selectedBowlProtein,
+      [...selectedBowlProteins].sort().join('-') || 'sin-proteina',
       includeSaladoCombo ? 'combo' : 'sin-combo',
     ].join('|');
 
@@ -253,12 +256,14 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
         kind: 'salado',
         bases: selectedBowlBases,
         toppings: selectedBowlToppings,
-        proteina: selectedBowlProtein,
+        proteina: selectedBowlProteins[0],
+        proteinas: selectedBowlProteins,
         esCombo: includeSaladoCombo,
       },
       precioUnitario:
         bowlModalItem.precio +
-        getBowlSaladoProteinExtraCost(selectedBowlProtein) +
+        getBowlSaladoProteinExtraCost(selectedBowlProteins.includes('Atún') ? 'Atún' : null) +
+        getBowlSaladoAdditionalProteinsCost(selectedBowlProteins) +
         getBowlSaladoComboExtraCost(includeSaladoCombo),
     });
 
@@ -277,7 +282,11 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   };
 
   const handleProteinSelection = (protein: string) => {
-    setSelectedBowlProtein(prev => (prev === protein ? null : protein));
+    setSelectedBowlProteins((prev) =>
+      prev.includes(protein)
+        ? prev.filter((entry) => entry !== protein)
+        : [...prev, protein]
+    );
   };
 
   useEffect(() => {
@@ -400,7 +409,8 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   const frutalPreviewPrice = frutalBasePrice + frutalExtrasCost;
   const saladoPreviewPrice = bowlModalItem
     ? bowlModalItem.precio +
-      getBowlSaladoProteinExtraCost(selectedBowlProtein) +
+      getBowlSaladoProteinExtraCost(selectedBowlProteins.includes('Atún') ? 'Atún' : null) +
+      getBowlSaladoAdditionalProteinsCost(selectedBowlProteins) +
       getBowlSaladoComboExtraCost(includeSaladoCombo)
     : 0;
   const isBowlSelectionValid = isFrutalModal
@@ -408,8 +418,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     : selectedBowlBases.length >= BOWL_BASE_MIN &&
         selectedBowlBases.length <= BOWL_BASE_LIMIT &&
         selectedBowlToppings.length >= BOWL_TOPPING_MIN &&
-        selectedBowlToppings.length <= BOWL_TOPPING_LIMIT &&
-        !!selectedBowlProtein;
+        selectedBowlToppings.length <= BOWL_TOPPING_LIMIT;
 
   const total = calculateCartTotal(cart);
 
@@ -845,7 +854,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                 <p className="text-sm text-gray-600">
                   {isFrutalModal
                     ? `Elige ${BOWL_FRUTAL_BASE_LIMIT} base, mínimo ${BOWL_FRUTAL_TOPPING_MIN} toppings. Yogurt griego +${formatCOP(BOWL_FRUTAL_YOGURT_COST)}.`
-                    : `Selecciona entre ${BOWL_BASE_MIN} y ${BOWL_BASE_LIMIT} bases, entre ${BOWL_TOPPING_MIN} y ${BOWL_TOPPING_LIMIT} toppings y 1 proteína.`}
+                    : `Selecciona entre ${BOWL_BASE_MIN} y ${BOWL_BASE_LIMIT} bases, entre ${BOWL_TOPPING_MIN} y ${BOWL_TOPPING_LIMIT} toppings. La proteína es opcional.`}
                 </p>
               </div>
               <button
@@ -978,12 +987,12 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
-                        Elige tu proteína
+                        Elige tus proteínas (opcional)
                       </h4>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       {BOWL_PROTEIN_OPTIONS.map((protein) => {
-                        const selected = selectedBowlProtein === protein;
+                        const selected = selectedBowlProteins.includes(protein);
                         return (
                           <button
                             key={protein}
@@ -1024,13 +1033,16 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                         onChange={(e) => setIncludeSaladoCombo(e.target.checked)}
                       />
                     </label>
-                    <p className="text-xs text-gray-500">
-                      Combo bowl: +{formatCOP(BOWL_SALADO_COMBO_EXTRA_COST)}
-                    </p>
-                    <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>
-                      Precio final: {formatCOP(saladoPreviewPrice)}
-                    </p>
-                  </div>
+                  <p className="text-xs text-gray-500">
+                    Combo bowl: +{formatCOP(BOWL_SALADO_COMBO_EXTRA_COST)}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Proteína adicional: +{formatCOP(BOWL_SALADO_EXTRA_PROTEIN_COST)} c/u (desde la 2da)
+                  </p>
+                  <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>
+                    Precio final: {formatCOP(saladoPreviewPrice)}
+                  </p>
+                </div>
                 </div>
               )}
             </div>

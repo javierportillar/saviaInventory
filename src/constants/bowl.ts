@@ -19,6 +19,7 @@ export const BOWL_TOPPING_OPTIONS = [
 export const BOWL_PROTEIN_OPTIONS = ['Atún', 'Pechuga de pollo', 'Jamón de cerdo', 'Carne desmechada'] as const;
 export const BOWL_SALADO_TUNA_EXTRA_COST = 1500;
 export const BOWL_SALADO_COMBO_EXTRA_COST = 1000;
+export const BOWL_SALADO_EXTRA_PROTEIN_COST = 5000;
 export const BOWL_BASE_MIN = 1;
 export const BOWL_BASE_LIMIT = 2;
 export const BOWL_TOPPING_MIN = 2;
@@ -73,4 +74,9 @@ export const getBowlSaladoProteinExtraCost = (protein?: string | null): number =
 
 export const getBowlSaladoComboExtraCost = (isCombo?: boolean): number => {
   return isCombo ? BOWL_SALADO_COMBO_EXTRA_COST : 0;
+};
+
+export const getBowlSaladoAdditionalProteinsCost = (proteins: string[] = []): number => {
+  const additionalProteins = Math.max(0, proteins.length - 1);
+  return additionalProteins * BOWL_SALADO_EXTRA_PROTEIN_COST;
 };

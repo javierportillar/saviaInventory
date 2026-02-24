@@ -14,9 +14,10 @@ interface DashboardProps {
   orders: Order[];
   menuItems: MenuItem[];
   onModuleChange: (module: ModuleType) => void;
+  isLoading?: boolean;
 }
 
-export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps) {
+export function Dashboard({ orders, menuItems, onModuleChange, isLoading = false }: DashboardProps) {
   const today = new Date();
   const todayKey = today.toDateString();
 
@@ -91,9 +92,13 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs lg:text-sm font-medium text-gray-600">{stat.label}</p>
-                  <p className="text-sm sm:text-lg lg:text-2xl font-bold mt-1" style={{ color: COLORS.dark }}>
-                    {stat.value}
-                  </p>
+                  {isLoading ? (
+                    <div className="mt-2 h-7 w-24 rounded-md bg-gray-200 animate-pulse" />
+                  ) : (
+                    <p className="text-sm sm:text-lg lg:text-2xl font-bold mt-1" style={{ color: COLORS.dark }}>
+                      {stat.value}
+                    </p>
+                  )}
                 </div>
                 <div 
                   className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-lg flex items-center justify-center"
@@ -114,7 +119,15 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
             Últimos pedidos
           </h3>
           <div className="space-y-3">
-            {orders.slice(-5).reverse().map((order) => (
+            {isLoading ? (
+              Array.from({ length: 3 }).map((_, index) => (
+                <div key={`orders-skeleton-${index}`} className="py-2 border-b border-gray-50 last:border-0">
+                  <div className="h-4 w-20 rounded bg-gray-200 animate-pulse" />
+                  <div className="mt-2 h-3 w-28 rounded bg-gray-100 animate-pulse" />
+                </div>
+              ))
+            ) : (
+              orders.slice(-5).reverse().map((order) => (
               <div key={order.id} className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-2 border-b border-gray-50 last:border-0 space-y-1 sm:space-y-0">
                 <div>
                   <span className="font-medium text-sm">#{order.numero}</span>
@@ -129,8 +142,9 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
                 </div>
                 <span className="font-semibold text-sm">{formatCOP(order.total)}</span>
               </div>
-            ))}
-            {orders.length === 0 && (
+              ))
+            )}
+            {!isLoading && orders.length === 0 && (
               <p className="text-gray-500 text-center py-4 text-sm">No hay pedidos registrados</p>
             )}
           </div>
@@ -142,7 +156,15 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
             Alertas de inventario
           </h3>
           <div className="space-y-3">
-            {lowStockItems.slice(0, 5).map((item) => (
+            {isLoading ? (
+              Array.from({ length: 3 }).map((_, index) => (
+                <div key={`stock-skeleton-${index}`} className="py-2 border-b border-gray-50 last:border-0">
+                  <div className="h-4 w-32 rounded bg-gray-200 animate-pulse" />
+                  <div className="mt-2 h-3 w-16 rounded bg-gray-100 animate-pulse" />
+                </div>
+              ))
+            ) : (
+              lowStockItems.slice(0, 5).map((item) => (
               <div key={item.id} className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-2 border-b border-gray-50 last:border-0 space-y-1 sm:space-y-0">
                 <div>
                   <span className="font-medium text-sm">{item.nombre}</span>
@@ -154,8 +176,9 @@ export function Dashboard({ orders, menuItems, onModuleChange }: DashboardProps)
                   {item.stock} unidades
                 </span>
               </div>
-            ))}
-            {lowStockItems.length === 0 && (
+              ))
+            )}
+            {!isLoading && lowStockItems.length === 0 && (
               <p className="text-gray-500 text-center py-4 text-sm">Stock en niveles normales</p>
             )}
           </div>

@@ -52,6 +52,7 @@ function App() {
   const [comandasFocus, setComandasFocus] = useState<FocusDateRequest | null>(null);
   const [gastosFocus, setGastosFocus] = useState<FocusDateRequest | null>(null);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+  const [isLoadingMenuItems, setIsLoadingMenuItems] = useState(false);
   const [isSyncingOrders, setIsSyncingOrders] = useState(false);
 
   useEffect(() => {
@@ -85,15 +86,25 @@ function App() {
 
   useEffect(() => {
     if (!user) {
+      setIsLoadingMenuItems(false);
       return;
     }
 
     let isActive = true;
 
     const fetchMenuItems = async () => {
-      const data = await dataService.fetchMenuItems();
-      if (isActive) {
-        setMenuItems(data);
+      try {
+        if (isActive) {
+          setIsLoadingMenuItems(true);
+        }
+        const data = await dataService.fetchMenuItems();
+        if (isActive) {
+          setMenuItems(data);
+        }
+      } finally {
+        if (isActive) {
+          setIsLoadingMenuItems(false);
+        }
       }
     };
 
@@ -458,6 +469,7 @@ function App() {
               orders={orders}
               menuItems={menuItems}
               onModuleChange={handleModuleChange}
+              isLoading={isLoadingOrders || isLoadingMenuItems}
             />
           )}
           {module === 'balance' && <Balance />}

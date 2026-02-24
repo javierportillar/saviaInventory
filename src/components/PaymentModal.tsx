@@ -142,11 +142,13 @@ const buildItemDetails = (cartItem: CartItem): string[] => {
   const details: string[] = [];
 
   if (cartItem.bowlCustomization) {
-    const { bases, toppings, proteina } = cartItem.bowlCustomization;
+    const { bases, toppings, proteina, proteinas } = cartItem.bowlCustomization;
     if (bases && bases.length > 0) {
       details.push(`Bases: ${bases.join(', ')}`);
     }
-    if (proteina) {
+    if (proteinas && proteinas.length > 0) {
+      details.push(`Proteínas: ${proteinas.join(', ')}`);
+    } else if (proteina) {
       details.push(`Proteína: ${proteina}`);
     }
     if (toppings && toppings.length > 0) {

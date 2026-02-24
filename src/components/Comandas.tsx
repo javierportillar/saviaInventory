@@ -17,6 +17,7 @@ import {
   BOWL_BASE_MIN,
   BOWL_BASE_LIMIT,
   BOWL_BASE_OPTIONS,
+  BOWL_SALADO_EXTRA_PROTEIN_COST,
   BOWL_PROTEIN_OPTIONS,
   BOWL_SALADO_COMBO_EXTRA_COST,
   BOWL_SALADO_TUNA_EXTRA_COST,
@@ -24,6 +25,7 @@ import {
   BOWL_TOPPING_LIMIT,
   BOWL_TOPPING_OPTIONS,
   getBowlSaladoComboExtraCost,
+  getBowlSaladoAdditionalProteinsCost,
   getBowlSaladoProteinExtraCost,
   isBowlSalado,
 } from '../constants/bowl';
@@ -83,7 +85,7 @@ export function Comandas({
   const [bowlModalItem, setBowlModalItem] = useState<MenuItem | null>(null);
   const [selectedBowlBases, setSelectedBowlBases] = useState<string[]>([]);
   const [selectedBowlToppings, setSelectedBowlToppings] = useState<string[]>([]);
-  const [selectedBowlProtein, setSelectedBowlProtein] = useState<string | null>(null);
+  const [selectedBowlProteins, setSelectedBowlProteins] = useState<string[]>([]);
   const [includeSaladoCombo, setIncludeSaladoCombo] = useState(false);
   const [selectedDateKey, setSelectedDateKey] = useState<string>(() => getDateKey(new Date()));
   const [currentPage, setCurrentPage] = useState(1);
@@ -207,7 +209,7 @@ export function Comandas({
   const resetBowlSelections = () => {
     setSelectedBowlBases([]);
     setSelectedBowlToppings([]);
-    setSelectedBowlProtein(null);
+    setSelectedBowlProteins([]);
     setIncludeSaladoCombo(false);
   };
 
@@ -229,7 +231,11 @@ export function Comandas({
   };
 
   const handleProteinSelection = (protein: string) => {
-    setSelectedBowlProtein(prev => (prev === protein ? null : protein));
+    setSelectedBowlProteins((prev) =>
+      prev.includes(protein)
+        ? prev.filter((entry) => entry !== protein)
+        : [...prev, protein]
+    );
   };
 
   useEffect(() => {
@@ -434,7 +440,7 @@ export function Comandas({
   };
 
   const confirmBowlSelection = () => {
-    if (!bowlModalItem || !selectedBowlProtein) return;
+    if (!bowlModalItem) return;
 
     if (
       selectedBowlBases.length < BOWL_BASE_MIN ||
@@ -448,9 +454,12 @@ export function Comandas({
     const notas = [
       `Bases: ${selectedBowlBases.join(', ')}`,
       `Toppings: ${selectedBowlToppings.join(', ')}`,
-      `Proteína: ${selectedBowlProtein}`,
-      getBowlSaladoProteinExtraCost(selectedBowlProtein) > 0
+      selectedBowlProteins.length > 0 ? `Proteínas: ${selectedBowlProteins.join(', ')}` : 'Sin proteína',
+      getBowlSaladoProteinExtraCost(selectedBowlProteins.includes('Atún') ? 'Atún' : null) > 0
         ? `Adición proteína (Atún): +${formatCOP(BOWL_SALADO_TUNA_EXTRA_COST)}`
+        : undefined,
+      getBowlSaladoAdditionalProteinsCost(selectedBowlProteins) > 0
+        ? `Proteínas adicionales: +${formatCOP(getBowlSaladoAdditionalProteinsCost(selectedBowlProteins))}`
         : undefined,
       includeSaladoCombo
         ? `Combo bowl (+${formatCOP(BOWL_SALADO_COMBO_EXTRA_COST)}): incluye bebida`
@@ -463,7 +472,7 @@ export function Comandas({
       bowlModalItem.id,
       [...selectedBowlBases].sort().join('-'),
       [...selectedBowlToppings].sort().join('-'),
-      selectedBowlProtein,
+      [...selectedBowlProteins].sort().join('-') || 'sin-proteina',
       includeSaladoCombo ? 'combo' : 'sin-combo',
     ].join('|');
 
@@ -473,12 +482,14 @@ export function Comandas({
       bowlCustomization: {
         bases: selectedBowlBases,
         toppings: selectedBowlToppings,
-        proteina: selectedBowlProtein,
+        proteina: selectedBowlProteins[0],
+        proteinas: selectedBowlProteins,
         esCombo: includeSaladoCombo,
       },
       precioUnitario:
         bowlModalItem.precio +
-        getBowlSaladoProteinExtraCost(selectedBowlProtein) +
+        getBowlSaladoProteinExtraCost(selectedBowlProteins.includes('Atún') ? 'Atún' : null) +
+        getBowlSaladoAdditionalProteinsCost(selectedBowlProteins) +
         getBowlSaladoComboExtraCost(includeSaladoCombo),
     });
 
@@ -497,11 +508,11 @@ export function Comandas({
     selectedBowlBases.length >= BOWL_BASE_MIN &&
     selectedBowlBases.length <= BOWL_BASE_LIMIT &&
     selectedBowlToppings.length >= BOWL_TOPPING_MIN &&
-    selectedBowlToppings.length <= BOWL_TOPPING_LIMIT &&
-    !!selectedBowlProtein;
+    selectedBowlToppings.length <= BOWL_TOPPING_LIMIT;
   const saladoPreviewPrice = bowlModalItem
     ? bowlModalItem.precio +
-      getBowlSaladoProteinExtraCost(selectedBowlProtein) +
+      getBowlSaladoProteinExtraCost(selectedBowlProteins.includes('Atún') ? 'Atún' : null) +
+      getBowlSaladoAdditionalProteinsCost(selectedBowlProteins) +
       getBowlSaladoComboExtraCost(includeSaladoCombo)
     : 0;
 
@@ -1418,12 +1429,12 @@ export function Comandas({
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
-                      Elige tu proteína
+                      Elige tus proteínas (opcional)
                     </h4>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     {BOWL_PROTEIN_OPTIONS.map((protein) => {
-                      const selected = selectedBowlProtein === protein;
+                      const selected = selectedBowlProteins.includes(protein);
                       return (
                         <button
                           key={protein}
@@ -1466,6 +1477,9 @@ export function Comandas({
                   </label>
                   <p className="text-xs text-gray-500">
                     Combo bowl: +{formatCOP(BOWL_SALADO_COMBO_EXTRA_COST)}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Proteína adicional: +{formatCOP(BOWL_SALADO_EXTRA_PROTEIN_COST)} c/u (desde la 2da)
                   </p>
                   <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>
                     Precio final: {formatCOP(saladoPreviewPrice)}
