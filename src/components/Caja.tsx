@@ -175,24 +175,27 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
         return;
       }
 
-      const selectedBase = selectedBowlBases[0] as keyof typeof BOWL_FRUTAL_BASE_PRICES;
-      const basePrice = BOWL_FRUTAL_BASE_PRICES[selectedBase] ?? bowlModalItem.precio;
-      const toppingExtraCount = Math.max(0, selectedBowlToppings.length - BOWL_FRUTAL_TOPPING_INCLUDED);
+      const selectedBase = selectedBowlBases[0] as keyof typeof BOWL_FRUTAL_BASE_PRICES | undefined;
+      const hasFrutalBase = Boolean(selectedBase);
+      const basePrice = selectedBase ? BOWL_FRUTAL_BASE_PRICES[selectedBase] ?? bowlModalItem.precio : 0;
+      const toppingExtraCount = hasFrutalBase
+        ? Math.max(0, selectedBowlToppings.length - BOWL_FRUTAL_TOPPING_INCLUDED)
+        : selectedBowlToppings.length;
       const extraCost = toppingExtraCount * BOWL_FRUTAL_TOPPING_EXTRA_COST + (includeGreekYogurt ? BOWL_FRUTAL_YOGURT_COST : 0);
       const finalPrice = basePrice + extraCost;
 
       const notas = [
-        `Base: ${selectedBase}`,
+        selectedBase ? `Base: ${selectedBase}` : 'Sin base',
         `Toppings: ${selectedBowlToppings.join(', ')}`,
+        `Toppings cobrados (${toppingExtraCount}): +${formatCOP(toppingExtraCount * BOWL_FRUTAL_TOPPING_EXTRA_COST)}`,
         includeGreekYogurt ? 'Adición: Yogurt Griego' : undefined,
-        toppingExtraCount > 0 ? `Toppings extra: ${toppingExtraCount}` : undefined,
       ]
         .filter(Boolean)
         .join('\n');
 
       const customKey = [
         bowlModalItem.id,
-        selectedBase,
+        selectedBase ?? 'sin-base',
         [...selectedBowlToppings].sort().join('-'),
         includeGreekYogurt ? 'yogurt' : 'sin-yogurt',
       ].join('|');
@@ -202,7 +205,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
         customKey,
         bowlCustomization: {
           kind: 'frutal',
-          bases: [selectedBase],
+          bases: selectedBase ? [selectedBase] : [],
           toppings: selectedBowlToppings,
           yogurtGriego: includeGreekYogurt,
           toppingExtraCount,
@@ -412,8 +415,11 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   const baseLimitReached = selectedBowlBases.length >= (isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : BOWL_BASE_LIMIT);
   const toppingLimitReached = false;
   const selectedFrutalBase = selectedBowlBases[0] as keyof typeof BOWL_FRUTAL_BASE_PRICES | undefined;
+  const hasFrutalBase = Boolean(selectedFrutalBase);
   const frutalBasePrice = selectedFrutalBase ? BOWL_FRUTAL_BASE_PRICES[selectedFrutalBase] ?? 0 : 0;
-  const frutalExtraToppings = Math.max(0, selectedBowlToppings.length - BOWL_FRUTAL_TOPPING_INCLUDED);
+  const frutalExtraToppings = hasFrutalBase
+    ? Math.max(0, selectedBowlToppings.length - BOWL_FRUTAL_TOPPING_INCLUDED)
+    : selectedBowlToppings.length;
   const frutalExtrasCost = frutalExtraToppings * BOWL_FRUTAL_TOPPING_EXTRA_COST + (includeGreekYogurt ? BOWL_FRUTAL_YOGURT_COST : 0);
   const frutalPreviewPrice = frutalBasePrice + frutalExtrasCost;
   const saladoExtraToppings = Math.max(0, selectedBowlToppings.length - BOWL_TOPPING_LIMIT);
@@ -426,7 +432,9 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
       getBowlSaladoComboExtraCost(includeSaladoCombo)
     : 0;
   const isBowlSelectionValid = isFrutalModal
-    ? selectedBowlBases.length === BOWL_FRUTAL_BASE_LIMIT && selectedBowlToppings.length >= BOWL_FRUTAL_TOPPING_MIN
+    ? selectedBowlBases.length >= BOWL_FRUTAL_BASE_MIN &&
+      selectedBowlBases.length <= BOWL_FRUTAL_BASE_LIMIT &&
+      selectedBowlToppings.length >= BOWL_FRUTAL_TOPPING_MIN
     : selectedBowlBases.length >= BOWL_BASE_MIN &&
         selectedBowlBases.length <= BOWL_BASE_LIMIT &&
         selectedBowlToppings.length >= BOWL_TOPPING_MIN;
@@ -864,7 +872,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                 </h3>
                 <p className="text-sm text-gray-600">
                   {isFrutalModal
-                    ? `Elige ${BOWL_FRUTAL_BASE_LIMIT} base, mínimo ${BOWL_FRUTAL_TOPPING_MIN} toppings. Yogurt griego +${formatCOP(BOWL_FRUTAL_YOGURT_COST)}.`
+                    ? `Base opcional. Sin base: cada topping suma +${formatCOP(BOWL_FRUTAL_TOPPING_EXTRA_COST)}. Con base: incluye ${BOWL_FRUTAL_TOPPING_INCLUDED} toppings y desde el 5to suma +${formatCOP(BOWL_FRUTAL_TOPPING_EXTRA_COST)}. Yogurt griego +${formatCOP(BOWL_FRUTAL_YOGURT_COST)}.`
                     : `Selecciona entre ${BOWL_BASE_MIN} y ${BOWL_BASE_LIMIT} bases, mínimo ${BOWL_TOPPING_MIN} toppings. Desde el topping 5: +${formatCOP(BOWL_SALADO_TOPPING_EXTRA_COST)} c/u. La proteína es opcional.`}
                 </p>
               </div>
@@ -932,7 +940,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                   </h4>
                   <span className="text-xs text-gray-500">
                     {selectedBowlToppings.length}
-                    {isFrutalModal ? ` (incluye ${BOWL_FRUTAL_TOPPING_INCLUDED})` : ` (incluye ${BOWL_TOPPING_LIMIT})`}
+                    {isFrutalModal ? '' : ` (incluye ${BOWL_TOPPING_LIMIT})`}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -987,7 +995,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                     />
                   </label>
                   <p className="text-xs text-gray-500">
-                    Toppings extra: {frutalExtraToppings} x {formatCOP(BOWL_FRUTAL_TOPPING_EXTRA_COST)} = {formatCOP(frutalExtraToppings * BOWL_FRUTAL_TOPPING_EXTRA_COST)}
+                    Toppings cobrados: {frutalExtraToppings} x {formatCOP(BOWL_FRUTAL_TOPPING_EXTRA_COST)} = {formatCOP(frutalExtraToppings * BOWL_FRUTAL_TOPPING_EXTRA_COST)}
                   </p>
                   <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>
                     Precio final: {formatCOP(frutalPreviewPrice)}

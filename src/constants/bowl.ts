@@ -44,9 +44,9 @@ export const BOWL_FRUTAL_BASE_PRICES: Record<(typeof BOWL_FRUTAL_BASE_OPTIONS)[n
   'Frutos Amarillos': 13500,
   Vital: 13500,
 };
-export const BOWL_FRUTAL_BASE_MIN = 1;
+export const BOWL_FRUTAL_BASE_MIN = 0;
 export const BOWL_FRUTAL_BASE_LIMIT = 1;
-export const BOWL_FRUTAL_TOPPING_MIN = 4;
+export const BOWL_FRUTAL_TOPPING_MIN = 1;
 export const BOWL_FRUTAL_TOPPING_INCLUDED = 4;
 export const BOWL_FRUTAL_TOPPING_EXTRA_COST = 2000;
 export const BOWL_FRUTAL_YOGURT_COST = 3000;
