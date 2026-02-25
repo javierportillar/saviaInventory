@@ -82,6 +82,9 @@ export function Comandas({
   const [expandedActionsOrderId, setExpandedActionsOrderId] = useState<string | null>(null);
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [orderNumberQuery, setOrderNumberQuery] = useState('');
+  const [creditEmployeeQuery, setCreditEmployeeQuery] = useState('');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<'all' | 'efectivo' | 'nequi' | 'tarjeta'>('all');
   const [bowlModalItem, setBowlModalItem] = useState<MenuItem | null>(null);
   const [selectedBowlBases, setSelectedBowlBases] = useState<string[]>([]);
   const [selectedBowlToppings, setSelectedBowlToppings] = useState<string[]>([]);
@@ -189,19 +192,66 @@ export function Comandas({
     ? ordersByDate[selectedDateKey] ?? []
     : sortedOrders;
 
-  const totalPages = Math.max(1, Math.ceil(selectedDateOrders.length / ITEMS_PER_PAGE));
+  const hasGlobalHistorySearch = orderNumberQuery.trim().length > 0 || creditEmployeeQuery.trim().length > 0;
+  const baseOrdersForFilters = hasGlobalHistorySearch ? sortedOrders : selectedDateOrders;
+
+  const filteredDateOrders = useMemo(() => {
+    const normalizedOrderQuery = orderNumberQuery.trim().toLowerCase();
+    const normalizedEmployeeQuery = creditEmployeeQuery.trim().toLowerCase();
+
+    return baseOrdersForFilters.filter((order) => {
+      if (normalizedOrderQuery && !String(order.numero).includes(normalizedOrderQuery)) {
+        return false;
+      }
+
+      if (normalizedEmployeeQuery) {
+        const allocations = getOrderAllocations(order);
+        const employeeNameFromCredit = order.creditInfo?.employeeName?.toLowerCase() ?? '';
+        const employeeIdFromCredit = order.creditInfo?.employeeId?.toLowerCase() ?? '';
+        const allocationMatches = allocations.some((allocation) => {
+          if (allocation.metodo !== 'credito_empleados') {
+            return false;
+          }
+          const allocationName = allocation.empleadoNombre?.toLowerCase() ?? '';
+          const allocationId = allocation.empleadoId?.toLowerCase() ?? '';
+          return allocationName.includes(normalizedEmployeeQuery) || allocationId.includes(normalizedEmployeeQuery);
+        });
+
+        if (
+          !employeeNameFromCredit.includes(normalizedEmployeeQuery) &&
+          !employeeIdFromCredit.includes(normalizedEmployeeQuery) &&
+          !allocationMatches
+        ) {
+          return false;
+        }
+      }
+
+      if (paymentMethodFilter !== 'all') {
+        const allocations = getOrderAllocations(order);
+        const hasMethodInAllocations = allocations.some((allocation) => allocation.metodo === paymentMethodFilter);
+        const matchesPrimaryMethod = order.metodoPago === paymentMethodFilter;
+        if (!hasMethodInAllocations && !matchesPrimaryMethod) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [baseOrdersForFilters, orderNumberQuery, creditEmployeeQuery, paymentMethodFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredDateOrders.length / ITEMS_PER_PAGE));
 
   const paginatedOrders = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return selectedDateOrders.slice(start, start + ITEMS_PER_PAGE);
-  }, [selectedDateOrders, currentPage]);
-
-  const pageStart = selectedDateOrders.length === 0
+    return filteredDateOrders.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredDateOrders, currentPage]);
+  
+  const pageStart = filteredDateOrders.length === 0
     ? 0
     : (currentPage - 1) * ITEMS_PER_PAGE + 1;
-  const pageEnd = Math.min(currentPage * ITEMS_PER_PAGE, selectedDateOrders.length);
+  const pageEnd = Math.min(currentPage * ITEMS_PER_PAGE, filteredDateOrders.length);
 
-  const hasPagination = selectedDateOrders.length > ITEMS_PER_PAGE;
+  const hasPagination = filteredDateOrders.length > ITEMS_PER_PAGE;
   const dateHeading = selectedDate
     ? formatDate(selectedDate)
     : 'Todas las comandas';
@@ -247,6 +297,10 @@ export function Comandas({
       setCurrentPage(totalPages);
     }
   }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [orderNumberQuery, creditEmployeeQuery, paymentMethodFilter, selectedDateKey]);
 
   const fetchMenuItems = async () => {
     const data = await dataService.fetchMenuItems();
@@ -1191,21 +1245,42 @@ export function Comandas({
                 {selectedDate ? `Comandas del ${dateHeading}` : dateHeading}
               </h3>
               <p className="text-sm text-gray-500">
-                {selectedDateOrders.length === 1
+                {filteredDateOrders.length === 1
                   ? '1 comanda registrada'
-                  : `${selectedDateOrders.length} comandas registradas`}
-                {selectedDateOrders.length > 0 && hasPagination && (
+                  : `${filteredDateOrders.length} comandas registradas`}
+                {hasGlobalHistorySearch && (
+                  <span> · búsqueda en todo el historial</span>
+                )}
+                {filteredDateOrders.length > 0 && hasPagination && (
                   <span>{` · Mostrando ${pageStart}-${pageEnd}`}</span>
                 )}
               </p>
             </div>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2">
-              <label
-                htmlFor="comandas-date-picker"
-                className="text-sm font-medium text-gray-600"
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+              <input
+                type="text"
+                value={orderNumberQuery}
+                onChange={(event) => setOrderNumberQuery(event.target.value)}
+                placeholder="Buscar # orden"
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-yellow-400"
+              />
+              <input
+                type="text"
+                value={creditEmployeeQuery}
+                onChange={(event) => setCreditEmployeeQuery(event.target.value)}
+                placeholder="Buscar empleado (crédito)"
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-yellow-400"
+              />
+              <select
+                value={paymentMethodFilter}
+                onChange={(event) => setPaymentMethodFilter(event.target.value as 'all' | 'efectivo' | 'nequi' | 'tarjeta')}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-yellow-400"
               >
-                Selecciona el día
-              </label>
+                <option value="all">Todos los métodos</option>
+                <option value="efectivo">Efectivo</option>
+                <option value="nequi">Nequi</option>
+                <option value="tarjeta">Tarjeta</option>
+              </select>
               <input
                 id="comandas-date-picker"
                 type="date"
@@ -1217,9 +1292,9 @@ export function Comandas({
             </div>
           </div>
 
-          {selectedDateOrders.length === 0 ? (
+          {filteredDateOrders.length === 0 ? (
             <div className="ui-card ui-card-pad text-center text-gray-500">
-              No hay comandas registradas para esta fecha.
+              No hay comandas que coincidan con los filtros seleccionados.
             </div>
           ) : (
             <>

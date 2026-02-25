@@ -32,19 +32,94 @@ import dataService from './lib/dataService';
 const SESSION_STORAGE_KEY = 'savia-user-session';
 const SESSION_DURATION_MS = 13 * 60 * 60 * 1000; // 13 horas
 
-interface StoredSession {
-  user: User;
-  timestamp: number;
-}
+const MODULE_ROUTE_SEGMENTS: Record<ModuleType, string> = {
+  dashboard: 'dashboard',
+  balance: 'balance',
+  caja: 'caja',
+  comandas: 'comandas',
+  inventario: 'inventario',
+  cocina: 'cocina',
+  clientes: 'clientes',
+  empleados: 'empleados',
+  gastos: 'gastos',
+  contabilidad: 'contabilidad',
+  novedades: 'novedades',
+  creditoEmpleados: 'credito-empleados',
+  analitica: 'analitica',
+};
+
+const MODULE_ROUTE_LOOKUP: Record<string, ModuleType> = Object.entries(MODULE_ROUTE_SEGMENTS).reduce(
+  (acc, [module, segment]) => {
+    acc[segment] = module as ModuleType;
+    return acc;
+  },
+  {} as Record<string, ModuleType>
+);
+
+const getModuleFromHash = (): ModuleType => {
+  if (typeof window === 'undefined') {
+    return 'dashboard';
+  }
+  const cleaned = window.location.hash.replace(/^#\/?/, '').split(/[?#]/)[0].trim().toLowerCase();
+  if (!cleaned) {
+    return 'dashboard';
+  }
+  return MODULE_ROUTE_LOOKUP[cleaned] ?? 'dashboard';
+};
+
+const writeModuleHash = (module: ModuleType, replace = false) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  const targetHash = `#/${MODULE_ROUTE_SEGMENTS[module]}`;
+  if (window.location.hash === targetHash) {
+    return;
+  }
+  if (replace) {
+    const newUrl = `${window.location.pathname}${window.location.search}${targetHash}`;
+    window.history.replaceState(null, '', newUrl);
+    return;
+  }
+  window.location.hash = targetHash;
+};
 
 interface StoredSession {
   user: User;
   timestamp: number;
 }
+
+const readStoredSession = (): StoredSession | null => {
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<StoredSession>;
+    const hasValidShape =
+      parsed &&
+      typeof parsed === 'object' &&
+      parsed.user &&
+      typeof parsed.timestamp === 'number';
+    if (!hasValidShape) {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+      return null;
+    }
+    const isExpired = Date.now() - parsed.timestamp > SESSION_DURATION_MS;
+    if (isExpired) {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+      return null;
+    }
+    return parsed as StoredSession;
+  } catch (error) {
+    console.error('[App] No se pudo leer la sesión guardada.', error);
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    return null;
+  }
+};
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [module, setModule] = useState<ModuleType>('dashboard');
+  const [module, setModule] = useState<ModuleType>(() => getModuleFromHash());
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -55,65 +130,144 @@ function App() {
   const [isLoadingMenuItems, setIsLoadingMenuItems] = useState(false);
   const [isSyncingOrders, setIsSyncingOrders] = useState(false);
 
+  const clearStoredSession = () => {
+    try {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch (error) {
+      console.error('[App] No se pudo limpiar la sesión guardada.', error);
+    }
+  };
+
+  const logoutToLogin = () => {
+    setUser(null);
+    setModule('dashboard');
+    writeModuleHash('dashboard', true);
+    setMenuItems([]);
+    setOrders([]);
+    setCustomers([]);
+    clearStoredSession();
+  };
+
+  const ensureValidActiveSession = (): boolean => {
+    const storedSession = readStoredSession();
+    if (!storedSession) {
+      if (user) {
+        logoutToLogin();
+      }
+      return false;
+    }
+    return true;
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const syncFromHash = () => {
+      const targetModule = getModuleFromHash();
+      if (user && !ensureValidActiveSession()) {
+        return;
+      }
+      setModule(targetModule);
+    };
+    syncFromHash();
+    window.addEventListener('hashchange', syncFromHash);
+    return () => {
+      window.removeEventListener('hashchange', syncFromHash);
+    };
+  }, [user]);
+
   useEffect(() => {
     initializeLocalData();
 
-    try {
-      const stored = localStorage.getItem(SESSION_STORAGE_KEY);
-      if (!stored) {
-        return;
-      }
-
-      const parsed: StoredSession = JSON.parse(stored);
-      const isValidUser = parsed && parsed.user && typeof parsed.timestamp === 'number';
-      if (!isValidUser) {
-        localStorage.removeItem(SESSION_STORAGE_KEY);
-        return;
-      }
-
-      const isExpired = Date.now() - parsed.timestamp > SESSION_DURATION_MS;
-      if (isExpired) {
-        localStorage.removeItem(SESSION_STORAGE_KEY);
-        return;
-      }
-
-      setUser(parsed.user);
-    } catch (error) {
-      console.error('[App] No se pudo restaurar la sesión guardada.', error);
-      localStorage.removeItem(SESSION_STORAGE_KEY);
+    const storedSession = readStoredSession();
+    if (storedSession) {
+      setUser(storedSession.user);
     }
   }, []);
 
   useEffect(() => {
     if (!user) {
       setIsLoadingMenuItems(false);
+      setIsLoadingOrders(false);
+      setIsSyncingOrders(false);
       return;
     }
 
     let isActive = true;
+    let isRefreshing = false;
 
-    const fetchMenuItems = async () => {
+    const refreshCoreData = async () => {
+      if (!isActive || isRefreshing) {
+        return;
+      }
+      if (!ensureValidActiveSession()) {
+        return;
+      }
+
+      isRefreshing = true;
+      setIsLoadingMenuItems(true);
+      setIsLoadingOrders(true);
+
       try {
-        if (isActive) {
-          setIsLoadingMenuItems(true);
+        const [menuItemsResult, ordersResult, customersResult] = await Promise.allSettled([
+          dataService.fetchMenuItems(),
+          dataService.fetchOrders(),
+          dataService.fetchCustomers(),
+        ]);
+
+        if (!isActive) {
+          return;
         }
-        const data = await dataService.fetchMenuItems();
-        if (isActive) {
-          setMenuItems(data);
+
+        if (menuItemsResult.status === 'fulfilled') {
+          setMenuItems(menuItemsResult.value);
+        } else {
+          console.error('[App] Error obteniendo inventario.', menuItemsResult.reason);
+        }
+
+        if (ordersResult.status === 'fulfilled') {
+          setOrders(ordersResult.value);
+        } else {
+          console.error('[App] Error obteniendo comandas.', ordersResult.reason);
+        }
+
+        if (customersResult.status === 'fulfilled') {
+          setCustomers(customersResult.value);
+        } else {
+          console.error('[App] Error obteniendo clientes.', customersResult.reason);
         }
       } finally {
         if (isActive) {
           setIsLoadingMenuItems(false);
+          setIsLoadingOrders(false);
         }
+        isRefreshing = false;
       }
     };
 
-    fetchMenuItems();
+    const handleWindowFocus = () => {
+      refreshCoreData();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshCoreData();
+      }
+    };
+
+    refreshCoreData();
+    window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('online', handleWindowFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       isActive = false;
+      window.removeEventListener('focus', handleWindowFocus);
+      window.removeEventListener('online', handleWindowFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [user]);
+  }, [user, module]);
 
   useEffect(() => {
     let isMounted = true;
@@ -140,40 +294,6 @@ function App() {
       window.clearInterval(intervalId);
     };
   }, []);
-
-  useEffect(() => {
-    if (!user) {
-      setIsLoadingOrders(false);
-      setIsSyncingOrders(false);
-      return;
-    }
-
-    let isActive = true;
-
-    const fetchOrders = async () => {
-      try {
-        if (isActive) {
-          setIsLoadingOrders(true);
-        }
-        const data = await dataService.fetchOrders();
-        if (isActive) {
-          setOrders(data);
-        }
-      } catch (error) {
-        console.error('[App] Error obteniendo comandas.', error);
-      } finally {
-        if (isActive) {
-          setIsLoadingOrders(false);
-        }
-      }
-    };
-
-    fetchOrders();
-
-    return () => {
-      isActive = false;
-    };
-  }, [user]);
 
   useEffect(() => {
     if (!user) {
@@ -226,27 +346,6 @@ function App() {
     };
   }, [user]);
 
-  useEffect(() => {
-    if (!user) {
-      return;
-    }
-
-    let isActive = true;
-
-    const fetchCustomers = async () => {
-      const data = await dataService.fetchCustomers();
-      if (isActive) {
-        setCustomers(data);
-      }
-    };
-
-    fetchCustomers();
-
-    return () => {
-      isActive = false;
-    };
-  }, [user]);
-
   const handleLogin = (user: User) => {
     setUser(user);
 
@@ -259,27 +358,41 @@ function App() {
   };
 
   const handleLogout = () => {
-    setUser(null);
-    setModule('dashboard');
-    setMenuItems([]);
-    setOrders([]);
-    setCustomers([]);
-
-    try {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
-    } catch (error) {
-      console.error('[App] No se pudo limpiar la sesión guardada.', error);
-    }
+    logoutToLogin();
   };
 
-  const handleModuleChange = (module: ModuleType) => {
-    if ((module === 'analitica' || module === 'contabilidad') && user?.role !== 'admin') {
+  const canAccessModule = (targetModule: ModuleType, targetUser: User | null): boolean => {
+    if ((targetModule === 'analitica' || targetModule === 'contabilidad') && targetUser?.role !== 'admin') {
+      return false;
+    }
+    return true;
+  };
+
+  const navigateToModule = (
+    targetModule: ModuleType,
+    options?: { clearComandasFocus?: boolean; clearGastosFocus?: boolean; replaceHash?: boolean }
+  ) => {
+    if (user && !ensureValidActiveSession()) {
       return;
     }
-    if (module === 'comandas') {
+    if (!canAccessModule(targetModule, user)) {
+      return;
+    }
+    if (options?.clearComandasFocus) {
       setComandasFocus(null);
     }
-    setModule(module);
+    if (options?.clearGastosFocus) {
+      setGastosFocus(null);
+    }
+    setModule(targetModule);
+    writeModuleHash(targetModule, options?.replaceHash ?? false);
+  };
+
+  const handleModuleChange = (targetModule: ModuleType) => {
+    navigateToModule(targetModule, {
+      clearComandasFocus: targetModule === 'comandas',
+      clearGastosFocus: targetModule === 'gastos',
+    });
   };
 
   const getDateKey = (date: Date): string => {
@@ -297,19 +410,32 @@ function App() {
 
   const handleNavigateToComandasFromNovedades = (dateKey: string) => {
     setComandasFocus(createFocusRequest(dateKey));
-    setModule('comandas');
+    navigateToModule('comandas');
   };
 
   const handleNavigateToComandasFromCredit = (order: Order) => {
     const dateKey = getDateKey(order.timestamp);
     setComandasFocus(createFocusRequest(dateKey, order.id));
-    setModule('comandas');
+    navigateToModule('comandas');
   };
 
   const handleNavigateToGastosFromNovedades = (dateKey: string) => {
     setGastosFocus(createFocusRequest(dateKey));
-    setModule('gastos');
+    navigateToModule('gastos');
   };
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    if (canAccessModule(module, user)) {
+      writeModuleHash(module, true);
+      return;
+    }
+    const fallback: ModuleType = user.role === 'admin' ? 'dashboard' : 'caja';
+    setModule(fallback);
+    writeModuleHash(fallback, true);
+  }, [module, user]);
 
   const handleCreateMenuItem = async (newItem: MenuItem) => {
     const data = await dataService.createMenuItem(newItem);
