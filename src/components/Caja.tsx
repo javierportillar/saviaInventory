@@ -26,6 +26,7 @@ import {
   BOWL_FRUTAL_YOGURT_COST,
   BOWL_SALADO_COMBO_EXTRA_COST,
   BOWL_SALADO_EXTRA_PROTEIN_COST,
+  BOWL_SALADO_TOPPING_EXTRA_COST,
   BOWL_PROTEIN_OPTIONS,
   BOWL_SALADO_TUNA_EXTRA_COST,
   BOWL_TOPPING_MIN,
@@ -218,15 +219,20 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     if (
       selectedBowlBases.length < BOWL_BASE_MIN ||
       selectedBowlBases.length > BOWL_BASE_LIMIT ||
-      selectedBowlToppings.length < BOWL_TOPPING_MIN ||
-      selectedBowlToppings.length > BOWL_TOPPING_LIMIT
+      selectedBowlToppings.length < BOWL_TOPPING_MIN
     ) {
       return;
     }
 
+    const saladoExtraToppings = Math.max(0, selectedBowlToppings.length - BOWL_TOPPING_LIMIT);
+    const saladoExtraToppingsCost = saladoExtraToppings * BOWL_SALADO_TOPPING_EXTRA_COST;
+
     const notas = [
       `Bases: ${selectedBowlBases.join(', ')}`,
       `Toppings: ${selectedBowlToppings.join(', ')}`,
+      saladoExtraToppings > 0
+        ? `Toppings adicionales: ${saladoExtraToppings} (+${formatCOP(saladoExtraToppingsCost)})`
+        : undefined,
       selectedBowlProteins.length > 0 ? `Proteínas: ${selectedBowlProteins.join(', ')}` : 'Sin proteína',
       getBowlSaladoProteinExtraCost(selectedBowlProteins.includes('Atún') ? 'Atún' : null) > 0
         ? `Adición proteína (Atún): +${formatCOP(BOWL_SALADO_TUNA_EXTRA_COST)}`
@@ -259,9 +265,12 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
         proteina: selectedBowlProteins[0],
         proteinas: selectedBowlProteins,
         esCombo: includeSaladoCombo,
+        toppingExtraCount: saladoExtraToppings,
+        extraCost: saladoExtraToppingsCost,
       },
       precioUnitario:
         bowlModalItem.precio +
+        saladoExtraToppingsCost +
         getBowlSaladoProteinExtraCost(selectedBowlProteins.includes('Atún') ? 'Atún' : null) +
         getBowlSaladoAdditionalProteinsCost(selectedBowlProteins) +
         getBowlSaladoComboExtraCost(includeSaladoCombo),
@@ -401,14 +410,17 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
 
   const isFrutalModal = bowlModalItem ? isBowlFrutal(bowlModalItem) : false;
   const baseLimitReached = selectedBowlBases.length >= (isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : BOWL_BASE_LIMIT);
-  const toppingLimitReached = !isFrutalModal && selectedBowlToppings.length >= BOWL_TOPPING_LIMIT;
+  const toppingLimitReached = false;
   const selectedFrutalBase = selectedBowlBases[0] as keyof typeof BOWL_FRUTAL_BASE_PRICES | undefined;
   const frutalBasePrice = selectedFrutalBase ? BOWL_FRUTAL_BASE_PRICES[selectedFrutalBase] ?? 0 : 0;
   const frutalExtraToppings = Math.max(0, selectedBowlToppings.length - BOWL_FRUTAL_TOPPING_INCLUDED);
   const frutalExtrasCost = frutalExtraToppings * BOWL_FRUTAL_TOPPING_EXTRA_COST + (includeGreekYogurt ? BOWL_FRUTAL_YOGURT_COST : 0);
   const frutalPreviewPrice = frutalBasePrice + frutalExtrasCost;
+  const saladoExtraToppings = Math.max(0, selectedBowlToppings.length - BOWL_TOPPING_LIMIT);
+  const saladoExtraToppingsCost = saladoExtraToppings * BOWL_SALADO_TOPPING_EXTRA_COST;
   const saladoPreviewPrice = bowlModalItem
     ? bowlModalItem.precio +
+      saladoExtraToppingsCost +
       getBowlSaladoProteinExtraCost(selectedBowlProteins.includes('Atún') ? 'Atún' : null) +
       getBowlSaladoAdditionalProteinsCost(selectedBowlProteins) +
       getBowlSaladoComboExtraCost(includeSaladoCombo)
@@ -417,8 +429,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     ? selectedBowlBases.length === BOWL_FRUTAL_BASE_LIMIT && selectedBowlToppings.length >= BOWL_FRUTAL_TOPPING_MIN
     : selectedBowlBases.length >= BOWL_BASE_MIN &&
         selectedBowlBases.length <= BOWL_BASE_LIMIT &&
-        selectedBowlToppings.length >= BOWL_TOPPING_MIN &&
-        selectedBowlToppings.length <= BOWL_TOPPING_LIMIT;
+        selectedBowlToppings.length >= BOWL_TOPPING_MIN;
 
   const total = calculateCartTotal(cart);
 
@@ -854,7 +865,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                 <p className="text-sm text-gray-600">
                   {isFrutalModal
                     ? `Elige ${BOWL_FRUTAL_BASE_LIMIT} base, mínimo ${BOWL_FRUTAL_TOPPING_MIN} toppings. Yogurt griego +${formatCOP(BOWL_FRUTAL_YOGURT_COST)}.`
-                    : `Selecciona entre ${BOWL_BASE_MIN} y ${BOWL_BASE_LIMIT} bases, entre ${BOWL_TOPPING_MIN} y ${BOWL_TOPPING_LIMIT} toppings. La proteína es opcional.`}
+                    : `Selecciona entre ${BOWL_BASE_MIN} y ${BOWL_BASE_LIMIT} bases, mínimo ${BOWL_TOPPING_MIN} toppings. Desde el topping 5: +${formatCOP(BOWL_SALADO_TOPPING_EXTRA_COST)} c/u. La proteína es opcional.`}
                 </p>
               </div>
               <button
@@ -921,7 +932,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                   </h4>
                   <span className="text-xs text-gray-500">
                     {selectedBowlToppings.length}
-                    {isFrutalModal ? ` (incluye ${BOWL_FRUTAL_TOPPING_INCLUDED})` : `/${BOWL_TOPPING_LIMIT}`}
+                    {isFrutalModal ? ` (incluye ${BOWL_FRUTAL_TOPPING_INCLUDED})` : ` (incluye ${BOWL_TOPPING_LIMIT})`}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -937,7 +948,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                             topping,
                             selectedBowlToppings,
                             setSelectedBowlToppings,
-                            isFrutalModal ? 99 : BOWL_TOPPING_LIMIT
+                            isFrutalModal ? 99 : BOWL_TOPPING_OPTIONS.length
                           )
                         }
                         disabled={disabled}
@@ -1038,6 +1049,9 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                   </p>
                   <p className="text-xs text-gray-500">
                     Proteína adicional: +{formatCOP(BOWL_SALADO_EXTRA_PROTEIN_COST)} c/u (desde la 2da)
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Topping adicional: {saladoExtraToppings} x {formatCOP(BOWL_SALADO_TOPPING_EXTRA_COST)} = {formatCOP(saladoExtraToppingsCost)}
                   </p>
                   <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>
                     Precio final: {formatCOP(saladoPreviewPrice)}

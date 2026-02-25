@@ -18,6 +18,7 @@ import {
   BOWL_BASE_LIMIT,
   BOWL_BASE_OPTIONS,
   BOWL_SALADO_EXTRA_PROTEIN_COST,
+  BOWL_SALADO_TOPPING_EXTRA_COST,
   BOWL_PROTEIN_OPTIONS,
   BOWL_SALADO_COMBO_EXTRA_COST,
   BOWL_SALADO_TUNA_EXTRA_COST,
@@ -499,15 +500,20 @@ export function Comandas({
     if (
       selectedBowlBases.length < BOWL_BASE_MIN ||
       selectedBowlBases.length > BOWL_BASE_LIMIT ||
-      selectedBowlToppings.length < BOWL_TOPPING_MIN ||
-      selectedBowlToppings.length > BOWL_TOPPING_LIMIT
+      selectedBowlToppings.length < BOWL_TOPPING_MIN
     ) {
       return;
     }
 
+    const saladoExtraToppings = Math.max(0, selectedBowlToppings.length - BOWL_TOPPING_LIMIT);
+    const saladoExtraToppingsCost = saladoExtraToppings * BOWL_SALADO_TOPPING_EXTRA_COST;
+
     const notas = [
       `Bases: ${selectedBowlBases.join(', ')}`,
       `Toppings: ${selectedBowlToppings.join(', ')}`,
+      saladoExtraToppings > 0
+        ? `Toppings adicionales: ${saladoExtraToppings} (+${formatCOP(saladoExtraToppingsCost)})`
+        : undefined,
       selectedBowlProteins.length > 0 ? `Proteínas: ${selectedBowlProteins.join(', ')}` : 'Sin proteína',
       getBowlSaladoProteinExtraCost(selectedBowlProteins.includes('Atún') ? 'Atún' : null) > 0
         ? `Adición proteína (Atún): +${formatCOP(BOWL_SALADO_TUNA_EXTRA_COST)}`
@@ -539,9 +545,12 @@ export function Comandas({
         proteina: selectedBowlProteins[0],
         proteinas: selectedBowlProteins,
         esCombo: includeSaladoCombo,
+        toppingExtraCount: saladoExtraToppings,
+        extraCost: saladoExtraToppingsCost,
       },
       precioUnitario:
         bowlModalItem.precio +
+        saladoExtraToppingsCost +
         getBowlSaladoProteinExtraCost(selectedBowlProteins.includes('Atún') ? 'Atún' : null) +
         getBowlSaladoAdditionalProteinsCost(selectedBowlProteins) +
         getBowlSaladoComboExtraCost(includeSaladoCombo),
@@ -557,14 +566,16 @@ export function Comandas({
   };
 
   const baseLimitReached = selectedBowlBases.length >= BOWL_BASE_LIMIT;
-  const toppingLimitReached = selectedBowlToppings.length >= BOWL_TOPPING_LIMIT;
+  const toppingLimitReached = false;
   const isBowlSelectionValid =
     selectedBowlBases.length >= BOWL_BASE_MIN &&
     selectedBowlBases.length <= BOWL_BASE_LIMIT &&
-    selectedBowlToppings.length >= BOWL_TOPPING_MIN &&
-    selectedBowlToppings.length <= BOWL_TOPPING_LIMIT;
+    selectedBowlToppings.length >= BOWL_TOPPING_MIN;
+  const saladoExtraToppings = Math.max(0, selectedBowlToppings.length - BOWL_TOPPING_LIMIT);
+  const saladoExtraToppingsCost = saladoExtraToppings * BOWL_SALADO_TOPPING_EXTRA_COST;
   const saladoPreviewPrice = bowlModalItem
     ? bowlModalItem.precio +
+      saladoExtraToppingsCost +
       getBowlSaladoProteinExtraCost(selectedBowlProteins.includes('Atún') ? 'Atún' : null) +
       getBowlSaladoAdditionalProteinsCost(selectedBowlProteins) +
       getBowlSaladoComboExtraCost(includeSaladoCombo)
@@ -1465,7 +1476,7 @@ export function Comandas({
                     Elige tus toppings
                   </h4>
                   <span className="text-xs text-gray-500">
-                    {selectedBowlToppings.length}/{BOWL_TOPPING_LIMIT}
+                    {selectedBowlToppings.length} (incluye {BOWL_TOPPING_LIMIT})
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1476,7 +1487,7 @@ export function Comandas({
                       <button
                         key={topping}
                         type="button"
-                        onClick={() => toggleBowlOption(topping, selectedBowlToppings, setSelectedBowlToppings, BOWL_TOPPING_LIMIT)}
+                        onClick={() => toggleBowlOption(topping, selectedBowlToppings, setSelectedBowlToppings, BOWL_TOPPING_OPTIONS.length)}
                         disabled={disabled}
                         className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
                           selected
@@ -1555,6 +1566,9 @@ export function Comandas({
                   </p>
                   <p className="text-xs text-gray-500">
                     Proteína adicional: +{formatCOP(BOWL_SALADO_EXTRA_PROTEIN_COST)} c/u (desde la 2da)
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Topping adicional: {saladoExtraToppings} x {formatCOP(BOWL_SALADO_TOPPING_EXTRA_COST)} = {formatCOP(saladoExtraToppingsCost)}
                   </p>
                   <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>
                     Precio final: {formatCOP(saladoPreviewPrice)}

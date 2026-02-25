@@ -20,6 +20,7 @@ export const BOWL_PROTEIN_OPTIONS = ['Atún', 'Pechuga de pollo', 'Jamón de cer
 export const BOWL_SALADO_TUNA_EXTRA_COST = 1500;
 export const BOWL_SALADO_COMBO_EXTRA_COST = 1000;
 export const BOWL_SALADO_EXTRA_PROTEIN_COST = 5000;
+export const BOWL_SALADO_TOPPING_EXTRA_COST = 3000;
 export const BOWL_BASE_MIN = 1;
 export const BOWL_BASE_LIMIT = 2;
 export const BOWL_TOPPING_MIN = 2;
