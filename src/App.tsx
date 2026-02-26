@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Dashboard } from './components/Dashboard';
 import { Balance } from './components/Balance';
 import { Caja } from './components/Caja';
@@ -129,6 +129,7 @@ function App() {
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
   const [isLoadingMenuItems, setIsLoadingMenuItems] = useState(false);
   const [isSyncingOrders, setIsSyncingOrders] = useState(false);
+  const hasLoadedCoreDataRef = useRef(false);
 
   const clearStoredSession = () => {
     try {
@@ -191,6 +192,11 @@ function App() {
       setIsLoadingMenuItems(false);
       setIsLoadingOrders(false);
       setIsSyncingOrders(false);
+      hasLoadedCoreDataRef.current = false;
+      return;
+    }
+
+    if (module === 'caja' && hasLoadedCoreDataRef.current) {
       return;
     }
 
@@ -241,31 +247,16 @@ function App() {
         if (isActive) {
           setIsLoadingMenuItems(false);
           setIsLoadingOrders(false);
+          hasLoadedCoreDataRef.current = true;
         }
         isRefreshing = false;
       }
     };
 
-    const handleWindowFocus = () => {
-      refreshCoreData();
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        refreshCoreData();
-      }
-    };
-
     refreshCoreData();
-    window.addEventListener('focus', handleWindowFocus);
-    window.addEventListener('online', handleWindowFocus);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       isActive = false;
-      window.removeEventListener('focus', handleWindowFocus);
-      window.removeEventListener('online', handleWindowFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [user, module]);
 
