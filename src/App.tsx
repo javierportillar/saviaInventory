@@ -549,7 +549,8 @@ function App() {
   const handleDeleteOrder = async (orderId: string) => {
     try {
       await dataService.deleteOrder(orderId);
-      setOrders((prevOrders) => prevOrders.filter((order) => order.id !== orderId));
+      const refreshedOrders = await dataService.fetchOrders();
+      setOrders(refreshedOrders);
     } catch (error) {
       console.error('Error eliminando la comanda:', error);
       throw error;

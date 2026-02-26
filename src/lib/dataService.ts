@@ -2700,21 +2700,26 @@ export const updateOrder = async (orderId: string, updates: { items?: CartItem[]
 
 export const deleteOrder = async (orderId: string): Promise<void> => {
   if (await ensureSupabaseReady()) {
-    try {
-      const { error: deleteItemsError } = await supabase
-        .from('order_items')
-        .delete()
-        .eq('order_id', orderId);
-      if (deleteItemsError) throw deleteItemsError;
-
-      const { error: deleteOrderError } = await supabase
-        .from('orders')
-        .delete()
-        .eq('id', orderId);
-      if (deleteOrderError) throw deleteOrderError;
-    } catch (error) {
-      console.warn('Supabase not available, using local data:', error);
+    const { error: deleteItemsError } = await supabase
+      .from('order_items')
+      .delete()
+      .eq('order_id', orderId);
+    if (deleteItemsError) {
+      throw deleteItemsError;
     }
+
+    const { error: deleteOrderError } = await supabase
+      .from('orders')
+      .delete()
+      .eq('id', orderId);
+    if (deleteOrderError) {
+      throw deleteOrderError;
+    }
+
+    clearOrderMetadata(orderId);
+    const remainingOrders = loadLocalOrders().filter(order => order.id !== orderId);
+    persistLocalOrders(remainingOrders);
+    return;
   }
 
   clearOrderMetadata(orderId);

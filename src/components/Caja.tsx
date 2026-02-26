@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { MenuItem, CartItem, Order, ModuleType, Customer, PaymentAllocation, BowlCustomization } from '../types';
+import { MenuItem, CartItem, Order, ModuleType, Customer, PaymentAllocation, BowlCustomization, Empleado } from '../types';
 import { Plus, Minus, Trash2, Search, ShoppingCart, Edit2, Check } from 'lucide-react';
 import { COLORS } from '../data/menu';
 import { formatCOP, generateOrderNumber } from '../utils/format';
@@ -8,6 +8,7 @@ import {
   getCartItemBaseUnitPrice,
   getCartItemEffectiveUnitPrice,
   getCartItemSubtotal,
+  isSandwichItem,
   STUDENT_DISCOUNT_NOTE,
 } from '../utils/cart';
 import dataService from '../lib/dataService';
@@ -40,6 +41,11 @@ import {
 } from '../constants/bowl';
 import { formatPaymentSummary, getOrderAllocations, isOrderPaid } from '../utils/payments';
 import { PaymentModal } from './PaymentModal';
+
+const EMPLOYEE_BOWL_PRICE = 6000;
+const EMPLOYEE_RESTRICTED_TOPPINGS = new Set(['Champiñones', 'Tocineta', 'Guacamole']);
+const EMPLOYEE_ALLOWED_PROTEINS = new Set(['Pechuga de pollo', 'Carne desmechada']);
+const SANDWICH_DRINK_EXTRA_COST = 1000;
 
 const formatDateForInput = (date: Date): string => {
   const year = date.getFullYear();
@@ -105,15 +111,21 @@ interface CajaProps {
 export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayment, onAssignOrderCredit }: CajaProps) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [isEmployeeCajaMode, setIsEmployeeCajaMode] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>(() => formatDateForInput(new Date()));
   const [showCheckout, setShowCheckout] = useState(false);
   const [paymentModalOrder, setPaymentModalOrder] = useState<Order | null>(null);
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [employeeName, setEmployeeName] = useState('');
+  const [selectedEmployee, setSelectedEmployee] = useState<Empleado | null>(null);
+  const [sandwichPreviewItem, setSandwichPreviewItem] = useState<MenuItem | null>(null);
+  const [includeSandwichDrink, setIncludeSandwichDrink] = useState(false);
   const [bowlModalItem, setBowlModalItem] = useState<MenuItem | null>(null);
   const [selectedBowlBases, setSelectedBowlBases] = useState<string[]>([]);
   const [selectedBowlToppings, setSelectedBowlToppings] = useState<string[]>([]);
@@ -132,6 +144,16 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   };
 
   const handleAddToCart = (item: MenuItem) => {
+    if (isEmployeeCajaMode && !isBowlSalado(item)) {
+      return;
+    }
+    const normalizedItemName = item.nombre.toLowerCase();
+    const isStandaloneSandwichDrink = normalizedItemName.includes('hatsu') && normalizedItemName.includes('adicional');
+    if (!isEmployeeCajaMode && isSandwichItem(item) && !isStandaloneSandwichDrink) {
+      setSandwichPreviewItem(item);
+      setIncludeSandwichDrink(false);
+      return;
+    }
     if (isBowlSalado(item)) {
       resetBowlSelections();
       setBowlModalItem(item);
@@ -143,6 +165,28 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
       return;
     }
     addToCart(item);
+  };
+
+  const closeSandwichPreview = () => {
+    setSandwichPreviewItem(null);
+    setIncludeSandwichDrink(false);
+  };
+
+  const confirmSandwichPreview = () => {
+    if (!sandwichPreviewItem) {
+      return;
+    }
+
+    const customKey = [sandwichPreviewItem.id, includeSandwichDrink ? 'con-bebida' : 'sin-bebida'].join('|');
+    const notas = includeSandwichDrink ? `Adición bebida: +${formatCOP(SANDWICH_DRINK_EXTRA_COST)}` : undefined;
+
+    addToCart(sandwichPreviewItem, {
+      customKey,
+      notas,
+      precioUnitario: sandwichPreviewItem.precio + (includeSandwichDrink ? SANDWICH_DRINK_EXTRA_COST : 0),
+    });
+
+    closeSandwichPreview();
   };
 
   const toggleBowlOption = (
@@ -159,6 +203,24 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
         return prev;
       }
       return [...prev, option];
+    });
+  };
+
+  const toggleEmployeeSaladoTopping = (topping: string) => {
+    setSelectedBowlToppings((prev) => {
+      if (prev.includes(topping)) {
+        return prev.filter((entry) => entry !== topping);
+      }
+      if (prev.length >= 2) {
+        return prev;
+      }
+      if (EMPLOYEE_RESTRICTED_TOPPINGS.has(topping)) {
+        const hasAnotherRestricted = prev.some((entry) => EMPLOYEE_RESTRICTED_TOPPINGS.has(entry));
+        if (hasAnotherRestricted) {
+          return prev;
+        }
+      }
+      return [...prev, topping];
     });
   };
 
@@ -220,10 +282,46 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     }
 
     if (
-      selectedBowlBases.length < BOWL_BASE_MIN ||
-      selectedBowlBases.length > BOWL_BASE_LIMIT ||
-      selectedBowlToppings.length < BOWL_TOPPING_MIN
+      selectedBowlBases.length < (isEmployeeCajaMode ? 1 : BOWL_BASE_MIN) ||
+      selectedBowlBases.length > (isEmployeeCajaMode ? 1 : BOWL_BASE_LIMIT) ||
+      selectedBowlToppings.length < (isEmployeeCajaMode ? 2 : BOWL_TOPPING_MIN) ||
+      (isEmployeeCajaMode && selectedBowlToppings.length > 2) ||
+      (isEmployeeCajaMode && selectedBowlProteins.length !== 1)
     ) {
+      return;
+    }
+
+    if (isEmployeeCajaMode) {
+      const notas = [
+        'Caja/Empleados',
+        `Base: ${selectedBowlBases[0]}`,
+        `Toppings: ${selectedBowlToppings.join(', ')}`,
+        `Proteína: ${selectedBowlProteins[0]}`,
+      ].join('\n');
+
+      const customKey = [
+        bowlModalItem.id,
+        'empleados',
+        selectedBowlBases[0],
+        [...selectedBowlToppings].sort().join('-'),
+        selectedBowlProteins[0],
+      ].join('|');
+
+      addToCart(bowlModalItem, {
+        notas,
+        customKey,
+        bowlCustomization: {
+          kind: 'salado',
+          bases: [selectedBowlBases[0]],
+          toppings: selectedBowlToppings,
+          proteina: selectedBowlProteins[0],
+          proteinas: [selectedBowlProteins[0]],
+        },
+        precioUnitario: EMPLOYEE_BOWL_PRICE,
+      });
+
+      setBowlModalItem(null);
+      resetBowlSelections();
       return;
     }
 
@@ -294,16 +392,17 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   };
 
   const handleProteinSelection = (protein: string) => {
-    setSelectedBowlProteins((prev) =>
-      prev.includes(protein)
-        ? prev.filter((entry) => entry !== protein)
-        : [...prev, protein]
-    );
+    if (isEmployeeCajaMode) {
+      setSelectedBowlProteins((prev) => (prev.includes(protein) ? [] : [protein]));
+      return;
+    }
+    setSelectedBowlProteins((prev) => (prev.includes(protein) ? prev.filter((entry) => entry !== protein) : [...prev, protein]));
   };
 
   useEffect(() => {
     fetchMenuItems();
     fetchCustomers();
+    fetchEmpleados();
   }, []);
 
   const fetchMenuItems = async () => {
@@ -316,16 +415,47 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     setCustomers(data);
   };
 
+  const fetchEmpleados = async () => {
+    const data = await dataService.fetchEmpleados();
+    setEmpleados(data);
+  };
+
+  const toggleCajaMode = () => {
+    if (cart.length > 0) {
+      const confirmed = window.confirm('Cambiar de modo vaciará el carrito actual. ¿Deseas continuar?');
+      if (!confirmed) {
+        return;
+      }
+    }
+    const nextMode = !isEmployeeCajaMode;
+    setIsEmployeeCajaMode(nextMode);
+    setCart([]);
+    setShowCheckout(false);
+    setSearchQuery('');
+    setSelectedCategory('');
+    setCustomerName('');
+    setSelectedCustomer(null);
+    setEmployeeName('');
+    setSelectedEmployee(null);
+    setSandwichPreviewItem(null);
+    setIncludeSandwichDrink(false);
+    setBowlModalItem(null);
+    resetBowlSelections();
+  };
+
   const nonInventariableCategories = menuItems
     .filter(item => item.inventarioCategoria !== 'Inventariables')
     .map(item => item.categoria);
   const categories = Array.from(new Set(nonInventariableCategories));
   
   const filteredItems = menuItems.filter(item => {
+    if (isEmployeeCajaMode && !isBowlSalado(item)) {
+      return false;
+    }
     const matchesSearch = !searchQuery ||
       item.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (item.keywords && item.keywords.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesCategory = !selectedCategory || item.categoria === selectedCategory;
+    const matchesCategory = isEmployeeCajaMode ? true : (!selectedCategory || item.categoria === selectedCategory);
     const isNonInventariable = item.inventarioCategoria !== 'Inventariables';
     return matchesSearch && matchesCategory && isNonInventariable;
   });
@@ -412,7 +542,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   };
 
   const isFrutalModal = bowlModalItem ? isBowlFrutal(bowlModalItem) : false;
-  const baseLimitReached = selectedBowlBases.length >= (isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : BOWL_BASE_LIMIT);
+  const baseLimitReached = selectedBowlBases.length >= (isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : (isEmployeeCajaMode ? 1 : BOWL_BASE_LIMIT));
   const toppingLimitReached = false;
   const selectedFrutalBase = selectedBowlBases[0] as keyof typeof BOWL_FRUTAL_BASE_PRICES | undefined;
   const hasFrutalBase = Boolean(selectedFrutalBase);
@@ -424,8 +554,16 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   const frutalPreviewPrice = frutalBasePrice + frutalExtrasCost;
   const saladoExtraToppings = Math.max(0, selectedBowlToppings.length - BOWL_TOPPING_LIMIT);
   const saladoExtraToppingsCost = saladoExtraToppings * BOWL_SALADO_TOPPING_EXTRA_COST;
+  const employeeRestrictedToppingsCount = selectedBowlToppings.filter((topping) => EMPLOYEE_RESTRICTED_TOPPINGS.has(topping)).length;
+  const isEmployeeBowlValid =
+    selectedBowlBases.length === 1 &&
+    selectedBowlToppings.length === 2 &&
+    selectedBowlProteins.length === 1 &&
+    employeeRestrictedToppingsCount <= 1;
   const saladoPreviewPrice = bowlModalItem
-    ? bowlModalItem.precio +
+    ? isEmployeeCajaMode
+      ? EMPLOYEE_BOWL_PRICE
+      : bowlModalItem.precio +
       saladoExtraToppingsCost +
       getBowlSaladoProteinExtraCost(selectedBowlProteins.includes('Atún') ? 'Atún' : null) +
       getBowlSaladoAdditionalProteinsCost(selectedBowlProteins) +
@@ -435,9 +573,11 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     ? selectedBowlBases.length >= BOWL_FRUTAL_BASE_MIN &&
       selectedBowlBases.length <= BOWL_FRUTAL_BASE_LIMIT &&
       selectedBowlToppings.length >= BOWL_FRUTAL_TOPPING_MIN
-    : selectedBowlBases.length >= BOWL_BASE_MIN &&
-        selectedBowlBases.length <= BOWL_BASE_LIMIT &&
-        selectedBowlToppings.length >= BOWL_TOPPING_MIN;
+    : isEmployeeCajaMode
+      ? isEmployeeBowlValid
+      : selectedBowlBases.length >= BOWL_BASE_MIN &&
+          selectedBowlBases.length <= BOWL_BASE_LIMIT &&
+          selectedBowlToppings.length >= BOWL_TOPPING_MIN;
 
   const total = calculateCartTotal(cart);
 
@@ -467,11 +607,17 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     let customer = selectedCustomer;
     let customerId: string | undefined;
     const trimmedCustomerName = customerName.trim();
+    const trimmedEmployeeName = employeeName.trim();
 
     setIsSubmittingOrder(true);
 
     try {
-      if (!customer && trimmedCustomerName) {
+      if (isEmployeeCajaMode) {
+        if (!selectedEmployee || selectedEmployee.nombre !== trimmedEmployeeName) {
+          alert('Debes seleccionar un empleado de la lista para continuar.');
+          return;
+        }
+      } else if (!customer && trimmedCustomerName) {
         const existing = customers.find(
           c => c.nombre.toLowerCase() === trimmedCustomerName.toLowerCase()
         );
@@ -501,6 +647,8 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
       }
 
       const orderCustomerName = customer?.nombre ?? (trimmedCustomerName || undefined);
+      const orderEmployeeName = selectedEmployee?.nombre ?? trimmedEmployeeName;
+      const employeeCreditAssignedAt = new Date();
 
       const order: Order = {
         id: crypto.randomUUID(),
@@ -509,10 +657,20 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
         total,
         estado: 'pendiente',
         timestamp: createTimestampForDateKey(selectedDate),
-        cliente_id: customerId,
-        cliente: orderCustomerName,
+        cliente_id: isEmployeeCajaMode ? undefined : customerId,
+        cliente: isEmployeeCajaMode ? `Empleado: ${orderEmployeeName}` : orderCustomerName,
+        metodoPago: isEmployeeCajaMode ? 'credito_empleados' : undefined,
         paymentStatus: 'pendiente',
         paymentAllocations: [],
+        creditInfo: isEmployeeCajaMode
+          ? {
+              type: 'empleados',
+              amount: Math.max(0, Math.round(total)),
+              assignedAt: employeeCreditAssignedAt,
+              employeeId: selectedEmployee?.id,
+              employeeName: orderEmployeeName,
+            }
+          : undefined,
       };
 
       await onCreateOrder(order);
@@ -521,6 +679,8 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
       setShowCheckout(false);
       setCustomerName('');
       setSelectedCustomer(null);
+      setEmployeeName('');
+      setSelectedEmployee(null);
       onModuleChange('comandas');
     } catch (error) {
       console.error('Error al crear el pedido:', error);
@@ -585,9 +745,16 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
           <div>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-4">
               <h2 className="text-xl lg:text-2xl font-bold" style={{ color: COLORS.dark }}>
-                Punto de Venta
+                {isEmployeeCajaMode ? 'Caja/Empleados' : 'Punto de Venta'}
               </h2>
               <div className="flex flex-col sm:flex-row sm:items-center sm:gap-3">
+                <button
+                  type="button"
+                  onClick={toggleCajaMode}
+                  className="px-3 py-2 rounded-lg border text-sm font-medium hover:bg-gray-50"
+                >
+                  {isEmployeeCajaMode ? 'Volver a Caja' : 'Ir a Caja/Empleados'}
+                </button>
                 <label htmlFor="caja-date" className="text-sm font-medium text-gray-600">
                   Fecha del registro
                 </label>
@@ -616,17 +783,19 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                   style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
                 />
               </div>
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="px-3 lg:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-base sm:text-sm w-full lg:w-auto"
-                style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
-              >
-                <option value="">Todas las categorías</option>
-                {categories.map(category => (
-                  <option key={category} value={category}>{category}</option>
-                ))}
-              </select>
+              {!isEmployeeCajaMode && (
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="px-3 lg:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-base sm:text-sm w-full lg:w-auto"
+                  style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+                >
+                  <option value="">Todas las categorías</option>
+                  {categories.map(category => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
 
@@ -861,6 +1030,61 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
         )}
       </div>
 
+      {sandwichPreviewItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 w-full max-w-md">
+            <h3 className="text-lg lg:text-xl font-bold mb-2" style={{ color: COLORS.dark }}>
+              Preview Sandwich
+            </h3>
+            <p className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+              {sandwichPreviewItem.nombre}
+            </p>
+            <p className="text-xs text-gray-500 mb-3">{sandwichPreviewItem.categoria}</p>
+            {sandwichPreviewItem.descripcion && (
+              <p className="text-sm text-gray-600 mb-4">{sandwichPreviewItem.descripcion}</p>
+            )}
+
+            <div className="rounded-lg border border-gray-200 p-3 space-y-2">
+              <p className="text-sm text-gray-700">
+                Precio base: <span className="font-semibold">{formatCOP(sandwichPreviewItem.precio)}</span>
+              </p>
+              <label className="flex items-center justify-between gap-3 cursor-pointer">
+                <span className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                  Agregar bebida
+                </span>
+                <input
+                  type="checkbox"
+                  checked={includeSandwichDrink}
+                  onChange={(e) => setIncludeSandwichDrink(e.target.checked)}
+                />
+              </label>
+              <p className="text-xs text-gray-500">
+                Bebida adicional: {includeSandwichDrink ? formatCOP(SANDWICH_DRINK_EXTRA_COST) : formatCOP(0)}
+              </p>
+              <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>
+                Precio final: {formatCOP(sandwichPreviewItem.precio + (includeSandwichDrink ? SANDWICH_DRINK_EXTRA_COST : 0))}
+              </p>
+            </div>
+
+            <div className="mt-4 flex gap-3">
+              <button
+                onClick={closeSandwichPreview}
+                className="flex-1 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmSandwichPreview}
+                className="flex-1 py-2 rounded-lg text-white font-semibold text-sm"
+                style={{ backgroundColor: COLORS.dark }}
+              >
+                Agregar al carrito
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal personalización Bowls */}
       {bowlModalItem && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -873,7 +1097,9 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                 <p className="text-sm text-gray-600">
                   {isFrutalModal
                     ? `Base opcional. Sin base: cada topping suma +${formatCOP(BOWL_FRUTAL_TOPPING_EXTRA_COST)}. Con base: incluye ${BOWL_FRUTAL_TOPPING_INCLUDED} toppings y desde el 5to suma +${formatCOP(BOWL_FRUTAL_TOPPING_EXTRA_COST)}. Yogurt griego +${formatCOP(BOWL_FRUTAL_YOGURT_COST)}.`
-                    : `Selecciona entre ${BOWL_BASE_MIN} y ${BOWL_BASE_LIMIT} bases, mínimo ${BOWL_TOPPING_MIN} toppings. Desde el topping 5: +${formatCOP(BOWL_SALADO_TOPPING_EXTRA_COST)} c/u. La proteína es opcional.`}
+                    : isEmployeeCajaMode
+                      ? `Regla Caja/Empleados: selecciona 1 base, 2 toppings y 1 proteína. Entre Champiñones, Tocineta y Guacamole solo se permite 1. Precio fijo: ${formatCOP(EMPLOYEE_BOWL_PRICE)}.`
+                      : `Selecciona entre ${BOWL_BASE_MIN} y ${BOWL_BASE_LIMIT} bases, mínimo ${BOWL_TOPPING_MIN} toppings. Desde el topping 5: +${formatCOP(BOWL_SALADO_TOPPING_EXTRA_COST)} c/u. La proteína es opcional.`}
                 </p>
               </div>
               <button
@@ -891,7 +1117,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                     Elige tu base
                   </h4>
                   <span className="text-xs text-gray-500">
-                    {selectedBowlBases.length}/{isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : BOWL_BASE_LIMIT}
+                    {selectedBowlBases.length}/{isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : (isEmployeeCajaMode ? 1 : BOWL_BASE_LIMIT)}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -907,7 +1133,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                             base,
                             selectedBowlBases,
                             setSelectedBowlBases,
-                            isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : BOWL_BASE_LIMIT
+                            isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : (isEmployeeCajaMode ? 1 : BOWL_BASE_LIMIT)
                           )
                         }
                         disabled={disabled}
@@ -940,25 +1166,38 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                   </h4>
                   <span className="text-xs text-gray-500">
                     {selectedBowlToppings.length}
-                    {isFrutalModal ? '' : ` (incluye ${BOWL_TOPPING_LIMIT})`}
+                    {isFrutalModal ? '' : (isEmployeeCajaMode ? '/2' : ` (incluye ${BOWL_TOPPING_LIMIT})`)}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {(isFrutalModal ? BOWL_FRUTAL_TOPPING_OPTIONS : BOWL_TOPPING_OPTIONS).map((topping) => {
                     const selected = selectedBowlToppings.includes(topping);
-                    const disabled = !selected && toppingLimitReached;
+                    const hasRestrictedSelected = selectedBowlToppings.some((entry) => EMPLOYEE_RESTRICTED_TOPPINGS.has(entry));
+                    const disabledByEmployeeRule =
+                      !isFrutalModal &&
+                      isEmployeeCajaMode &&
+                      !selected &&
+                      (
+                        selectedBowlToppings.length >= 2 ||
+                        (EMPLOYEE_RESTRICTED_TOPPINGS.has(topping) && hasRestrictedSelected)
+                      );
+                    const disabled = !selected && (toppingLimitReached || disabledByEmployeeRule);
                     return (
                       <button
                         key={topping}
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
+                          if (!isFrutalModal && isEmployeeCajaMode) {
+                            toggleEmployeeSaladoTopping(topping);
+                            return;
+                          }
                           toggleBowlOption(
                             topping,
                             selectedBowlToppings,
                             setSelectedBowlToppings,
                             isFrutalModal ? 99 : BOWL_TOPPING_OPTIONS.length
-                          )
-                        }
+                          );
+                        }}
                         disabled={disabled}
                         className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
                           selected
@@ -1006,11 +1245,11 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
-                        Elige tus proteínas (opcional)
+                        Elige tu proteína {isEmployeeCajaMode ? '' : '(opcional)'}
                       </h4>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      {BOWL_PROTEIN_OPTIONS.map((protein) => {
+                      {BOWL_PROTEIN_OPTIONS.filter((protein) => !isEmployeeCajaMode || EMPLOYEE_ALLOWED_PROTEINS.has(protein)).map((protein) => {
                         const selected = selectedBowlProteins.includes(protein);
                         return (
                           <button
@@ -1042,29 +1281,38 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                     </div>
                   </div>
                   <div className="rounded-lg border border-gray-200 p-4 space-y-2">
-                    <label className="flex items-center justify-between gap-3 cursor-pointer">
-                      <span className="text-sm font-semibold" style={{ color: COLORS.dark }}>
-                        Pedir en combo (incluye bebida)
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={includeSaladoCombo}
-                        onChange={(e) => setIncludeSaladoCombo(e.target.checked)}
-                      />
-                    </label>
-                  <p className="text-xs text-gray-500">
-                    Combo bowl: +{formatCOP(BOWL_SALADO_COMBO_EXTRA_COST)}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Proteína adicional: +{formatCOP(BOWL_SALADO_EXTRA_PROTEIN_COST)} c/u (desde la 2da)
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Topping adicional: {saladoExtraToppings} x {formatCOP(BOWL_SALADO_TOPPING_EXTRA_COST)} = {formatCOP(saladoExtraToppingsCost)}
-                  </p>
-                  <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>
-                    Precio final: {formatCOP(saladoPreviewPrice)}
-                  </p>
-                </div>
+                    {!isEmployeeCajaMode && (
+                      <>
+                        <label className="flex items-center justify-between gap-3 cursor-pointer">
+                          <span className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                            Pedir en combo (incluye bebida)
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={includeSaladoCombo}
+                            onChange={(e) => setIncludeSaladoCombo(e.target.checked)}
+                          />
+                        </label>
+                        <p className="text-xs text-gray-500">
+                          Combo bowl: +{formatCOP(BOWL_SALADO_COMBO_EXTRA_COST)}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Proteína adicional: +{formatCOP(BOWL_SALADO_EXTRA_PROTEIN_COST)} c/u (desde la 2da)
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Topping adicional: {saladoExtraToppings} x {formatCOP(BOWL_SALADO_TOPPING_EXTRA_COST)} = {formatCOP(saladoExtraToppingsCost)}
+                        </p>
+                      </>
+                    )}
+                    {isEmployeeCajaMode && (
+                      <p className="text-xs text-gray-500">
+                        Entre Champiñones, Tocineta y Guacamole solo puedes elegir uno.
+                      </p>
+                    )}
+                    <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>
+                      Precio final: {formatCOP(saladoPreviewPrice)}
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
@@ -1099,45 +1347,63 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
 
             <div className="space-y-4">
               <div className="relative">
-                <label className="block text-sm font-medium mb-2">Cliente (opcional)</label>
+                <label className="block text-sm font-medium mb-2">
+                  {isEmployeeCajaMode ? 'Empleado' : 'Cliente (opcional)'}
+                </label>
                 <input
                   type="text"
-                  value={customerName}
+                  value={isEmployeeCajaMode ? employeeName : customerName}
                   onChange={(e) => {
-                    setCustomerName(e.target.value);
-                    setSelectedCustomer(null);
+                    if (isEmployeeCajaMode) {
+                      setEmployeeName(e.target.value);
+                      setSelectedEmployee(null);
+                    } else {
+                      setCustomerName(e.target.value);
+                      setSelectedCustomer(null);
+                    }
                   }}
-                  placeholder="Nombre del cliente"
+                  placeholder={isEmployeeCajaMode ? 'Nombre del empleado' : 'Nombre del cliente'}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent pr-10 text-sm"
-                  readOnly={!!selectedCustomer}
+                  readOnly={isEmployeeCajaMode ? !!selectedEmployee : !!selectedCustomer}
                 />
-                {selectedCustomer && (
+                {(isEmployeeCajaMode ? selectedEmployee : selectedCustomer) && (
                   <button
                     type="button"
-                    onClick={() => setSelectedCustomer(null)}
+                    onClick={() => {
+                      if (isEmployeeCajaMode) {
+                        setSelectedEmployee(null);
+                      } else {
+                        setSelectedCustomer(null);
+                      }
+                    }}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
                   >
                     <Edit2 size={16} />
                   </button>
                 )}
-                {customerName && !selectedCustomer && (
+                {(isEmployeeCajaMode ? employeeName : customerName) && !(isEmployeeCajaMode ? selectedEmployee : selectedCustomer) && (
                   <div
                     className="absolute z-10 bg-white border border-gray-200 rounded-lg mt-1 w-full max-h-32 sm:max-h-40 overflow-y-auto"
                   >
-                    {customers
-                      .filter(c =>
-                        c.nombre.toLowerCase().includes(customerName.toLowerCase())
+                    {(isEmployeeCajaMode ? empleados : customers)
+                      .filter((entry) =>
+                        entry.nombre.toLowerCase().includes((isEmployeeCajaMode ? employeeName : customerName).toLowerCase())
                       )
-                      .map(c => (
+                      .map((entry) => (
                         <button
-                          key={c.id}
+                          key={entry.id}
                           onClick={() => {
-                            setCustomerName(c.nombre);
-                            setSelectedCustomer(c);
+                            if (isEmployeeCajaMode) {
+                              setEmployeeName(entry.nombre);
+                              setSelectedEmployee(entry as Empleado);
+                            } else {
+                              setCustomerName(entry.nombre);
+                              setSelectedCustomer(entry as Customer);
+                            }
                           }}
                           className="w-full text-left px-3 py-2 hover:bg-gray-100 text-sm"
                         >
-                          {c.nombre}
+                          {entry.nombre}
                         </button>
                       ))}
                   </div>
