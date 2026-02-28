@@ -2244,6 +2244,17 @@ export const createOrder = async (order: Order): Promise<Order> => {
     paymentStatus,
   };
 
+  const creditInfo = sanitizedOrder.creditInfo;
+  const shouldRegisterEmployeeCredit =
+    sanitizedOrder.metodoPago === 'credito_empleados' &&
+    creditInfo?.type === 'empleados' &&
+    typeof creditInfo.employeeId === 'string' &&
+    creditInfo.employeeId.trim().length > 0;
+  const employeeCreditId = shouldRegisterEmployeeCredit ? creditInfo!.employeeId!.trim() : undefined;
+  const employeeCreditAmount = shouldRegisterEmployeeCredit
+    ? Math.max(0, Math.round(creditInfo?.amount ?? sanitizedOrder.total))
+    : 0;
+
   syncOrderMetadata(sanitizedOrder);
 
   const supabasePaymentPayload = buildSupabaseOrderPaymentPayload(sanitizedAllocations);
@@ -2303,6 +2314,22 @@ export const createOrder = async (order: Order): Promise<Order> => {
         metodoPago: getPrimaryMethodFromAllocations(sanitizedAllocations)
           ?? sanitizedOrder.metodoPago,
       };
+
+      if (shouldRegisterEmployeeCredit && employeeCreditId && employeeCreditAmount > 0) {
+        try {
+          await addEmployeeCredit({
+            empleadoId: employeeCreditId,
+            monto: employeeCreditAmount,
+            orderId: createdOrder.id,
+            orderNumero: createdOrder.numero,
+          });
+        } catch (creditError) {
+          await supabase.from('order_items').delete().eq('order_id', createdOrder.id);
+          await supabase.from('orders').delete().eq('id', createdOrder.id);
+          throw creditError;
+        }
+      }
+
       upsertLocalOrder(createdOrder);
       return createdOrder;
     } catch (error) {

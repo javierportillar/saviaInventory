@@ -17,6 +17,15 @@ import {
   BOWL_BASE_MIN,
   BOWL_BASE_LIMIT,
   BOWL_BASE_OPTIONS,
+  BOWL_FRUTAL_BASE_LIMIT,
+  BOWL_FRUTAL_BASE_MIN,
+  BOWL_FRUTAL_BASE_OPTIONS,
+  BOWL_FRUTAL_BASE_PRICES,
+  BOWL_FRUTAL_TOPPING_EXTRA_COST,
+  BOWL_FRUTAL_TOPPING_INCLUDED,
+  BOWL_FRUTAL_TOPPING_MIN,
+  BOWL_FRUTAL_TOPPING_OPTIONS,
+  BOWL_FRUTAL_YOGURT_COST,
   BOWL_SALADO_EXTRA_PROTEIN_COST,
   BOWL_SALADO_TOPPING_EXTRA_COST,
   BOWL_PROTEIN_OPTIONS,
@@ -28,6 +37,7 @@ import {
   getBowlSaladoComboExtraCost,
   getBowlSaladoAdditionalProteinsCost,
   getBowlSaladoProteinExtraCost,
+  isBowlFrutal,
   isBowlSalado,
 } from '../constants/bowl';
 import { formatPaymentSummary, getOrderAllocations, isOrderPaid, isOrderPaymentHandled } from '../utils/payments';
@@ -91,6 +101,7 @@ export function Comandas({
   const [selectedBowlToppings, setSelectedBowlToppings] = useState<string[]>([]);
   const [selectedBowlProteins, setSelectedBowlProteins] = useState<string[]>([]);
   const [includeSaladoCombo, setIncludeSaladoCombo] = useState(false);
+  const [includeGreekYogurt, setIncludeGreekYogurt] = useState(false);
   const [selectedDateKey, setSelectedDateKey] = useState<string>(() => getDateKey(new Date()));
   const [currentPage, setCurrentPage] = useState(1);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
@@ -262,6 +273,7 @@ export function Comandas({
     setSelectedBowlToppings([]);
     setSelectedBowlProteins([]);
     setIncludeSaladoCombo(false);
+    setIncludeGreekYogurt(false);
   };
 
   const toggleBowlOption = (
@@ -483,7 +495,7 @@ export function Comandas({
   const addProductToOrder = (menuItem: MenuItem) => {
     if (!editingOrder) return;
 
-    if (isBowlSalado(menuItem)) {
+    if (isBowlSalado(menuItem) || isBowlFrutal(menuItem)) {
       resetBowlSelections();
       setBowlModalItem(menuItem);
       setShowAddProduct(false);
@@ -496,6 +508,60 @@ export function Comandas({
 
   const confirmBowlSelection = () => {
     if (!bowlModalItem) return;
+
+    const isFrutal = isBowlFrutal(bowlModalItem);
+    if (isFrutal) {
+      if (
+        selectedBowlBases.length < BOWL_FRUTAL_BASE_MIN ||
+        selectedBowlBases.length > BOWL_FRUTAL_BASE_LIMIT ||
+        selectedBowlToppings.length < BOWL_FRUTAL_TOPPING_MIN
+      ) {
+        return;
+      }
+
+      const selectedBase = selectedBowlBases[0] as keyof typeof BOWL_FRUTAL_BASE_PRICES | undefined;
+      const hasFrutalBase = Boolean(selectedBase);
+      const basePrice = selectedBase ? BOWL_FRUTAL_BASE_PRICES[selectedBase] ?? bowlModalItem.precio : 0;
+      const toppingExtraCount = hasFrutalBase
+        ? Math.max(0, selectedBowlToppings.length - BOWL_FRUTAL_TOPPING_INCLUDED)
+        : selectedBowlToppings.length;
+      const extraCost = toppingExtraCount * BOWL_FRUTAL_TOPPING_EXTRA_COST + (includeGreekYogurt ? BOWL_FRUTAL_YOGURT_COST : 0);
+      const finalPrice = basePrice + extraCost;
+
+      const notas = [
+        selectedBase ? `Base: ${selectedBase}` : 'Sin base',
+        `Toppings: ${selectedBowlToppings.join(', ')}`,
+        `Toppings cobrados (${toppingExtraCount}): +${formatCOP(toppingExtraCount * BOWL_FRUTAL_TOPPING_EXTRA_COST)}`,
+        includeGreekYogurt ? 'Adición: Yogurt Griego' : undefined,
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      const customKey = [
+        bowlModalItem.id,
+        selectedBase ?? 'sin-base',
+        [...selectedBowlToppings].sort().join('-'),
+        includeGreekYogurt ? 'yogurt' : 'sin-yogurt',
+      ].join('|');
+
+      addMenuItemToEditingOrder(bowlModalItem, {
+        notas,
+        customKey,
+        bowlCustomization: {
+          kind: 'frutal',
+          bases: selectedBase ? [selectedBase] : [],
+          toppings: selectedBowlToppings,
+          yogurtGriego: includeGreekYogurt,
+          toppingExtraCount,
+          extraCost,
+        },
+        precioUnitario: finalPrice,
+      });
+
+      setBowlModalItem(null);
+      resetBowlSelections();
+      return;
+    }
 
     if (
       selectedBowlBases.length < BOWL_BASE_MIN ||
@@ -565,12 +631,24 @@ export function Comandas({
     resetBowlSelections();
   };
 
-  const baseLimitReached = selectedBowlBases.length >= BOWL_BASE_LIMIT;
+  const isFrutalModal = bowlModalItem ? isBowlFrutal(bowlModalItem) : false;
+  const baseLimitReached = selectedBowlBases.length >= (isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : BOWL_BASE_LIMIT);
   const toppingLimitReached = false;
-  const isBowlSelectionValid =
-    selectedBowlBases.length >= BOWL_BASE_MIN &&
-    selectedBowlBases.length <= BOWL_BASE_LIMIT &&
-    selectedBowlToppings.length >= BOWL_TOPPING_MIN;
+  const selectedFrutalBase = selectedBowlBases[0] as keyof typeof BOWL_FRUTAL_BASE_PRICES | undefined;
+  const hasFrutalBase = Boolean(selectedFrutalBase);
+  const frutalBasePrice = selectedFrutalBase ? BOWL_FRUTAL_BASE_PRICES[selectedFrutalBase] ?? 0 : 0;
+  const frutalExtraToppings = hasFrutalBase
+    ? Math.max(0, selectedBowlToppings.length - BOWL_FRUTAL_TOPPING_INCLUDED)
+    : selectedBowlToppings.length;
+  const frutalExtrasCost = frutalExtraToppings * BOWL_FRUTAL_TOPPING_EXTRA_COST + (includeGreekYogurt ? BOWL_FRUTAL_YOGURT_COST : 0);
+  const frutalPreviewPrice = frutalBasePrice + frutalExtrasCost;
+  const isBowlSelectionValid = isFrutalModal
+    ? selectedBowlBases.length >= BOWL_FRUTAL_BASE_MIN &&
+      selectedBowlBases.length <= BOWL_FRUTAL_BASE_LIMIT &&
+      selectedBowlToppings.length >= BOWL_FRUTAL_TOPPING_MIN
+    : selectedBowlBases.length >= BOWL_BASE_MIN &&
+        selectedBowlBases.length <= BOWL_BASE_LIMIT &&
+        selectedBowlToppings.length >= BOWL_TOPPING_MIN;
   const saladoExtraToppings = Math.max(0, selectedBowlToppings.length - BOWL_TOPPING_LIMIT);
   const saladoExtraToppingsCost = saladoExtraToppings * BOWL_SALADO_TOPPING_EXTRA_COST;
   const saladoPreviewPrice = bowlModalItem
@@ -1424,29 +1502,43 @@ export function Comandas({
       {bowlModalItem && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg lg:rounded-xl p-4 lg:p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg lg:text-xl font-bold mb-4" style={{ color: COLORS.dark }}>
-              Personaliza tu Bowl Salado
-            </h3>
+            <div className="mb-4">
+              <h3 className="text-lg lg:text-xl font-bold" style={{ color: COLORS.dark }}>
+                {isFrutalModal ? 'Personaliza tu Bowl Frutal' : 'Personaliza tu Bowl Salado'}
+              </h3>
+              <p className="text-sm text-gray-600">
+                {isFrutalModal
+                  ? `Base opcional. Sin base: cada topping suma +${formatCOP(BOWL_FRUTAL_TOPPING_EXTRA_COST)}. Con base: incluye ${BOWL_FRUTAL_TOPPING_INCLUDED} toppings y desde el 5to suma +${formatCOP(BOWL_FRUTAL_TOPPING_EXTRA_COST)}. Yogurt griego +${formatCOP(BOWL_FRUTAL_YOGURT_COST)}.`
+                  : `Selecciona entre ${BOWL_BASE_MIN} y ${BOWL_BASE_LIMIT} bases, mínimo ${BOWL_TOPPING_MIN} toppings. Desde el topping 5: +${formatCOP(BOWL_SALADO_TOPPING_EXTRA_COST)} c/u. La proteína es opcional.`}
+              </p>
+            </div>
 
             <div className="space-y-6">
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
-                    Elige tus bases
+                    Elige tu base
                   </h4>
                   <span className="text-xs text-gray-500">
-                    {selectedBowlBases.length}/{BOWL_BASE_LIMIT}
+                    {selectedBowlBases.length}/{isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : BOWL_BASE_LIMIT}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {BOWL_BASE_OPTIONS.map((base) => {
+                  {(isFrutalModal ? BOWL_FRUTAL_BASE_OPTIONS : BOWL_BASE_OPTIONS).map((base) => {
                     const selected = selectedBowlBases.includes(base);
                     const disabled = !selected && baseLimitReached;
                     return (
                       <button
                         key={base}
                         type="button"
-                        onClick={() => toggleBowlOption(base, selectedBowlBases, setSelectedBowlBases, BOWL_BASE_LIMIT)}
+                        onClick={() =>
+                          toggleBowlOption(
+                            base,
+                            selectedBowlBases,
+                            setSelectedBowlBases,
+                            isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : BOWL_BASE_LIMIT
+                          )
+                        }
                         disabled={disabled}
                         className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
                           selected
@@ -1476,18 +1568,26 @@ export function Comandas({
                     Elige tus toppings
                   </h4>
                   <span className="text-xs text-gray-500">
-                    {selectedBowlToppings.length} (incluye {BOWL_TOPPING_LIMIT})
+                    {selectedBowlToppings.length}
+                    {isFrutalModal ? '' : ` (incluye ${BOWL_TOPPING_LIMIT})`}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {BOWL_TOPPING_OPTIONS.map((topping) => {
+                  {(isFrutalModal ? BOWL_FRUTAL_TOPPING_OPTIONS : BOWL_TOPPING_OPTIONS).map((topping) => {
                     const selected = selectedBowlToppings.includes(topping);
                     const disabled = !selected && toppingLimitReached;
                     return (
                       <button
                         key={topping}
                         type="button"
-                        onClick={() => toggleBowlOption(topping, selectedBowlToppings, setSelectedBowlToppings, BOWL_TOPPING_OPTIONS.length)}
+                        onClick={() =>
+                          toggleBowlOption(
+                            topping,
+                            selectedBowlToppings,
+                            setSelectedBowlToppings,
+                            isFrutalModal ? 99 : BOWL_TOPPING_OPTIONS.length
+                          )
+                        }
                         disabled={disabled}
                         className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
                           selected
@@ -1511,70 +1611,91 @@ export function Comandas({
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
-                      Elige tus proteínas (opcional)
-                    </h4>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {BOWL_PROTEIN_OPTIONS.map((protein) => {
-                      const selected = selectedBowlProteins.includes(protein);
-                      return (
-                        <button
-                          key={protein}
-                          type="button"
-                          onClick={() => handleProteinSelection(protein)}
-                          className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
-                            selected
-                              ? 'border-transparent shadow-sm'
-                              : 'border-gray-200 hover:border-gray-300'
-                          }`}
-                          style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
-                        >
-                          <span>
-                            {protein}
-                            {getBowlSaladoProteinExtraCost(protein) > 0 ? ` (+${formatCOP(BOWL_SALADO_TUNA_EXTRA_COST)})` : ''}
-                          </span>
-                          {selected && (
-                            <span
-                              className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"
-                              style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
-                            >
-                              <Check size={16} />
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+              {isFrutalModal ? (
                 <div className="rounded-lg border border-gray-200 p-4 space-y-2">
                   <label className="flex items-center justify-between gap-3 cursor-pointer">
                     <span className="text-sm font-semibold" style={{ color: COLORS.dark }}>
-                      Pedir en combo (incluye bebida)
+                      Adición Yogurt Griego
                     </span>
                     <input
                       type="checkbox"
-                      checked={includeSaladoCombo}
-                      onChange={(e) => setIncludeSaladoCombo(e.target.checked)}
+                      checked={includeGreekYogurt}
+                      onChange={(e) => setIncludeGreekYogurt(e.target.checked)}
                     />
                   </label>
                   <p className="text-xs text-gray-500">
-                    Combo bowl: +{formatCOP(BOWL_SALADO_COMBO_EXTRA_COST)}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Proteína adicional: +{formatCOP(BOWL_SALADO_EXTRA_PROTEIN_COST)} c/u (desde la 2da)
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Topping adicional: {saladoExtraToppings} x {formatCOP(BOWL_SALADO_TOPPING_EXTRA_COST)} = {formatCOP(saladoExtraToppingsCost)}
+                    Toppings cobrados: {frutalExtraToppings} x {formatCOP(BOWL_FRUTAL_TOPPING_EXTRA_COST)} = {formatCOP(frutalExtraToppings * BOWL_FRUTAL_TOPPING_EXTRA_COST)}
                   </p>
                   <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>
-                    Precio final: {formatCOP(saladoPreviewPrice)}
+                    Precio final: {formatCOP(frutalPreviewPrice)}
                   </p>
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                        Elige tus proteínas (opcional)
+                      </h4>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {BOWL_PROTEIN_OPTIONS.map((protein) => {
+                        const selected = selectedBowlProteins.includes(protein);
+                        return (
+                          <button
+                            key={protein}
+                            type="button"
+                            onClick={() => handleProteinSelection(protein)}
+                            className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
+                              selected
+                                ? 'border-transparent shadow-sm'
+                                : 'border-gray-200 hover:border-gray-300'
+                            }`}
+                            style={selected ? { backgroundColor: COLORS.beige, color: COLORS.dark, borderColor: COLORS.accent } : undefined}
+                          >
+                            <span>
+                              {protein}
+                              {getBowlSaladoProteinExtraCost(protein) > 0 ? ` (+${formatCOP(BOWL_SALADO_TUNA_EXTRA_COST)})` : ''}
+                            </span>
+                            {selected && (
+                              <span
+                                className="ml-3 inline-flex h-6 w-6 items-center justify-center rounded-full text-white"
+                                style={{ backgroundColor: COLORS.accent, color: COLORS.dark }}
+                              >
+                                <Check size={16} />
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 p-4 space-y-2">
+                    <label className="flex items-center justify-between gap-3 cursor-pointer">
+                      <span className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                        Pedir en combo (incluye bebida)
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={includeSaladoCombo}
+                        onChange={(e) => setIncludeSaladoCombo(e.target.checked)}
+                      />
+                    </label>
+                    <p className="text-xs text-gray-500">
+                      Combo bowl: +{formatCOP(BOWL_SALADO_COMBO_EXTRA_COST)}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Proteína adicional: +{formatCOP(BOWL_SALADO_EXTRA_PROTEIN_COST)} c/u (desde la 2da)
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Topping adicional: {saladoExtraToppings} x {formatCOP(BOWL_SALADO_TOPPING_EXTRA_COST)} = {formatCOP(saladoExtraToppingsCost)}
+                    </p>
+                    <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>
+                      Precio final: {formatCOP(saladoPreviewPrice)}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="mt-6 flex flex-col sm:flex-row gap-3 sm:justify-end border-t pt-4">
