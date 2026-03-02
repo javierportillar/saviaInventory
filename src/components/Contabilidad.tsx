@@ -58,6 +58,19 @@ type PayrollRow = {
   origen: PayrollSource;
 };
 
+type ProvisionHistoryEntry = {
+  id: string;
+  fecha: Date;
+  descripcion?: string;
+  desdeNombre: string;
+  desdeMetodo?: string;
+  haciaNombre: string;
+  haciaMetodo?: string;
+  monto: number;
+  tipo: 'transfer' | 'gasto';
+  transferId?: string;
+};
+
 type WeeklyHoursCache = Record<string, Record<string, WeeklyHours>>;
 
 const compareTransfers = (a: ProvisionTransfer, b: ProvisionTransfer) => {
@@ -68,6 +81,14 @@ const compareTransfers = (a: ProvisionTransfer, b: ProvisionTransfer) => {
   const createdDiff = (b.created_at?.getTime() ?? 0) - (a.created_at?.getTime() ?? 0);
   if (createdDiff !== 0) {
     return createdDiff;
+  }
+  return b.id.localeCompare(a.id);
+};
+
+const compareProvisionHistory = (a: ProvisionHistoryEntry, b: ProvisionHistoryEntry) => {
+  const dateDiff = b.fecha.getTime() - a.fecha.getTime();
+  if (dateDiff !== 0) {
+    return dateDiff;
   }
   return b.id.localeCompare(a.id);
 };
@@ -322,14 +343,54 @@ export function Contabilidad() {
     [transfers]
   );
 
+  const totalProvisionExpenses = useMemo(
+    () => gastos
+      .filter((gasto) => (gasto.metodoPago ?? 'efectivo') === 'provision_caja')
+      .reduce((acc, gasto) => acc + gasto.monto, 0),
+    [gastos]
+  );
+
   const totalProvisionWithdrawals = useMemo(
     () => transfers
       .filter((transfer) => transfer.bolsilloOrigen === 'provision_caja')
-      .reduce((acc, transfer) => acc + transfer.monto, 0),
-    [transfers]
+      .reduce((acc, transfer) => acc + transfer.monto, 0) + totalProvisionExpenses,
+    [transfers, totalProvisionExpenses]
   );
 
   const currentProvisionBalance = totalProvisionDeposits - totalProvisionWithdrawals;
+
+  const provisionHistory = useMemo(() => {
+    const transferEntries: ProvisionHistoryEntry[] = sortedTransfers.map((transfer) => ({
+      id: `transfer-${transfer.id}`,
+      fecha: transfer.fecha,
+      descripcion: transfer.descripcion,
+      desdeNombre: getPocketName(transfer.bolsilloOrigen),
+      desdeMetodo: PAYMENT_METHOD_LABELS[transfer.origen] ?? transfer.origen,
+      haciaNombre: getPocketName(transfer.bolsilloDestino),
+      haciaMetodo: transfer.destinoMetodo
+        ? (PAYMENT_METHOD_LABELS[transfer.destinoMetodo] ?? transfer.destinoMetodo)
+        : '—',
+      monto: transfer.monto,
+      tipo: 'transfer',
+      transferId: transfer.id,
+    }));
+
+    const expenseEntries: ProvisionHistoryEntry[] = gastos
+      .filter((gasto) => (gasto.metodoPago ?? 'efectivo') === 'provision_caja')
+      .map((gasto) => ({
+        id: `gasto-${gasto.id}`,
+        fecha: gasto.fecha instanceof Date ? gasto.fecha : new Date(gasto.fecha),
+        descripcion: gasto.descripcion || `Gasto ${gasto.categoria || ''}`.trim(),
+        desdeNombre: 'Provisión de caja',
+        desdeMetodo: 'Provisión caja',
+        haciaNombre: 'Gasto registrado',
+        haciaMetodo: gasto.categoria || 'Operativo',
+        monto: gasto.monto,
+        tipo: 'gasto',
+      }));
+
+    return [...transferEntries, ...expenseEntries].sort(compareProvisionHistory);
+  }, [gastos, getPocketName, sortedTransfers]);
 
   const weekHours = weeklyHoursCache[selectedWeek] || {};
 
@@ -566,6 +627,11 @@ export function Contabilidad() {
             <p className="text-lg font-semibold text-red-600">
               {formatCOP(totalProvisionWithdrawals)}
             </p>
+            {totalProvisionExpenses > 0 && (
+              <p className="text-xs text-gray-500 mt-1">
+                Incluye gastos pagados desde provisión: {formatCOP(totalProvisionExpenses)}
+              </p>
+            )}
           </div>
           <div className="bg-gray-50 rounded-lg px-3 py-3">
             <p className="text-xs font-medium uppercase text-gray-500">Saldo disponible</p>
@@ -679,52 +745,66 @@ export function Contabilidad() {
               </tr>
             </thead>
             <tbody>
-              {sortedTransfers.length === 0 ? (
+              {provisionHistory.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-4 pr-4 text-center text-gray-500">
                     Aún no registras movimientos de provisión.
                   </td>
                 </tr>
               ) : (
-                sortedTransfers.map((transfer) => (
-                  <tr key={transfer.id} className="border-t border-gray-100">
+                provisionHistory.map((entry) => (
+                  <tr key={entry.id} className="border-t border-gray-100">
                     <td className="py-2 pr-4 text-gray-700 font-medium whitespace-nowrap">
-                      {shortDateFormatter.format(transfer.fecha)}
+                      {shortDateFormatter.format(entry.fecha)}
                     </td>
                     <td className="py-2 pr-4 text-gray-600">
-                      {transfer.descripcion ?? '—'}
+                      {entry.descripcion ?? '—'}
                     </td>
                     <td className="py-2 pr-4 text-gray-600">
                       <div className="flex flex-col">
                         <span className="font-medium" style={{ color: COLORS.dark }}>
-                          {getPocketName(transfer.bolsilloOrigen)}
+                          {entry.desdeNombre}
                         </span>
                         <span className="text-xs text-gray-500">
-                          {PAYMENT_METHOD_LABELS[transfer.origen] ?? transfer.origen}
+                          {entry.desdeMetodo ?? '—'}
                         </span>
                       </div>
                     </td>
                     <td className="py-2 pr-4 text-gray-600">
                       <div className="flex flex-col">
                         <span className="font-medium" style={{ color: COLORS.dark }}>
-                          {getPocketName(transfer.bolsilloDestino)}
+                          {entry.haciaNombre}
                         </span>
                         <span className="text-xs text-gray-500">
-                          {transfer.destinoMetodo ? (PAYMENT_METHOD_LABELS[transfer.destinoMetodo] ?? transfer.destinoMetodo) : '—'}
+                          {entry.haciaMetodo ?? '—'}
                         </span>
                       </div>
                     </td>
-                    <td className="py-2 pr-4 text-green-600 font-semibold">
-                      {formatCOP(transfer.monto)}
+                    <td className={`py-2 pr-4 font-semibold ${entry.tipo === 'gasto' ? 'text-red-600' : 'text-green-600'}`}>
+                      {entry.tipo === 'gasto' ? '-' : '+'}
+                      {formatCOP(entry.monto)}
                     </td>
                     <td className="py-2 pr-4 text-right">
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteTransfer(transfer.id)}
-                        className="inline-flex items-center justify-center rounded-md border border-transparent px-2 py-1 text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      {entry.tipo === 'transfer' && entry.transferId ? (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTransfer(entry.transferId!)}
+                          className="inline-flex items-center justify-center rounded-md border border-transparent px-2 py-1 text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            alert('Para borrar este registro debes dirigirte a Gastos y borrarlo desde allí.');
+                          }}
+                          className="inline-flex items-center justify-center rounded-md border border-transparent px-2 py-1 text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50"
+                          title="Borrar desde Gastos"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))

@@ -4,7 +4,7 @@ export const PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi',
 
 export const POS_PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'tarjeta', 'nequi', 'credito_empleados'];
 
-export const EXPENSE_PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'nequi', 'tarjeta'];
+export const EXPENSE_PAYMENT_METHODS: PaymentMethod[] = ['efectivo', 'nequi', 'tarjeta', 'provision_caja'];
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   efectivo: 'Efectivo',
@@ -104,7 +104,7 @@ export const determinePaymentStatus = (order: Order): PaymentStatus => {
 export const isOrderPaid = (order: Order): boolean => determinePaymentStatus(order) === 'pagado';
 
 export const isOrderPaymentHandled = (order: Order): boolean => {
-  if (order.metodoPago === 'credito_empleados' && order.creditInfo?.type === 'empleados') {
+  if (order.metodoPago === 'credito_empleados') {
     return true;
   }
   return isOrderPaid(order);

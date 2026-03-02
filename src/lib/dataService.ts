@@ -437,6 +437,29 @@ export const addEmployeeCredit = async ({ empleadoId, monto, orderId, orderNumer
   notifyEmployeeCreditUpdate();
 };
 
+export const deleteEmployeeCreditHistoryEntry = async (entryId: string): Promise<void> => {
+  const trimmedId = entryId?.trim();
+  if (!trimmedId) {
+    return;
+  }
+
+  if (!(await ensureSupabaseReady())) {
+    throw new Error('No se pudo eliminar el movimiento porque la base de datos no está disponible.');
+  }
+
+  const { error } = await supabase
+    .from('employee_credit_history')
+    .delete()
+    .eq('id', trimmedId);
+
+  if (error) {
+    console.error('[dataService] Error eliminando movimiento de crédito de empleado.', error);
+    throw error;
+  }
+
+  notifyEmployeeCreditUpdate();
+};
+
 interface SettleEmployeeCreditBalanceOptions {
   empleadoId: string;
   monto: number;
@@ -507,6 +530,9 @@ const extractPaymentMethodValue = (record: any): string | null => {
   }
   if (typeof record.metodopago === 'string') {
     return record.metodopago;
+  }
+  if (typeof record.metodo_pago === 'string') {
+    return record.metodo_pago;
   }
   return null;
 };
@@ -1140,10 +1166,6 @@ const mapOrderRecord = (record: any): Order => {
     }
   }
 
-  if (allocations.length === 0 && metodoPagoFromRecord) {
-    allocations = [{ metodo: metodoPagoFromRecord, monto: Math.round(baseOrder.total) }];
-  }
-
   const mergedAllocations = allocations.length > 0 ? mergeAllocations(allocations) : allocations;
   const derivedMetodoPago = getPrimaryMethodFromAllocations(mergedAllocations) ?? metodoPagoFromRecord;
 
@@ -1223,6 +1245,7 @@ const ORDER_SELECT_COLUMNS = `
   estado,
   timestamp,
   cliente_id,
+  metodo_pago,
   ${SUPABASE_ORDER_PAYMENT_COLUMNS.efectivo},
   ${SUPABASE_ORDER_PAYMENT_COLUMNS.nequi},
   ${SUPABASE_ORDER_PAYMENT_COLUMNS.tarjeta},
@@ -1277,7 +1300,7 @@ const normalizeGastoRecord = (gasto: any): Gasto => ({
   created_at: gasto?.created_at ? new Date(gasto.created_at) : undefined,
   metodoPago: (() => {
     const metodo = normalizePaymentMethod(extractPaymentMethodValue(gasto));
-    return metodo === 'provision_caja' ? 'efectivo' : metodo;
+    return metodo;
   })(),
   esInventariable: Boolean(gasto?.esInventariable ?? gasto?.es_inventariable),
   menuItemId: typeof (gasto?.menuItemId ?? gasto?.menu_item_id) === 'string'
@@ -1722,7 +1745,7 @@ interface DailyAccumulator {
 
 interface SupabaseCreditHistoryRow {
   order_id?: string | null;
-  order_numero?: number | null;
+  order_numero?: number | string | null;
   monto?: number | null;
   tipo?: 'cargo' | 'abono' | null;
   timestamp?: string | null;
@@ -1792,48 +1815,136 @@ const buildOutstandingCreditMap = (rows: SupabaseCreditHistoryRow[]): Map<string
   return outstanding;
 };
 
+const buildOutstandingCreditMapByOrderNumber = (rows: SupabaseCreditHistoryRow[]): Map<number, OutstandingCreditInfo> => {
+  const credits = new Map<number, OutstandingCreditInfo>();
+
+  rows.forEach((row) => {
+    const parsedOrderNumber = Number(row.order_numero);
+    const orderNumber = Number.isFinite(parsedOrderNumber) && parsedOrderNumber > 0
+      ? Math.round(parsedOrderNumber)
+      : undefined;
+    if (!orderNumber) {
+      return;
+    }
+
+    const amount = Math.max(0, Math.round(Number(row.monto) || 0));
+    if (amount <= 0) {
+      return;
+    }
+
+    let record = credits.get(orderNumber);
+    if (!record) {
+      record = { amount: 0 };
+      credits.set(orderNumber, record);
+    }
+
+    if (row.tipo === 'cargo') {
+      record.amount += amount;
+      const ts = typeof row.timestamp === 'string' ? row.timestamp : undefined;
+      if (ts) {
+        const currentTs = record.assignedAt ? new Date(record.assignedAt).getTime() : Number.NEGATIVE_INFINITY;
+        const nextTs = new Date(ts).getTime();
+        if (!Number.isNaN(nextTs) && nextTs >= currentTs) {
+          record.assignedAt = ts;
+        }
+      }
+      const employeeId = typeof row.empleado_id === 'string' ? row.empleado_id : row.empleado?.id ?? undefined;
+      if (employeeId) {
+        record.employeeId = employeeId;
+      }
+      const employeeName = row.empleado?.nombre ?? row.empleado_nombre ?? undefined;
+      if (employeeName) {
+        record.employeeName = employeeName;
+      }
+    } else if (row.tipo === 'abono') {
+      record.amount -= amount;
+      if (record.amount < 0) {
+        record.amount = 0;
+      }
+    }
+  });
+
+  const outstanding = new Map<number, OutstandingCreditInfo>();
+  credits.forEach((record, orderNumber) => {
+    if (record.amount > 0) {
+      outstanding.set(orderNumber, record);
+    }
+  });
+  return outstanding;
+};
+
 const hydrateOrdersWithEmployeeCredit = async (orders: Order[]): Promise<Order[]> => {
   if (orders.length === 0) {
     return orders;
   }
 
-  const orderIds = orders.map((order) => order.id).filter((id): id is string => typeof id === 'string' && id.length > 0);
-  if (orderIds.length === 0) {
+  const orderIds = orders
+    .map((order) => order.id)
+    .filter((id): id is string => typeof id === 'string' && isUuid(id));
+  const orderNumbers = Array.from(
+    new Set(
+      orders
+        .map((order) => Number(order.numero))
+        .filter((value) => Number.isInteger(value) && value > 0),
+    ),
+  );
+
+  if (orderIds.length === 0 && orderNumbers.length === 0) {
     return orders;
   }
 
   try {
-    const { data, error } = await supabase
-      .from('employee_credit_history')
-      .select(`
-        order_id,
-        order_numero,
-        monto,
-        tipo,
-        timestamp,
-        empleado_id,
-        empleado:empleados ( id, nombre )
-      `)
-      .in('order_id', orderIds)
-      .order('timestamp', { ascending: true });
-    if (error) {
-      throw error;
+    let outstandingById = new Map<string, OutstandingCreditInfo>();
+    if (orderIds.length > 0) {
+      const { data, error } = await supabase
+        .from('employee_credit_history')
+        .select(`
+          order_id,
+          order_numero,
+          monto,
+          tipo,
+          timestamp,
+          empleado_id,
+          empleado:empleados ( id, nombre )
+        `)
+        .in('order_id', orderIds)
+        .order('timestamp', { ascending: true });
+      if (error) {
+        throw error;
+      }
+      outstandingById = buildOutstandingCreditMap(data ?? []);
     }
 
-    const outstanding = buildOutstandingCreditMap(data ?? []);
+    let outstandingByNumber = new Map<number, OutstandingCreditInfo>();
+    if (orderNumbers.length > 0) {
+      const { data, error } = await supabase
+        .from('employee_credit_history')
+        .select(`
+          order_id,
+          order_numero,
+          monto,
+          tipo,
+          timestamp,
+          empleado_id,
+          empleado:empleados ( id, nombre )
+        `)
+        .in('order_numero', orderNumbers)
+        .order('timestamp', { ascending: true });
+      if (error) {
+        throw error;
+      }
+      outstandingByNumber = buildOutstandingCreditMapByOrderNumber(data ?? []);
+    }
 
     return orders.map((order) => {
-      const credit = outstanding.get(order.id);
+      const creditById = outstandingById.get(order.id);
+      const parsedOrderNumber = Number(order.numero);
+      const orderNumber = Number.isInteger(parsedOrderNumber) && parsedOrderNumber > 0
+        ? parsedOrderNumber
+        : undefined;
+      const creditByNumber = orderNumber ? outstandingByNumber.get(orderNumber) : undefined;
+      const credit = creditById ?? creditByNumber;
       if (!credit) {
-        if (order.creditInfo && order.metodoPago === 'credito_empleados') {
-          return {
-            ...order,
-            creditInfo: undefined,
-            metodoPago: order.metodoPago === 'credito_empleados' && order.paymentAllocations?.length
-              ? getPrimaryMethodFromAllocations(order.paymentAllocations) ?? order.metodoPago
-              : order.metodoPago,
-          };
-        }
         return order;
       }
 
@@ -2195,7 +2306,8 @@ export const subscribeToOrders = async (
   const channel = supabase
     .channel('orders-sync')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, scheduleRefresh)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, scheduleRefresh);
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, scheduleRefresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_credit_history' }, scheduleRefresh);
 
   let realtimeChannel: RealtimeChannel | undefined;
 
@@ -2234,7 +2346,7 @@ export const createOrder = async (order: Order): Promise<Order> => {
   const primaryMethod = sanitizedAllocations.length > 0
     ? sanitizedAllocations[0].metodo
     : undefined;
-  const metodoPago = normalizePaymentMethod(order.metodoPago ?? primaryMethod);
+  const metodoPago = toOptionalPaymentMethod(order.metodoPago ?? primaryMethod ?? null);
 
   const sanitizedOrder: Order = {
     ...order,
@@ -2243,7 +2355,6 @@ export const createOrder = async (order: Order): Promise<Order> => {
     paymentAllocations: sanitizedAllocations,
     paymentStatus,
   };
-
   const creditInfo = sanitizedOrder.creditInfo;
   const shouldRegisterEmployeeCredit =
     sanitizedOrder.metodoPago === 'credito_empleados' &&
@@ -2277,6 +2388,7 @@ export const createOrder = async (order: Order): Promise<Order> => {
             estado: sanitizedOrder.estado,
             timestamp: sanitizedOrder.timestamp.toISOString(),
             cliente_id: sanitizedOrder.cliente_id ?? null,
+            metodo_pago: sanitizedOrder.metodoPago ?? null,
             ...supabasePaymentPayload,
           },
         ])
@@ -2379,15 +2491,16 @@ export const recordOrderPayment = async (
   }
 
   if (await ensureSupabaseReady()) {
-    try {
-      const supabasePaymentPayload = buildSupabaseOrderPaymentPayload(sanitizedAllocations);
-      const { error } = await supabase
-        .from('orders')
-        .update(supabasePaymentPayload)
-        .eq('id', order.id);
-      if (error) throw error;
-    } catch (error) {
-      console.warn('Supabase not available, using local data:', error);
+    const supabasePaymentPayload = buildSupabaseOrderPaymentPayload(sanitizedAllocations);
+    const { error } = await supabase
+      .from('orders')
+      .update({
+        ...supabasePaymentPayload,
+        metodo_pago: primaryMethod,
+      })
+      .eq('id', order.id);
+    if (error) {
+      throw error;
     }
   }
 
@@ -2427,6 +2540,10 @@ export const assignOrderCredit = async (
   const rawEmployeeName = options?.employeeName?.trim();
   const employeeName = rawEmployeeName ? rawEmployeeName : undefined;
 
+  if (!employeeId) {
+    throw new Error('Debes seleccionar un empleado válido para asignar el crédito.');
+  }
+
   if (employeeId && amount > 0) {
     await addEmployeeCredit({
       empleadoId: employeeId,
@@ -2444,17 +2561,21 @@ export const assignOrderCredit = async (
     employeeName,
   };
 
-  if (order.estado !== 'entregado') {
-    if (await ensureSupabaseReady()) {
-      try {
-        const { error } = await supabase
-          .from('orders')
-          .update({ estado: 'entregado' })
-          .eq('id', order.id);
-        if (error) throw error;
-      } catch (error) {
-        console.warn('Supabase not available al marcar crédito, se usará caché local:', error);
-      }
+  if (await ensureSupabaseReady()) {
+    // Siempre actualizamos orders para garantizar que el evento realtime
+    // llegue a los otros navegadores, incluso si el estado ya era 'entregado'.
+    // También guardamos el método de pago explícitamente para sincronización robusta.
+    const updatePayload: Record<string, unknown> = {
+      estado: 'entregado',
+      metodo_pago: 'credito_empleados',
+      ...buildSupabaseOrderPaymentPayload([]),
+    };
+    const { error } = await supabase
+      .from('orders')
+      .update(updatePayload)
+      .eq('id', order.id);
+    if (error) {
+      throw error;
     }
   }
 
@@ -2526,18 +2647,17 @@ export const settleOrderEmployeeCredit = async (
   const now = new Date();
 
   if (await ensureSupabaseReady()) {
-    try {
-      const updatePayload = {
-        estado: 'entregado',
-        ...buildSupabaseOrderPaymentPayload(paymentAllocations),
-      };
-      const { error } = await supabase
-        .from('orders')
-        .update(updatePayload)
-        .eq('id', order.id);
-      if (error) throw error;
-    } catch (error) {
-      console.warn('Supabase no disponible al registrar el pago del crédito, se usará caché local:', error);
+    const updatePayload = {
+      estado: 'entregado',
+      metodo_pago: metodo,
+      ...buildSupabaseOrderPaymentPayload(paymentAllocations),
+    };
+    const { error } = await supabase
+      .from('orders')
+      .update(updatePayload)
+      .eq('id', order.id);
+    if (error) {
+      throw error;
     }
   }
 
@@ -2727,6 +2847,44 @@ export const updateOrder = async (orderId: string, updates: { items?: CartItem[]
 
 export const deleteOrder = async (orderId: string): Promise<void> => {
   if (await ensureSupabaseReady()) {
+    const { data: orderRow, error: orderFetchError } = await supabase
+      .from('orders')
+      .select('id, numero, metodo_pago')
+      .eq('id', orderId)
+      .maybeSingle();
+    if (orderFetchError) {
+      throw orderFetchError;
+    }
+
+    const orderNumero = Number(orderRow?.numero ?? 0);
+    let hasEmployeeCreditRecord = false;
+
+    const { data: creditById, error: creditByIdError } = await supabase
+      .from('employee_credit_history')
+      .select('id')
+      .eq('order_id', orderId)
+      .limit(1);
+    if (creditByIdError) {
+      throw creditByIdError;
+    }
+    hasEmployeeCreditRecord = hasEmployeeCreditRecord || (creditById?.length ?? 0) > 0;
+
+    if (!hasEmployeeCreditRecord && Number.isInteger(orderNumero) && orderNumero > 0) {
+      const { data: creditByNumero, error: creditByNumeroError } = await supabase
+        .from('employee_credit_history')
+        .select('id')
+        .eq('order_numero', orderNumero)
+        .limit(1);
+      if (creditByNumeroError) {
+        throw creditByNumeroError;
+      }
+      hasEmployeeCreditRecord = (creditByNumero?.length ?? 0) > 0;
+    }
+
+    if (hasEmployeeCreditRecord) {
+      throw new Error('Para borrar esta comanda primero debes borrar el registro en crédito empleados.');
+    }
+
     const { error: deleteItemsError } = await supabase
       .from('order_items')
       .delete()
@@ -3904,6 +4062,7 @@ export const dataService = {
   fetchEmployeeWeeklyHoursHistory,
   saveEmployeeWeeklyHours,
   fetchEmployeeCredits,
+  deleteEmployeeCreditHistoryEntry,
   fetchInventoryPriceHistory,
   fetchInventoryPriceHistorySummary,
   fetchInventoryPriceStats,

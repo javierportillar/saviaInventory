@@ -175,22 +175,6 @@ export function Comandas({
     }
   }, [focusRequest?.requestId]);
 
-  const sortedOrders = useMemo(
-    () => [...orders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
-    [orders]
-  );
-
-  const ordersByDate = useMemo(() => {
-    return sortedOrders.reduce((acc, order) => {
-      const dateKey = getDateKey(order.timestamp);
-      if (!acc[dateKey]) {
-        acc[dateKey] = [];
-      }
-      acc[dateKey].push(order);
-      return acc;
-    }, {} as Record<string, Order[]>);
-  }, [sortedOrders]);
-
   const selectedDate = useMemo(() => {
     if (!selectedDateKey) {
       return null;
@@ -200,24 +184,26 @@ export function Comandas({
     return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
   }, [selectedDateKey]);
 
-  const selectedDateOrders = selectedDate
-    ? ordersByDate[selectedDateKey] ?? []
-    : sortedOrders;
-
   const hasGlobalHistorySearch = orderNumberQuery.trim().length > 0 || creditEmployeeQuery.trim().length > 0;
-  const baseOrdersForFilters = hasGlobalHistorySearch ? sortedOrders : selectedDateOrders;
+  const baseOrdersForFilters = useMemo(() => {
+    const source = hasGlobalHistorySearch || !selectedDate
+      ? orders
+      : orders.filter((order) => getDateKey(order.timestamp) === selectedDateKey);
+    return [...source].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  }, [orders, hasGlobalHistorySearch, selectedDate, selectedDateKey]);
 
   const filteredDateOrders = useMemo(() => {
     const normalizedOrderQuery = orderNumberQuery.trim().toLowerCase();
-    const normalizedEmployeeQuery = creditEmployeeQuery.trim().toLowerCase();
+    const normalizedNameQuery = creditEmployeeQuery.trim().toLowerCase();
 
     return baseOrdersForFilters.filter((order) => {
       if (normalizedOrderQuery && !String(order.numero).includes(normalizedOrderQuery)) {
         return false;
       }
 
-      if (normalizedEmployeeQuery) {
+      if (normalizedNameQuery) {
         const allocations = getOrderAllocations(order);
+        const customerName = order.cliente?.toLowerCase() ?? '';
         const employeeNameFromCredit = order.creditInfo?.employeeName?.toLowerCase() ?? '';
         const employeeIdFromCredit = order.creditInfo?.employeeId?.toLowerCase() ?? '';
         const allocationMatches = allocations.some((allocation) => {
@@ -226,12 +212,13 @@ export function Comandas({
           }
           const allocationName = allocation.empleadoNombre?.toLowerCase() ?? '';
           const allocationId = allocation.empleadoId?.toLowerCase() ?? '';
-          return allocationName.includes(normalizedEmployeeQuery) || allocationId.includes(normalizedEmployeeQuery);
+          return allocationName.includes(normalizedNameQuery) || allocationId.includes(normalizedNameQuery);
         });
 
         if (
-          !employeeNameFromCredit.includes(normalizedEmployeeQuery) &&
-          !employeeIdFromCredit.includes(normalizedEmployeeQuery) &&
+          !customerName.includes(normalizedNameQuery) &&
+          !employeeNameFromCredit.includes(normalizedNameQuery) &&
+          !employeeIdFromCredit.includes(normalizedNameQuery) &&
           !allocationMatches
         ) {
           return false;
@@ -692,6 +679,17 @@ export function Comandas({
       return;
     }
 
+    const allocations = getOrderAllocations(order);
+    const hasEmployeeCreditAllocation = allocations.some((allocation) => allocation.metodo === 'credito_empleados');
+    const hasEmployeeCredit =
+      order.metodoPago === 'credito_empleados' ||
+      order.creditInfo?.type === 'empleados' ||
+      hasEmployeeCreditAllocation;
+    if (hasEmployeeCredit) {
+      alert('Para borrar esta comanda primero debes borrar el registro en crédito empleados.');
+      return;
+    }
+
     const confirmed = window.confirm(`¿Eliminar la comanda #${order.numero}? Esta acción no se puede deshacer.`);
     if (!confirmed) {
       return;
@@ -705,7 +703,10 @@ export function Comandas({
       }
     } catch (error) {
       console.error('Error al eliminar la comanda:', error);
-      alert('No se pudo eliminar la comanda. Inténtalo nuevamente.');
+      const message = error instanceof Error && error.message
+        ? error.message
+        : 'No se pudo eliminar la comanda. Inténtalo nuevamente.';
+      alert(message);
     } finally {
       setDeletingOrderId(null);
     }
@@ -812,7 +813,11 @@ export function Comandas({
 
   const renderOrderCard = (order: Order) => {
     const allocations = getOrderAllocations(order);
-    const isEmployeeCredit = order.creditInfo?.type === 'empleados';
+    const creditAllocation = allocations.find((allocation) => allocation.metodo === 'credito_empleados');
+    const isEmployeeCredit =
+      order.creditInfo?.type === 'empleados' ||
+      order.metodoPago === 'credito_empleados' ||
+      Boolean(creditAllocation);
     let employeeCreditLabel = '';
     if (isEmployeeCredit) {
       const employeeName = order.creditInfo?.employeeName?.trim();
@@ -820,10 +825,14 @@ export function Comandas({
         employeeCreditLabel = ` · ${employeeName}`;
       } else if (order.creditInfo?.employeeId) {
         employeeCreditLabel = ` · Empleado ${order.creditInfo.employeeId}`;
+      } else if (creditAllocation?.empleadoNombre) {
+        employeeCreditLabel = ` · ${creditAllocation.empleadoNombre}`;
+      } else if (creditAllocation?.empleadoId) {
+        employeeCreditLabel = ` · Empleado ${creditAllocation.empleadoId}`;
       }
     }
     const creditAmount = isEmployeeCredit
-      ? Math.max(0, Math.round(order.creditInfo?.amount ?? order.total))
+      ? Math.max(0, Math.round(order.creditInfo?.amount ?? creditAllocation?.monto ?? order.total))
       : 0;
     const paymentSummary = isEmployeeCredit
       ? `Crédito empleados${employeeCreditLabel} · ${formatCOP(creditAmount || order.total)}`
@@ -1357,7 +1366,7 @@ export function Comandas({
                 type="text"
                 value={creditEmployeeQuery}
                 onChange={(event) => setCreditEmployeeQuery(event.target.value)}
-                placeholder="Buscar empleado (crédito)"
+                placeholder="Buscar nombre"
                 className="px-3 py-2 border border-gray-300 rounded-lg text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-yellow-400"
               />
               <select

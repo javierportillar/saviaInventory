@@ -21,7 +21,7 @@ type TipoRegistro = 'operativo' | 'inventariable';
 
 type GastoForm = {
   descripcion: string;
-  monto: number;
+  monto: number | '';
   categoria: string;
   fecha: string;
   metodoPago: PaymentMethod;
@@ -51,7 +51,7 @@ type InventoryPriceStat = {
 
 const DEFAULT_FORM: GastoForm = {
   descripcion: '',
-  monto: 0,
+  monto: '',
   categoria: '',
   fecha: getTodayDateInputValue(),
   metodoPago: 'efectivo',
@@ -419,7 +419,7 @@ export function Gastos({ focusRequest, onInventoryChanged }: GastosProps) {
         return;
       }
 
-      const monto = parseFloat(formData.monto.toString()) || 0;
+      const monto = formData.monto === '' ? 0 : parseFloat(formData.monto.toString()) || 0;
 
       const payload: Gasto = {
         id: editingId ?? crypto.randomUUID(),
@@ -661,9 +661,18 @@ export function Gastos({ focusRequest, onInventoryChanged }: GastosProps) {
                     required
                     min="0"
                     step="100"
-                    value={formData.tipoRegistro === 'inventariable' ? inventarioTotal : formData.monto}
+                    value={
+                      formData.tipoRegistro === 'inventariable'
+                        ? inventarioTotal
+                        : formData.monto
+                    }
                     readOnly={formData.tipoRegistro === 'inventariable'}
-                    onChange={(e) => setFormData({ ...formData, monto: parseFloat(e.target.value) || 0 })}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        monto: e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0),
+                      })
+                    }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
                     style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
                     placeholder="Valor total (COP)"

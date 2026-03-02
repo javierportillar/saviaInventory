@@ -6,6 +6,7 @@ import {
   CheckCircle,
   Loader2,
   History,
+  Trash2,
   X,
 } from 'lucide-react';
 import { EmployeeCreditRecord, Order, PaymentMethod } from '../types';
@@ -15,6 +16,7 @@ import { formatPaymentSummary, getOrderAllocations, isOrderPaid } from '../utils
 import dataService, { EMPLOYEE_CREDIT_UPDATED_EVENT } from '../lib/dataService';
 
 const UNASSIGNED_EMPLOYEE_KEY = '__sin_empleado__';
+const DELETE_HISTORY_CODE = '123450';
 
 type SettlementPaymentMethod = Extract<PaymentMethod, 'efectivo' | 'nequi' | 'tarjeta'>;
 
@@ -86,6 +88,11 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
   const [creditRecords, setCreditRecords] = useState<EmployeeCreditRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState<boolean>(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [deletingHistoryEntryId, setDeletingHistoryEntryId] = useState<string | null>(null);
+  const [bulkDeletingHistory, setBulkDeletingHistory] = useState(false);
+  const [bulkSettling, setBulkSettling] = useState(false);
+  const [selectedHistoryEntryIds, setSelectedHistoryEntryIds] = useState<string[]>([]);
+  const [selectedPendingOrderIds, setSelectedPendingOrderIds] = useState<string[]>([]);
 
   const defaultStartDate = useMemo(() => {
     const now = new Date();
@@ -149,36 +156,104 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
     };
   }, []);
 
+  const reloadHistory = async () => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const records = await dataService.fetchEmployeeCredits();
+      setCreditRecords(records);
+    } catch (error) {
+      console.error('Error recargando el historial de crédito de empleados:', error);
+      setHistoryError('No se pudo cargar el historial de créditos de empleados.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void reloadHistory();
+  }, [orders]);
+
   const pendingCreditOrders = useMemo<CreditOrderView[]>(() => {
-    return orders
-      .filter((order) => {
-        const creditInfo = order.creditInfo;
-        if (!creditInfo || creditInfo.type !== 'empleados') {
-          return false;
+    type OutstandingByOrder = {
+      amount: number;
+      assignedAt: Date;
+      employeeId?: string;
+      employeeName?: string;
+    };
+
+    const byOrder = new Map<string, OutstandingByOrder>();
+
+    creditRecords.forEach((record) => {
+      record.history.forEach((entry) => {
+        const orderKey = entry.orderId
+          ? `id:${entry.orderId}`
+          : typeof entry.orderNumero === 'number'
+            ? `num:${entry.orderNumero}`
+            : null;
+
+        if (!orderKey) {
+          return;
         }
-        return !isOrderPaid(order);
-      })
+
+        const entryTimestamp = new Date(entry.timestamp);
+        const safeTimestamp = Number.isNaN(entryTimestamp.getTime()) ? new Date() : entryTimestamp;
+        const current = byOrder.get(orderKey) ?? {
+          amount: 0,
+          assignedAt: safeTimestamp,
+          employeeId: entry.empleadoId,
+          employeeName: entry.empleadoNombre,
+        };
+
+        current.amount += entry.tipo === 'cargo' ? entry.monto : -entry.monto;
+        if (entry.tipo === 'cargo' && safeTimestamp.getTime() < current.assignedAt.getTime()) {
+          current.assignedAt = safeTimestamp;
+        }
+        if (!current.employeeId && entry.empleadoId) {
+          current.employeeId = entry.empleadoId;
+        }
+        if (!current.employeeName && entry.empleadoNombre) {
+          current.employeeName = entry.empleadoNombre;
+        }
+
+        byOrder.set(orderKey, current);
+      });
+    });
+
+    return orders
       .map((order) => {
-        const creditInfo = order.creditInfo!;
-        const assignedAt = creditInfo.assignedAt ?? order.timestamp;
-        const amount = Math.max(0, Math.round(creditInfo.amount ?? order.total));
-        const rawName = creditInfo.employeeName?.trim();
-        const employeeId = creditInfo.employeeId ?? undefined;
+        const keyById = `id:${order.id}`;
+        const keyByNumero = typeof order.numero === 'number' ? `num:${order.numero}` : null;
+        const outstanding = byOrder.get(keyById) ?? (keyByNumero ? byOrder.get(keyByNumero) : undefined);
+        if (!outstanding) {
+          return null;
+        }
+
+        const amount = Math.max(0, Math.round(outstanding.amount));
+        if (amount <= 0 || isOrderPaid(order)) {
+          return null;
+        }
+
+        const creditInfo = order.creditInfo;
+        const rawName = outstanding.employeeName?.trim() || creditInfo?.employeeName?.trim();
+        const employeeId = outstanding.employeeId ?? creditInfo?.employeeId ?? undefined;
         const employeeLabel = rawName && rawName.length > 0
           ? rawName
           : employeeId
             ? `Empleado ${employeeId}`
             : 'Empleado sin asignar';
+
         return {
           order,
-          assignedAt,
+          assignedAt: outstanding.assignedAt,
           amount,
           employeeLabel,
           employeeId,
-        };
+        } as CreditOrderView;
       })
+      .filter((entry): entry is CreditOrderView => entry !== null)
       .sort((a, b) => b.assignedAt.getTime() - a.assignedAt.getTime());
-  }, [orders]);
+  }, [orders, creditRecords]);
 
   const dateRange = useMemo(() => {
     const baseStart = normalizeDateStart(parseDateInputValue(startDate));
@@ -262,6 +337,11 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
     });
   }, [pendingCreditOrders, dateRange, selectedEmployee]);
 
+  useEffect(() => {
+    const visibleIds = new Set(filteredCreditOrders.map((entry) => entry.order.id));
+    setSelectedPendingOrderIds((prev) => prev.filter((id) => visibleIds.has(id)));
+  }, [filteredCreditOrders]);
+
   const filteredPendingTotal = useMemo(
     () => filteredCreditOrders.reduce((sum, entry) => sum + entry.amount, 0),
     [filteredCreditOrders]
@@ -306,6 +386,11 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
     });
   }, [dateRange, historyEntries, selectedEmployee, statusFilter]);
 
+  useEffect(() => {
+    const visibleIds = new Set(filteredHistoryEntries.map((entry) => entry.id));
+    setSelectedHistoryEntryIds((prev) => prev.filter((id) => visibleIds.has(id)));
+  }, [filteredHistoryEntries]);
+
   const totalCargos = useMemo(
     () => filteredHistoryEntries.filter((entry) => entry.tipo === 'cargo').reduce((sum, entry) => sum + entry.monto, 0),
     [filteredHistoryEntries]
@@ -323,9 +408,9 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
       .map((record) => ({
         key: record.empleadoId,
         label: buildEmployeeLabel(record.empleadoId, record.empleadoNombre),
-        total: Math.round(record.total),
+        pendingBalance: Math.max(0, Math.round(record.total)),
       }))
-      .sort((a, b) => b.total - a.total);
+      .sort((a, b) => b.pendingBalance - a.pendingBalance);
   }, [creditRecords]);
 
   const handleOpenSettlement = (entry: CreditOrderView) => {
@@ -360,6 +445,168 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
       setSettlingOrderId(null);
     }
   };
+
+  const requestDeleteAuthCode = (): boolean => {
+    const enteredCode = window.prompt('Para eliminar registros ingresa el código de autorización:');
+    if (enteredCode === null) {
+      return false;
+    }
+    if (enteredCode.trim() !== DELETE_HISTORY_CODE) {
+      alert('Código incorrecto. No se eliminó ningún registro.');
+      return false;
+    }
+    return true;
+  };
+
+  const togglePendingOrderSelection = (orderId: string) => {
+    setSelectedPendingOrderIds((prev) =>
+      prev.includes(orderId) ? prev.filter((id) => id !== orderId) : [...prev, orderId]
+    );
+  };
+
+  const toggleSelectAllPendingOrders = () => {
+    const visibleIds = filteredCreditOrders.map((entry) => entry.order.id);
+    if (visibleIds.length === 0) {
+      setSelectedPendingOrderIds([]);
+      return;
+    }
+    const allSelected = visibleIds.every((id) => selectedPendingOrderIds.includes(id));
+    setSelectedPendingOrderIds(allSelected ? [] : visibleIds);
+  };
+
+  const toggleHistoryEntrySelection = (entryId: string) => {
+    setSelectedHistoryEntryIds((prev) =>
+      prev.includes(entryId) ? prev.filter((id) => id !== entryId) : [...prev, entryId]
+    );
+  };
+
+  const toggleSelectAllHistoryEntries = () => {
+    const visibleIds = filteredHistoryEntries.map((entry) => entry.id);
+    if (visibleIds.length === 0) {
+      setSelectedHistoryEntryIds([]);
+      return;
+    }
+    const allSelected = visibleIds.every((id) => selectedHistoryEntryIds.includes(id));
+    setSelectedHistoryEntryIds(allSelected ? [] : visibleIds);
+  };
+
+  const handleBulkSettleSelectedOrders = async () => {
+    if (bulkSettling || selectedPendingOrderIds.length === 0) {
+      return;
+    }
+    const selectedEntries = filteredCreditOrders.filter((entry) => selectedPendingOrderIds.includes(entry.order.id));
+    if (selectedEntries.length === 0) {
+      return;
+    }
+
+    const settlementMethodLabel =
+      SETTLEMENT_METHODS.find((method) => method.value === settlementMethod)?.label ?? settlementMethod;
+    const confirmed = window.confirm(
+      `¿Registrar pago para ${selectedEntries.length} pedido(s) seleccionados usando ${settlementMethodLabel}?`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setBulkSettling(true);
+    setSettlementError(null);
+    try {
+      const method = normalizeSettlementMethod(settlementMethod);
+      for (const entry of selectedEntries) {
+        await onSettleCredit(entry.order, { metodo: method });
+      }
+      setSelectedPendingOrderIds([]);
+    } catch (error) {
+      console.error('Error registrando pagos masivos de crédito:', error);
+      setSettlementError('No se pudieron registrar todos los pagos seleccionados.');
+    } finally {
+      setBulkSettling(false);
+    }
+  };
+
+  const handleDeleteHistoryEntry = async (entryId: string) => {
+    if (deletingHistoryEntryId || bulkDeletingHistory) {
+      return;
+    }
+
+    const confirmed = window.confirm('¿Eliminar este movimiento del historial de créditos? Esta acción no se puede deshacer.');
+    if (!confirmed) {
+      return;
+    }
+
+    if (!requestDeleteAuthCode()) {
+      return;
+    }
+
+    try {
+      setDeletingHistoryEntryId(entryId);
+      await dataService.deleteEmployeeCreditHistoryEntry(entryId);
+      await reloadHistory();
+    } catch (error) {
+      console.error('Error eliminando movimiento de crédito de empleado:', error);
+      setHistoryError('No se pudo eliminar el movimiento seleccionado.');
+    } finally {
+      setDeletingHistoryEntryId(null);
+    }
+  };
+
+  const handleBulkDeleteHistoryEntries = async () => {
+    if (bulkDeletingHistory || selectedHistoryEntryIds.length === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `¿Eliminar ${selectedHistoryEntryIds.length} movimiento(s) del historial de créditos? Esta acción no se puede deshacer.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    if (!requestDeleteAuthCode()) {
+      return;
+    }
+
+    setBulkDeletingHistory(true);
+    setHistoryError(null);
+    try {
+      for (const entryId of selectedHistoryEntryIds) {
+        await dataService.deleteEmployeeCreditHistoryEntry(entryId);
+      }
+      setSelectedHistoryEntryIds([]);
+      await reloadHistory();
+    } catch (error) {
+      console.error('Error eliminando movimientos seleccionados de crédito:', error);
+      setHistoryError('No se pudieron eliminar todos los movimientos seleccionados.');
+    } finally {
+      setBulkDeletingHistory(false);
+    }
+  };
+  const handleViewOrderFromHistory = (orderId?: string, orderNumero?: number) => {
+    if (!onViewOrder) return;
+
+    let target: Order | undefined;
+    if (orderId) {
+      target = orders.find((o) => o.id === orderId);
+    }
+    if (!target && typeof orderNumero === 'number') {
+      target = orders.find((o) => Number(o.numero) === orderNumero);
+    }
+
+    if (target) {
+      onViewOrder(target);
+    } else {
+      alert('La comanda seleccionada no se encuentra cargada en la vista actual o es muy antigua.');
+    }
+  };
+
+  const allPendingSelected =
+    filteredCreditOrders.length > 0 &&
+    filteredCreditOrders.every((entry) => selectedPendingOrderIds.includes(entry.order.id));
+
+  const allHistorySelected =
+    filteredHistoryEntries.length > 0 &&
+    filteredHistoryEntries.every((entry) => selectedHistoryEntryIds.includes(entry.id));
+
   return (
     <section className="space-y-6">
       <header className="space-y-2">
@@ -507,18 +754,53 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
 
       <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="xl:col-span-2 ui-card">
-          <div className="px-4 py-3 border-b border-gray-100">
-            <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
-              Créditos pendientes por pedido
-            </h3>
-            <p className="text-xs text-gray-500">
-              Pedidos asignados como crédito de empleados dentro del filtro seleccionado.
-            </p>
+          <div className="px-4 py-3 border-b border-gray-100 space-y-3">
+            <div>
+              <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
+                Créditos pendientes por pedido
+              </h3>
+              <p className="text-xs text-gray-500">
+                Pedidos asignados como crédito de empleados dentro del filtro seleccionado.
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <select
+                value={settlementMethod}
+                onChange={(event) => setSettlementMethod(event.target.value as SettlementPaymentMethod)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:border-transparent"
+                style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+              >
+                {SETTLEMENT_METHODS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    Pago masivo por {option.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={handleBulkSettleSelectedOrders}
+                disabled={bulkSettling || selectedPendingOrderIds.length === 0}
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-green-600 text-white text-xs sm:text-sm font-semibold hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {bulkSettling ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                {bulkSettling
+                  ? 'Procesando pagos...'
+                  : `Gestionar seleccionados (${selectedPendingOrderIds.length})`}
+              </button>
+            </div>
           </div>
           <div className="ui-card-pad ui-table-wrapper">
             <table className="ui-table">
               <thead className="bg-gray-50">
                 <tr>
+                  <th className="px-3 lg:px-6 py-3 text-left">
+                    <input
+                      type="checkbox"
+                      checked={allPendingSelected}
+                      onChange={toggleSelectAllPendingOrders}
+                      aria-label="Seleccionar todos los pedidos pendientes visibles"
+                    />
+                  </th>
                   <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Fecha asignación
                   </th>
@@ -543,7 +825,7 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
                 {filteredCreditOrders.length === 0 && (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-3 lg:px-6 py-8 text-center text-xs lg:text-sm text-gray-500"
                     >
                       No hay créditos de empleados para el filtro seleccionado.
@@ -558,6 +840,14 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
                   const isSettling = settlingOrderId === order.id;
                   return (
                     <tr key={order.id} className="hover:bg-gray-50">
+                      <td className="px-3 lg:px-6 py-3 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={selectedPendingOrderIds.includes(order.id)}
+                          onChange={() => togglePendingOrderSelection(order.id)}
+                          aria-label={`Seleccionar pedido ${order.numero ? `#${order.numero}` : order.id}`}
+                        />
+                      </td>
                       <td className="px-3 lg:px-6 py-3 text-xs text-gray-600">
                         {formatAssignedAt(assignedAt)}
                       </td>
@@ -611,10 +901,10 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
         <div className="ui-card">
           <div className="px-4 py-3 border-b border-gray-100">
             <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
-              Saldo por empleado
+              Saldo pendiente por empleado
             </h3>
             <p className="text-xs text-gray-500">
-              Total de créditos pendientes acumulados por colaborador.
+              Valor consumido y aún no pagado por cada colaborador.
             </p>
           </div>
           <div className="divide-y divide-gray-100">
@@ -623,11 +913,14 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
                 No hay créditos pendientes registrados.
               </p>
             )}
-            {totalsByEmployee.map(({ key, label, total }) => (
+            {totalsByEmployee.map(({ key, label, pendingBalance }) => (
               <div key={key} className="px-4 py-3 flex items-center justify-between text-sm">
-                <span className="font-medium text-gray-600">{label}</span>
+                <div className="flex flex-col">
+                  <span className="font-medium text-gray-600">{label}</span>
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">Saldo pendiente</span>
+                </div>
                 <span className="font-semibold" style={{ color: COLORS.dark }}>
-                  {formatCOP(total)}
+                  {formatCOP(pendingBalance)}
                 </span>
               </div>
             ))}
@@ -636,13 +929,24 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
       </section>
       <section className="ui-card">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <div>
+          <div className="space-y-2">
             <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
               Historial de movimientos
             </h3>
             <p className="text-xs text-gray-500">
               Registros de cargos (créditos asignados) y abonos (pagos) según los filtros seleccionados.
             </p>
+            <button
+              type="button"
+              onClick={handleBulkDeleteHistoryEntries}
+              disabled={bulkDeletingHistory || selectedHistoryEntryIds.length === 0}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-red-300 text-red-600 text-xs sm:text-sm font-semibold hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {bulkDeletingHistory ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              {bulkDeletingHistory
+                ? 'Eliminando...'
+                : `Eliminar seleccionados (${selectedHistoryEntryIds.length})`}
+            </button>
           </div>
           <History size={18} className="text-gray-400" />
         </div>
@@ -650,6 +954,14 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
           <table className="ui-table">
             <thead className="bg-gray-50">
               <tr>
+                <th className="px-3 lg:px-6 py-3 text-left">
+                  <input
+                    type="checkbox"
+                    checked={allHistorySelected}
+                    onChange={toggleSelectAllHistoryEntries}
+                    aria-label="Seleccionar todos los movimientos visibles"
+                  />
+                </th>
                 <th className="px-3 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Fecha
                 </th>
@@ -668,19 +980,22 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
                 <th className="px-3 lg:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
                   Saldo acumulado
                 </th>
+                <th className="px-3 lg:px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Acciones
+                </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-100">
               {historyLoading && (
                 <tr>
-                  <td colSpan={6} className="px-3 lg:px-6 py-8 text-center text-xs lg:text-sm text-gray-500">
+                  <td colSpan={8} className="px-3 lg:px-6 py-8 text-center text-xs lg:text-sm text-gray-500">
                     Cargando historial de movimientos...
                   </td>
                 </tr>
               )}
               {!historyLoading && filteredHistoryEntries.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-3 lg:px-6 py-8 text-center text-xs lg:text-sm text-gray-500">
+                  <td colSpan={8} className="px-3 lg:px-6 py-8 text-center text-xs lg:text-sm text-gray-500">
                     No hay movimientos registrados para los filtros seleccionados.
                   </td>
                 </tr>
@@ -694,6 +1009,14 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
 
                   return (
                     <tr key={entry.id} className="hover:bg-gray-50">
+                      <td className="px-3 lg:px-6 py-3 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={selectedHistoryEntryIds.includes(entry.id)}
+                          onChange={() => toggleHistoryEntrySelection(entry.id)}
+                          aria-label={`Seleccionar movimiento ${entry.id}`}
+                        />
+                      </td>
                       <td className="px-3 lg:px-6 py-3 text-xs text-gray-600">
                         {formatHistoryTimestamp(entry.timestamp)}
                       </td>
@@ -706,17 +1029,41 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
                         </span>
                       </td>
                       <td className="px-3 lg:px-6 py-3 text-xs text-gray-600 hidden md:table-cell">
-                        {typeof entry.orderNumero === 'number'
-                          ? `#${entry.orderNumero}`
-                          : entry.orderId
-                            ? entry.orderId.slice(0, 8)
-                            : '—'}
+                        {typeof entry.orderNumero === 'number' || entry.orderId ? (
+                          <button
+                            type="button"
+                            onClick={() => handleViewOrderFromHistory(entry.orderId, entry.orderNumero)}
+                            className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                          >
+                            {typeof entry.orderNumero === 'number'
+                              ? `#${entry.orderNumero}`
+                              : entry.orderId?.slice(0, 8)}
+                          </button>
+                        ) : (
+                          '—'
+                        )}
                       </td>
                       <td className="px-3 lg:px-6 py-3 text-xs text-right font-semibold" style={{ color: entry.tipo === 'cargo' ? COLORS.accent : '#047857' }}>
                         {formatCOP(entry.monto)}
                       </td>
                       <td className="px-3 lg:px-6 py-3 text-xs text-right text-gray-600 hidden lg:table-cell">
                         {typeof entry.balanceAfter === 'number' ? formatCOP(entry.balanceAfter) : '—'}
+                      </td>
+                      <td className="px-3 lg:px-6 py-3 text-xs text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteHistoryEntry(entry.id)}
+                          disabled={deletingHistoryEntryId === entry.id}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Eliminar movimiento"
+                        >
+                          {deletingHistoryEntryId === entry.id ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Trash2 size={14} />
+                          )}
+                          <span className="hidden sm:inline">Eliminar</span>
+                        </button>
                       </td>
                     </tr>
                   );
