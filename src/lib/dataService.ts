@@ -1761,6 +1761,12 @@ interface OutstandingCreditInfo {
   employeeName?: string;
 }
 
+interface CreditEmployeeMeta {
+  assignedAt?: string;
+  employeeId?: string;
+  employeeName?: string;
+}
+
 const buildOutstandingCreditMap = (rows: SupabaseCreditHistoryRow[]): Map<string, OutstandingCreditInfo> => {
   const credits = new Map<string, OutstandingCreditInfo>();
 
@@ -1873,6 +1879,65 @@ const buildOutstandingCreditMapByOrderNumber = (rows: SupabaseCreditHistoryRow[]
   return outstanding;
 };
 
+const buildLatestCreditMetaByOrderId = (rows: SupabaseCreditHistoryRow[]): Map<string, CreditEmployeeMeta> => {
+  const meta = new Map<string, CreditEmployeeMeta>();
+
+  rows.forEach((row) => {
+    if (row.tipo !== 'cargo') return;
+    const orderId = typeof row.order_id === 'string' ? row.order_id : undefined;
+    if (!orderId) return;
+
+    const ts = typeof row.timestamp === 'string' ? row.timestamp : undefined;
+    const current = meta.get(orderId);
+    if (current?.assignedAt && ts) {
+      const currentTs = new Date(current.assignedAt).getTime();
+      const nextTs = new Date(ts).getTime();
+      if (!Number.isNaN(currentTs) && !Number.isNaN(nextTs) && nextTs < currentTs) {
+        return;
+      }
+    }
+
+    meta.set(orderId, {
+      assignedAt: ts ?? current?.assignedAt,
+      employeeId: (typeof row.empleado_id === 'string' ? row.empleado_id : row.empleado?.id ?? undefined) ?? current?.employeeId,
+      employeeName: (row.empleado?.nombre ?? row.empleado_nombre ?? undefined) ?? current?.employeeName,
+    });
+  });
+
+  return meta;
+};
+
+const buildLatestCreditMetaByOrderNumber = (rows: SupabaseCreditHistoryRow[]): Map<number, CreditEmployeeMeta> => {
+  const meta = new Map<number, CreditEmployeeMeta>();
+
+  rows.forEach((row) => {
+    if (row.tipo !== 'cargo') return;
+    const parsedOrderNumber = Number(row.order_numero);
+    const orderNumber = Number.isFinite(parsedOrderNumber) && parsedOrderNumber > 0
+      ? Math.round(parsedOrderNumber)
+      : undefined;
+    if (!orderNumber) return;
+
+    const ts = typeof row.timestamp === 'string' ? row.timestamp : undefined;
+    const current = meta.get(orderNumber);
+    if (current?.assignedAt && ts) {
+      const currentTs = new Date(current.assignedAt).getTime();
+      const nextTs = new Date(ts).getTime();
+      if (!Number.isNaN(currentTs) && !Number.isNaN(nextTs) && nextTs < currentTs) {
+        return;
+      }
+    }
+
+    meta.set(orderNumber, {
+      assignedAt: ts ?? current?.assignedAt,
+      employeeId: (typeof row.empleado_id === 'string' ? row.empleado_id : row.empleado?.id ?? undefined) ?? current?.employeeId,
+      employeeName: (row.empleado?.nombre ?? row.empleado_nombre ?? undefined) ?? current?.employeeName,
+    });
+  });
+
+  return meta;
+};
+
 const hydrateOrdersWithEmployeeCredit = async (orders: Order[]): Promise<Order[]> => {
   if (orders.length === 0) {
     return orders;
@@ -1895,6 +1960,7 @@ const hydrateOrdersWithEmployeeCredit = async (orders: Order[]): Promise<Order[]
 
   try {
     let outstandingById = new Map<string, OutstandingCreditInfo>();
+    let latestCreditMetaById = new Map<string, CreditEmployeeMeta>();
     if (orderIds.length > 0) {
       const { data, error } = await supabase
         .from('employee_credit_history')
@@ -1912,10 +1978,13 @@ const hydrateOrdersWithEmployeeCredit = async (orders: Order[]): Promise<Order[]
       if (error) {
         throw error;
       }
-      outstandingById = buildOutstandingCreditMap(data ?? []);
+      const rows = data ?? [];
+      outstandingById = buildOutstandingCreditMap(rows);
+      latestCreditMetaById = buildLatestCreditMetaByOrderId(rows);
     }
 
     let outstandingByNumber = new Map<number, OutstandingCreditInfo>();
+    let latestCreditMetaByNumber = new Map<number, CreditEmployeeMeta>();
     if (orderNumbers.length > 0) {
       const { data, error } = await supabase
         .from('employee_credit_history')
@@ -1933,7 +2002,43 @@ const hydrateOrdersWithEmployeeCredit = async (orders: Order[]): Promise<Order[]
       if (error) {
         throw error;
       }
-      outstandingByNumber = buildOutstandingCreditMapByOrderNumber(data ?? []);
+      const rows = data ?? [];
+      outstandingByNumber = buildOutstandingCreditMapByOrderNumber(rows);
+      latestCreditMetaByNumber = buildLatestCreditMetaByOrderNumber(rows);
+    }
+
+    const pendingNameIds = new Set<string>();
+    const collectMissingNames = (entry?: OutstandingCreditInfo) => {
+      if (!entry?.employeeName && entry?.employeeId) {
+        pendingNameIds.add(entry.employeeId);
+      }
+    };
+    const collectMissingNamesFromMeta = (entry?: CreditEmployeeMeta) => {
+      if (!entry?.employeeName && entry?.employeeId) {
+        pendingNameIds.add(entry.employeeId);
+      }
+    };
+    outstandingById.forEach((entry) => collectMissingNames(entry));
+    outstandingByNumber.forEach((entry) => collectMissingNames(entry));
+    latestCreditMetaById.forEach((entry) => collectMissingNamesFromMeta(entry));
+    latestCreditMetaByNumber.forEach((entry) => collectMissingNamesFromMeta(entry));
+
+    let employeeNamesById = new Map<string, string>();
+    if (pendingNameIds.size > 0) {
+      const ids = Array.from(pendingNameIds);
+      const { data: employeesData, error: employeesError } = await supabase
+        .from('empleados')
+        .select('id, nombre')
+        .in('id', ids);
+      if (employeesError) {
+        console.warn('[dataService] No se pudieron hidratar nombres de empleados para créditos.', employeesError);
+      } else {
+        employeeNamesById = new Map(
+          (employeesData ?? [])
+            .filter((row) => typeof row?.id === 'string' && typeof row?.nombre === 'string')
+            .map((row) => [row.id as string, row.nombre as string])
+        );
+      }
     }
 
     return orders.map((order) => {
@@ -1944,27 +2049,43 @@ const hydrateOrdersWithEmployeeCredit = async (orders: Order[]): Promise<Order[]
         : undefined;
       const creditByNumber = orderNumber ? outstandingByNumber.get(orderNumber) : undefined;
       const credit = creditById ?? creditByNumber;
-      if (!credit) {
+      const latestCreditMeta = latestCreditMetaById.get(order.id)
+        ?? (orderNumber ? latestCreditMetaByNumber.get(orderNumber) : undefined);
+      if (!credit && !latestCreditMeta) {
         return order;
       }
 
-      const assignedAt = credit.assignedAt ? new Date(credit.assignedAt) : order.timestamp;
+      const assignedAt = (credit?.assignedAt ?? latestCreditMeta?.assignedAt)
+        ? new Date(credit?.assignedAt ?? latestCreditMeta?.assignedAt ?? order.timestamp.toISOString())
+        : order.timestamp;
       const safeAssignedAt = Number.isNaN(assignedAt.getTime()) ? order.timestamp : assignedAt;
 
-      return {
+      const hydratedEmployeeName =
+        credit?.employeeName
+        ?? latestCreditMeta?.employeeName
+        ?? ((credit?.employeeId ?? latestCreditMeta?.employeeId)
+          ? employeeNamesById.get((credit?.employeeId ?? latestCreditMeta?.employeeId)!)
+          : undefined);
+
+      const hydratedOrder: Order = {
         ...order,
         metodoPago: 'credito_empleados',
-        paymentStatus: 'pendiente',
-        paymentAllocations: [],
-        paymentRegisteredAt: undefined,
         creditInfo: {
           type: 'empleados',
-          amount: credit.amount,
+          amount: credit?.amount ?? Math.max(0, Math.round(order.total)),
           assignedAt: safeAssignedAt,
-          employeeId: credit.employeeId,
-          employeeName: credit.employeeName,
+          employeeId: credit?.employeeId ?? latestCreditMeta?.employeeId,
+          employeeName: hydratedEmployeeName,
         },
       };
+
+      if (credit) {
+        hydratedOrder.paymentStatus = 'pendiente';
+        hydratedOrder.paymentAllocations = [];
+        hydratedOrder.paymentRegisteredAt = undefined;
+      }
+
+      return hydratedOrder;
     });
   } catch (error) {
     console.warn('[dataService] No se pudo obtener el estado de créditos de empleados.', error);

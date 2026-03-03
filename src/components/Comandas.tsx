@@ -109,6 +109,8 @@ export function Comandas({
   const [isSavingOrderChanges, setIsSavingOrderChanges] = useState(false);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [statusUpdatingOrderIds, setStatusUpdatingOrderIds] = useState<Record<string, boolean>>({});
+  const [creditEmployeeLabelByOrderId, setCreditEmployeeLabelByOrderId] = useState<Record<string, string>>({});
+  const [creditEmployeeLabelByOrderNumero, setCreditEmployeeLabelByOrderNumero] = useState<Record<number, string>>({});
 
   const handleOrderStatusChange = async (order: Order, nextStatus: Order['estado']) => {
     if (statusUpdatingOrderIds[order.id]) {
@@ -165,6 +167,64 @@ export function Comandas({
       }
     }
   }, [focusRequest, orders]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadCreditEmployeeLabels = async () => {
+      try {
+        const credits = await dataService.fetchEmployeeCredits();
+        if (!active) {
+          return;
+        }
+
+        const byOrderId = new Map<string, { label: string; ts: number }>();
+        const byOrderNumero = new Map<number, { label: string; ts: number }>();
+
+        credits.forEach((record) => {
+          record.history.forEach((entry) => {
+            if (entry.tipo !== 'cargo') {
+              return;
+            }
+
+            const ts = new Date(entry.timestamp).getTime();
+            const safeTs = Number.isNaN(ts) ? 0 : ts;
+            const label = (entry.empleadoNombre ?? record.empleadoNombre)?.trim()
+              || `Empleado ${record.empleadoId.slice(0, 6)}`;
+
+            if (entry.orderId) {
+              const current = byOrderId.get(entry.orderId);
+              if (!current || safeTs >= current.ts) {
+                byOrderId.set(entry.orderId, { label, ts: safeTs });
+              }
+            }
+
+            if (typeof entry.orderNumero === 'number' && Number.isFinite(entry.orderNumero)) {
+              const current = byOrderNumero.get(entry.orderNumero);
+              if (!current || safeTs >= current.ts) {
+                byOrderNumero.set(entry.orderNumero, { label, ts: safeTs });
+              }
+            }
+          });
+        });
+
+        setCreditEmployeeLabelByOrderId(
+          Object.fromEntries(Array.from(byOrderId.entries()).map(([key, value]) => [key, value.label]))
+        );
+        setCreditEmployeeLabelByOrderNumero(
+          Object.fromEntries(Array.from(byOrderNumero.entries()).map(([key, value]) => [key, value.label]))
+        );
+      } catch (error) {
+        console.error('No se pudieron cargar etiquetas de empleado para créditos.', error);
+      }
+    };
+
+    void loadCreditEmployeeLabels();
+
+    return () => {
+      active = false;
+    };
+  }, [orders]);
 
   useEffect(() => {
     if (!focusRequest) {
@@ -820,11 +880,16 @@ export function Comandas({
       Boolean(creditAllocation);
     let employeeCreditLabel = '';
     if (isEmployeeCredit) {
+      const employeeNameFromHistory =
+        creditEmployeeLabelByOrderId[order.id]
+        ?? (typeof order.numero === 'number' ? creditEmployeeLabelByOrderNumero[order.numero] : undefined);
       const employeeName = order.creditInfo?.employeeName?.trim();
       if (employeeName) {
         employeeCreditLabel = ` · ${employeeName}`;
       } else if (order.creditInfo?.employeeId) {
         employeeCreditLabel = ` · Empleado ${order.creditInfo.employeeId}`;
+      } else if (employeeNameFromHistory) {
+        employeeCreditLabel = ` · ${employeeNameFromHistory}`;
       } else if (creditAllocation?.empleadoNombre) {
         employeeCreditLabel = ` · ${creditAllocation.empleadoNombre}`;
       } else if (creditAllocation?.empleadoId) {
