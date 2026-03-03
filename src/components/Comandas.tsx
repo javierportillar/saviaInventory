@@ -57,6 +57,59 @@ const parseDateKey = (key: string): Date => {
   return new Date(year, (month ?? 1) - 1, day ?? 1);
 };
 
+const parseCsvValues = (value?: string): string[] => {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+};
+
+const parseBowlDataFromNotes = (
+  notes: string | undefined,
+  isFrutal: boolean
+): {
+  bases: string[];
+  toppings: string[];
+  proteins: string[];
+  combo: boolean;
+  yogurt: boolean;
+} => {
+  if (!notes) {
+    return { bases: [], toppings: [], proteins: [], combo: false, yogurt: false };
+  }
+
+  const lines = notes
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const getLine = (prefix: string) => lines.find((line) => line.toLowerCase().startsWith(prefix.toLowerCase()));
+  const getAfterPrefix = (line: string | undefined, prefix: string) =>
+    line?.slice(prefix.length).trim();
+
+  const baseLine = getLine('Base:');
+  const basesLine = getLine('Bases:');
+  const toppingsLine = getLine('Toppings:');
+  const proteinsLine = getLine('Proteínas:');
+
+  const singleBase = getAfterPrefix(baseLine, 'Base:');
+  const multiBases = getAfterPrefix(basesLine, 'Bases:');
+  const toppingsValue = getAfterPrefix(toppingsLine, 'Toppings:');
+  const proteinsValue = getAfterPrefix(proteinsLine, 'Proteínas:');
+
+  const bases = isFrutal
+    ? (singleBase && singleBase.toLowerCase() !== 'sin base' ? [singleBase] : [])
+    : parseCsvValues(multiBases);
+
+  const toppings = parseCsvValues(toppingsValue);
+  const proteins = parseCsvValues(proteinsValue).filter((entry) => entry.toLowerCase() !== 'sin proteína');
+  const combo = lines.some((line) => line.toLowerCase().includes('combo bowl'));
+  const yogurt = lines.some((line) => line.toLowerCase().includes('yogurt griego'));
+
+  return { bases, toppings, proteins, combo, yogurt };
+};
+
 interface ComandasProps {
   orders: Order[];
   onUpdateOrderStatus: (order: Order, status: Order['estado']) => Promise<void> | void;
@@ -102,6 +155,7 @@ export function Comandas({
   const [selectedBowlProteins, setSelectedBowlProteins] = useState<string[]>([]);
   const [includeSaladoCombo, setIncludeSaladoCombo] = useState(false);
   const [includeGreekYogurt, setIncludeGreekYogurt] = useState(false);
+  const [editingBowlItemIndex, setEditingBowlItemIndex] = useState<number | null>(null);
   const [selectedDateKey, setSelectedDateKey] = useState<string>(() => getDateKey(new Date()));
   const [currentPage, setCurrentPage] = useState(1);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
@@ -544,6 +598,7 @@ export function Comandas({
 
     if (isBowlSalado(menuItem) || isBowlFrutal(menuItem)) {
       resetBowlSelections();
+      setEditingBowlItemIndex(null);
       setBowlModalItem(menuItem);
       setShowAddProduct(false);
       setSearchQuery('');
@@ -555,6 +610,37 @@ export function Comandas({
 
   const confirmBowlSelection = () => {
     if (!bowlModalItem) return;
+
+    const applyBowlEdition = (payload: {
+      notas: string;
+      customKey: string;
+      bowlCustomization: CartItem['bowlCustomization'];
+      precioUnitario: number;
+    }) => {
+      if (editingBowlItemIndex !== null && editingOrder) {
+        const target = editingOrder.items[editingBowlItemIndex];
+        if (!target) {
+          return;
+        }
+        const updatedItems = [...editingOrder.items];
+        updatedItems[editingBowlItemIndex] = {
+          ...target,
+          item: bowlModalItem,
+          notas: payload.notas,
+          customKey: payload.customKey,
+          bowlCustomization: payload.bowlCustomization,
+          precioUnitario: payload.precioUnitario,
+        };
+        const newTotal = calculateCartTotal(updatedItems);
+        setEditingOrder({
+          ...editingOrder,
+          items: updatedItems,
+          total: newTotal,
+        });
+      } else {
+        addMenuItemToEditingOrder(bowlModalItem, payload);
+      }
+    };
 
     const isFrutal = isBowlFrutal(bowlModalItem);
     if (isFrutal) {
@@ -591,7 +677,7 @@ export function Comandas({
         includeGreekYogurt ? 'yogurt' : 'sin-yogurt',
       ].join('|');
 
-      addMenuItemToEditingOrder(bowlModalItem, {
+      applyBowlEdition({
         notas,
         customKey,
         bowlCustomization: {
@@ -606,6 +692,7 @@ export function Comandas({
       });
 
       setBowlModalItem(null);
+      setEditingBowlItemIndex(null);
       resetBowlSelections();
       return;
     }
@@ -649,7 +736,7 @@ export function Comandas({
       includeSaladoCombo ? 'combo' : 'sin-combo',
     ].join('|');
 
-    addMenuItemToEditingOrder(bowlModalItem, {
+    applyBowlEdition({
       notas,
       customKey,
       bowlCustomization: {
@@ -670,12 +757,38 @@ export function Comandas({
     });
 
     setBowlModalItem(null);
+    setEditingBowlItemIndex(null);
     resetBowlSelections();
   };
 
   const closeBowlModal = () => {
     setBowlModalItem(null);
+    setEditingBowlItemIndex(null);
     resetBowlSelections();
+  };
+
+  const editBowlItem = (item: CartItem, itemIndex: number) => {
+    if (!editingOrder) return;
+    if (!isBowlSalado(item.item) && !isBowlFrutal(item.item)) return;
+
+    resetBowlSelections();
+    const isFrutal = isBowlFrutal(item.item);
+    const parsedFromNotes = parseBowlDataFromNotes(item.notas, isFrutal);
+
+    const config = item.bowlCustomization;
+    const basesFromConfig = config?.bases ?? [];
+    const toppingsFromConfig = config?.toppings ?? [];
+    const proteinsFromConfig = config?.proteinas ?? (config?.proteina ? [config.proteina] : []);
+
+    setSelectedBowlBases(basesFromConfig.length > 0 ? basesFromConfig : parsedFromNotes.bases);
+    setSelectedBowlToppings(toppingsFromConfig.length > 0 ? toppingsFromConfig : parsedFromNotes.toppings);
+    setSelectedBowlProteins(proteinsFromConfig.length > 0 ? proteinsFromConfig : parsedFromNotes.proteins);
+    setIncludeSaladoCombo(Boolean(config?.esCombo) || parsedFromNotes.combo);
+    setIncludeGreekYogurt(Boolean(config?.yogurtGriego) || parsedFromNotes.yogurt);
+
+    setEditingBowlItemIndex(itemIndex);
+    setBowlModalItem(item.item);
+    setShowAddProduct(false);
   };
 
   const isFrutalModal = bowlModalItem ? isBowlFrutal(bowlModalItem) : false;
@@ -1057,6 +1170,15 @@ export function Comandas({
                       />
                     </div>
                   </div>
+
+                  {(isBowlSalado(cartItem.item) || isBowlFrutal(cartItem.item)) && (
+                    <button
+                      onClick={() => editBowlItem(cartItem, index)}
+                      className="self-start inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium transition-colors bg-blue-100 text-blue-700 hover:bg-blue-200"
+                    >
+                      Editar bowl
+                    </button>
+                  )}
 
                   {isSandwichItem(cartItem.item) && (
                     <button
