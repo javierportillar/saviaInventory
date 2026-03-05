@@ -19,6 +19,7 @@ import {
   WeeklySchedule,
   WeeklyHours,
   DAY_KEYS,
+  AppSettings,
 } from '../types';
 import { supabase } from './supabaseClient';
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -86,6 +87,11 @@ const PROVISION_TRANSFERS_STORAGE_KEY = 'savia-provision-transfers';
 const CAJA_POCKETS_STORAGE_KEY = 'savia-caja-bolsillos';
 const GASTO_INVENTARIO_ITEMS_STORAGE_KEY = 'savia-gasto-inventario-items';
 const INVENTORY_PRICE_HISTORY_STORAGE_KEY = 'savia-inventory-price-history';
+const APP_SETTINGS_STORAGE_KEY = 'savia-app-settings';
+const APP_SETTINGS_DISCOUNT_KEY = 'caja_combo_descuento_bebidas';
+const DEFAULT_APP_SETTINGS: AppSettings = {
+  drinkComboDiscountPercent: 10,
+};
 
 const notifyEmployeeCreditUpdate = () => {
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
@@ -520,6 +526,18 @@ const toOptionalPaymentMethod = (method?: string | null): PaymentMethod | undefi
 const normalizePaymentMethod = (method?: string | null, fallback: PaymentMethod = 'efectivo'): PaymentMethod => {
   return toOptionalPaymentMethod(method) ?? fallback;
 };
+
+const normalizeDiscountPercent = (value: unknown): number => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_APP_SETTINGS.drinkComboDiscountPercent;
+  }
+  return Math.min(100, Math.max(0, Math.round(numeric * 100) / 100));
+};
+
+const normalizeAppSettings = (value: Partial<AppSettings> | null | undefined): AppSettings => ({
+  drinkComboDiscountPercent: normalizeDiscountPercent(value?.drinkComboDiscountPercent),
+});
 
 const extractPaymentMethodValue = (record: any): string | null => {
   if (!record || typeof record !== 'object') {
@@ -4154,6 +4172,76 @@ export const fetchBalanceResumen = async (): Promise<BalanceResumen[]> => {
   return computeLocalBalance(localOrders, localGastos, localTransfers);
 };
 
+export const fetchAppSettings = async (): Promise<AppSettings> => {
+  const localSettings = normalizeAppSettings(getLocalData<Partial<AppSettings>>(APP_SETTINGS_STORAGE_KEY, DEFAULT_APP_SETTINGS));
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const { data, error } = await supabase
+        .from('app_settings')
+        .select('key, value_json')
+        .eq('key', APP_SETTINGS_DISCOUNT_KEY)
+        .maybeSingle();
+      if (error) throw error;
+
+      if (!data) {
+        const { error: upsertError } = await supabase
+          .from('app_settings')
+          .upsert([
+            {
+              key: APP_SETTINGS_DISCOUNT_KEY,
+              value_json: {
+                drinkComboDiscountPercent: DEFAULT_APP_SETTINGS.drinkComboDiscountPercent,
+              },
+            },
+          ], { onConflict: 'key' });
+        if (upsertError) throw upsertError;
+        setLocalData(APP_SETTINGS_STORAGE_KEY, DEFAULT_APP_SETTINGS);
+        return DEFAULT_APP_SETTINGS;
+      }
+
+      const valueJson = (data as { value_json?: unknown }).value_json;
+      const parsed = normalizeAppSettings(
+        typeof valueJson === 'object' && valueJson !== null
+          ? (valueJson as Partial<AppSettings>)
+          : undefined
+      );
+      setLocalData(APP_SETTINGS_STORAGE_KEY, parsed);
+      return parsed;
+    } catch (error) {
+      console.warn('[dataService] No se pudo leer app_settings desde Supabase. Usando local.', error);
+    }
+  }
+
+  return localSettings;
+};
+
+export const saveAppSettings = async (updates: Partial<AppSettings>): Promise<AppSettings> => {
+  const current = await fetchAppSettings();
+  const merged = normalizeAppSettings({ ...current, ...updates });
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const { error } = await supabase
+        .from('app_settings')
+        .upsert([
+          {
+            key: APP_SETTINGS_DISCOUNT_KEY,
+            value_json: {
+              drinkComboDiscountPercent: merged.drinkComboDiscountPercent,
+            },
+          },
+        ], { onConflict: 'key' });
+      if (error) throw error;
+    } catch (error) {
+      console.warn('[dataService] No se pudo guardar app_settings en Supabase. Guardando local.', error);
+    }
+  }
+
+  setLocalData(APP_SETTINGS_STORAGE_KEY, merged);
+  return merged;
+};
+
 export const dataService = {
   fetchMenuItems,
   createMenuItem,
@@ -4197,6 +4285,8 @@ export const dataService = {
   createProvisionTransfer,
   deleteProvisionTransfer,
   fetchBalanceResumen,
+  fetchAppSettings,
+  saveAppSettings,
   checkDatabaseConnection,
 } as const;
 

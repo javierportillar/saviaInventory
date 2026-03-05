@@ -235,6 +235,10 @@ export interface BalanceResumen {
   saldoProvisionCajaAcumulado?: number;
 }
 
+export interface AppSettings {
+  drinkComboDiscountPercent: number;
+}
+
 export type ModuleType =
   | 'dashboard'
   | 'balance'
@@ -248,6 +252,7 @@ export type ModuleType =
   | 'contabilidad'
   | 'novedades'
   | 'creditoEmpleados'
+  | 'configuracion'
   | 'analitica';
 
 export type UserRole = 'admin' | 'employee';

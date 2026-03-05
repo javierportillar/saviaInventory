@@ -44,7 +44,7 @@ import { formatPaymentSummary, getOrderAllocations, isOrderPaid, isOrderPaymentH
 import { PaymentModal } from './PaymentModal';
 
 const ITEMS_PER_PAGE = 30;
-const DRINK_DISCOUNT_NOTE = 'Descuento bebida combo 10%';
+const DRINK_DISCOUNT_NOTE = 'Descuento bebida combo';
 const DRINK_DISCOUNT_CATEGORIES = new Set([
   'batidos refrescantes',
   'funcionales',

@@ -16,7 +16,11 @@ import {
   X,
   CreditCard,
   CalendarDays,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Settings
+  ,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { COLORS } from '../data/menu';
 
@@ -41,6 +45,7 @@ const modules = [
   { id: 'contabilidad' as ModuleType, label: 'Contabilidad', icon: FileSpreadsheet },
   { id: 'novedades' as ModuleType, label: 'Novedades', icon: CalendarDays },
   { id: 'creditoEmpleados' as ModuleType, label: 'Crédito empleados', icon: CreditCard },
+  { id: 'configuracion' as ModuleType, label: 'Configuración', icon: Settings },
   { id: 'analitica' as ModuleType, label: 'Analítica', icon: BarChart3 },
 ];
 
@@ -48,7 +53,9 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isDesktopMenuHovered, setIsDesktopMenuHovered] = useState(false);
   const [isDesktopMenuExpanded, setIsDesktopMenuExpanded] = useState(false);
-  const desktopExpandTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const desktopModulesScrollRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollDesktopLeft, setCanScrollDesktopLeft] = useState(false);
+  const [canScrollDesktopRight, setCanScrollDesktopRight] = useState(false);
 
   const allowedModules =
     user.role === 'admin'
@@ -87,32 +94,45 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
   };
 
   const handleDesktopMouseEnter = () => {
-    if (desktopExpandTimeoutRef.current) {
-      clearTimeout(desktopExpandTimeoutRef.current);
-    }
     setIsDesktopMenuHovered(true);
-    desktopExpandTimeoutRef.current = setTimeout(() => {
-      setIsDesktopMenuExpanded(true);
-      desktopExpandTimeoutRef.current = null;
-    }, 150);
+    setIsDesktopMenuExpanded(true);
   };
 
   const handleDesktopMouseLeave = () => {
-    if (desktopExpandTimeoutRef.current) {
-      clearTimeout(desktopExpandTimeoutRef.current);
-      desktopExpandTimeoutRef.current = null;
-    }
     setIsDesktopMenuExpanded(false);
     setIsDesktopMenuHovered(false);
   };
 
+  const updateDesktopScrollControls = () => {
+    const container = desktopModulesScrollRef.current;
+    if (!container) {
+      setCanScrollDesktopLeft(false);
+      setCanScrollDesktopRight(false);
+      return;
+    }
+    const maxScrollLeft = container.scrollWidth - container.clientWidth;
+    setCanScrollDesktopLeft(container.scrollLeft > 4);
+    setCanScrollDesktopRight(maxScrollLeft - container.scrollLeft > 4);
+  };
+
+  const scrollDesktopModules = (direction: 'left' | 'right') => {
+    const container = desktopModulesScrollRef.current;
+    if (!container) {
+      return;
+    }
+    const step = Math.max(220, Math.round(container.clientWidth * 0.45));
+    container.scrollBy({
+      left: direction === 'left' ? -step : step,
+      behavior: 'smooth',
+    });
+  };
+
   useEffect(() => {
-    return () => {
-      if (desktopExpandTimeoutRef.current) {
-        clearTimeout(desktopExpandTimeoutRef.current);
-      }
-    };
-  }, []);
+    updateDesktopScrollControls();
+    const handleResize = () => updateDesktopScrollControls();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isDesktopMenuExpanded, allowedModules.length]);
 
   const desktopIconSize = isDesktopMenuExpanded ? 26 : 20;
   const desktopLogoClass = isDesktopMenuExpanded ? 'w-10 h-10 text-lg' : 'w-8 h-8 text-base';
@@ -121,10 +141,11 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
     <>
       <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
         <div
-          className={`ui-page transition-all duration-300 ease-out ${
-            isDesktopMenuHovered ? 'mx-0 px-6' : ''
+          className={`transition-all duration-300 ease-out ${
+            isDesktopMenuHovered
+              ? 'w-full max-w-none px-6 lg:px-8 xl:px-10'
+              : 'ui-page'
           }`}
-          style={isDesktopMenuHovered ? { maxWidth: '100%' } : undefined}
         >
           <div
             className="hidden lg:block"
@@ -141,41 +162,65 @@ export function Navigation({ activeModule, onModuleChange, user, onLogout, conne
                     S
                   </div>
                 </div>
-                <div className="flex flex-1 items-end justify-center gap-3 min-w-0 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                  {allowedModules.map(({ id, label, icon: Icon }) => (
-                    <button
-                      key={id}
-                      onClick={() => handleModuleClick(id)}
-                      className={`
-                        group flex flex-col items-center gap-1 rounded-xl px-3 py-2 transition-all duration-200 flex-shrink-0
-                        ${
-                          activeModule === id
-                            ? 'text-white shadow-md'
-                            : 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
-                        }
-                      `}
-                      style={{
-                        backgroundColor: activeModule === id ? COLORS.dark : 'transparent'
-                      }}
-                    >
-                      <Icon
-                        size={desktopIconSize}
-                        className={`transition-transform duration-200 ${
-                          activeModule === id ? '' : 'group-hover:scale-110'
-                        }`}
-                      />
-                      <span className="text-[11px] font-medium uppercase tracking-wide">{label}</span>
-                    </button>
-                  ))}
+                <div className="flex flex-1 items-center gap-2 min-w-0">
                   <button
-                    onClick={handleLogout}
-                    className="group flex flex-col items-center gap-1 rounded-xl px-3 py-2 text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-all duration-200 flex-shrink-0"
+                    type="button"
+                    onClick={() => scrollDesktopModules('left')}
+                    disabled={!canScrollDesktopLeft}
+                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                    aria-label="Desplazar navegación a la izquierda"
                   >
-                    <LogOut
-                      size={desktopIconSize}
-                      className="transition-transform duration-200 group-hover:scale-110"
-                    />
-                    <span className="text-[11px] font-medium uppercase tracking-wide">Salir</span>
+                    <ChevronLeft size={18} />
+                  </button>
+                  <div
+                    ref={desktopModulesScrollRef}
+                    onScroll={updateDesktopScrollControls}
+                    className="flex flex-1 items-end justify-start gap-3 min-w-0 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                  >
+                    {allowedModules.map(({ id, label, icon: Icon }) => (
+                      <button
+                        key={id}
+                        onClick={() => handleModuleClick(id)}
+                        className={`
+                          group flex flex-col items-center gap-1 rounded-xl px-3 py-2 transition-all duration-200 flex-shrink-0
+                          ${
+                            activeModule === id
+                              ? 'text-white shadow-md'
+                              : 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                          }
+                        `}
+                        style={{
+                          backgroundColor: activeModule === id ? COLORS.dark : 'transparent'
+                        }}
+                      >
+                        <Icon
+                          size={desktopIconSize}
+                          className={`transition-transform duration-200 ${
+                            activeModule === id ? '' : 'group-hover:scale-110'
+                          }`}
+                        />
+                        <span className="text-[11px] font-medium uppercase tracking-wide">{label}</span>
+                      </button>
+                    ))}
+                    <button
+                      onClick={handleLogout}
+                      className="group flex flex-col items-center gap-1 rounded-xl px-3 py-2 text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-all duration-200 flex-shrink-0"
+                    >
+                      <LogOut
+                        size={desktopIconSize}
+                        className="transition-transform duration-200 group-hover:scale-110"
+                      />
+                      <span className="text-[11px] font-medium uppercase tracking-wide">Salir</span>
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => scrollDesktopModules('right')}
+                    disabled={!canScrollDesktopRight}
+                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                    aria-label="Desplazar navegación a la derecha"
+                  >
+                    <ChevronRight size={18} />
                   </button>
                 </div>
                 <div className={`flex items-center gap-2 text-sm font-medium flex-shrink-0 ${currentStatus.textClass}`}>

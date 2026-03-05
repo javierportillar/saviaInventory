@@ -46,7 +46,7 @@ const EMPLOYEE_BOWL_PRICE = 6000;
 const EMPLOYEE_RESTRICTED_TOPPINGS = new Set(['Champiñones', 'Tocineta', 'Guacamole']);
 const EMPLOYEE_ALLOWED_PROTEINS = new Set(['Pechuga de pollo', 'Carne desmechada']);
 const SANDWICH_DRINK_EXTRA_COST = 1000;
-const DRINK_DISCOUNT_RATE = 0.1;
+const DEFAULT_DRINK_DISCOUNT_PERCENT = 10;
 const DRINK_DISCOUNT_CATEGORIES = new Set([
   'batidos refrescantes',
   'funcionales',
@@ -176,7 +176,12 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   const [includeSaladoCombo, setIncludeSaladoCombo] = useState(false);
   const [includeGreekYogurt, setIncludeGreekYogurt] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [drinkDiscountPercent, setDrinkDiscountPercent] = useState<number>(DEFAULT_DRINK_DISCOUNT_PERCENT);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const drinkDiscountRate = drinkDiscountPercent / 100;
+  const drinkDiscountLabel = Number.isInteger(drinkDiscountPercent)
+    ? String(drinkDiscountPercent)
+    : drinkDiscountPercent.toFixed(2).replace(/\.?0+$/, '');
 
   const resetBowlSelections = () => {
     setSelectedBowlBases([]);
@@ -448,6 +453,18 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     fetchEmpleados();
   }, []);
 
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const settings = await dataService.fetchAppSettings();
+        setDrinkDiscountPercent(settings.drinkComboDiscountPercent);
+      } catch (error) {
+        console.error('No se pudo cargar la configuración de descuentos:', error);
+      }
+    };
+    loadSettings();
+  }, []);
+
   const fetchMenuItems = async () => {
     const data = await dataService.fetchMenuItems();
     setMenuItems(data);
@@ -531,7 +548,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
       }
 
       const basePrice = Math.max(0, Math.round(entry.item.precio));
-      const rawDiscount = basePrice * DRINK_DISCOUNT_RATE;
+      const rawDiscount = basePrice * drinkDiscountRate;
       const roundedDiscount = roundDrinkDiscountAmount(rawDiscount);
       const discountedPrice = Math.max(0, basePrice - roundedDiscount);
 
@@ -541,6 +558,10 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
       };
     });
   };
+
+  useEffect(() => {
+    setCart((prev) => applyMealDrinkDiscount(prev));
+  }, [drinkDiscountPercent]);
 
   const addToCart = (
     item: MenuItem,
@@ -816,11 +837,11 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   };
 
   return (
-    <section className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
+    <section className="space-y-4">
+      <div className="flex flex-col gap-4">
         {/* Panel de productos */}
-        <div className="order-2 lg:order-1 lg:col-span-2 space-y-6">
-          <div>
+        <div className="order-2 space-y-4 min-w-0">
+          <div className="rounded-xl border border-gray-200 bg-white/95 backdrop-blur-sm p-3 sm:p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-4">
               <h2 className="text-xl lg:text-2xl font-bold" style={{ color: COLORS.dark }}>
                 {isEmployeeCajaMode ? 'Caja/Empleados' : 'Punto de Venta'}
@@ -875,24 +896,32 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                 </select>
               )}
             </div>
+            <div className="flex items-center justify-between text-xs sm:text-sm text-gray-500">
+              <span>
+                {filteredItems.length} productos visibles
+              </span>
+              {!isEmployeeCajaMode && selectedCategory && (
+                <span>Categoría: {selectedCategory}</span>
+              )}
+            </div>
           </div>
 
           {/* Grid de productos */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
             {filteredItems.map((item) => {
               const quantity = getCartQuantity(item.id);
               const isSelected = quantity > 0;
               const isDiscountableDrink = isDiscountableDrinkCategory(item.categoria);
               const shouldHighlightDiscount = hasBowlOrSandwichInCart && isDiscountableDrink;
               const productDiscountAmount = shouldHighlightDiscount
-                ? roundDrinkDiscountAmount(item.precio * DRINK_DISCOUNT_RATE)
+                ? roundDrinkDiscountAmount(item.precio * drinkDiscountRate)
                 : 0;
               const productDiscountedPrice = Math.max(0, item.precio - productDiscountAmount);
 
               return (
                 <div
                   key={item.id}
-                  className={`relative ui-card ui-card-pad hover:shadow-md transition-all duration-200 border ${
+                  className={`relative bg-white rounded-xl p-3 lg:p-4 shadow-sm hover:shadow-md transition-all duration-200 border ${
                     shouldHighlightDiscount
                       ? 'bg-emerald-50 border-emerald-300'
                       : isSelected
@@ -957,8 +986,8 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
         </div>
 
         {/* Panel del carrito */}
-        <div className="order-1 lg:order-2 space-y-6">
-          <div className="ui-card ui-card-pad lg:sticky lg:top-24">
+        <div className="order-1 space-y-4">
+          <div className="ui-card ui-card-pad">
             <div className="flex items-center gap-2 mb-4">
               <ShoppingCart size={24} style={{ color: COLORS.dark }} />
               <h3 className="text-lg lg:text-xl font-bold" style={{ color: COLORS.dark }}>
@@ -970,11 +999,11 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
               <p className="text-gray-500 text-center py-6 lg:py-8 text-sm">Carrito vacío</p>
             ) : (
               <>
-                <div className="space-y-3 mb-4 lg:mb-6 max-h-80 lg:max-h-96 overflow-y-auto">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3 mb-4 lg:mb-6">
                   {cart.map((cartItem) => (
                     <div
                       key={`${cartItem.item.id}-${cartItem.customKey ?? 'default'}`}
-                      className={`rounded-lg p-3 space-y-2 ${
+                      className={`rounded-lg p-3 space-y-2 h-full ${
                         hasBowlOrSandwichInCart && isDiscountableDrinkCategory(cartItem.item.categoria)
                           ? 'bg-emerald-50 border border-emerald-200'
                           : 'bg-gray-50'
@@ -1036,7 +1065,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                           )}
                           {isDiscountedDrink && subtotalDiscount > 0 && (
                             <span className="inline-flex items-center text-[11px] font-medium text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
-                              Descuento bebida 10%
+                              {`Descuento bebida ${drinkDiscountLabel}%`}
                             </span>
                           )}
                           {cartItem.notas && (

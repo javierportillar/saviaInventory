@@ -14,6 +14,7 @@ import { Navigation } from './components/Navigation';
 import { Analitica } from './components/Analitica';
 import { CreditoEmpleados } from './components/CreditoEmpleados';
 import { Novedades } from './components/Novedades';
+import { Configuracion } from './components/Configuracion';
 import {
   ModuleType,
   User,
@@ -45,6 +46,7 @@ const MODULE_ROUTE_SEGMENTS: Record<ModuleType, string> = {
   contabilidad: 'contabilidad',
   novedades: 'novedades',
   creditoEmpleados: 'credito-empleados',
+  configuracion: 'configuracion',
   analitica: 'analitica',
 };
 
@@ -353,7 +355,7 @@ function App() {
   };
 
   const canAccessModule = (targetModule: ModuleType, targetUser: User | null): boolean => {
-    if ((targetModule === 'analitica' || targetModule === 'contabilidad') && targetUser?.role !== 'admin') {
+    if ((targetModule === 'analitica' || targetModule === 'contabilidad' || targetModule === 'configuracion') && targetUser?.role !== 'admin') {
       return false;
     }
     return true;
@@ -659,6 +661,9 @@ function App() {
           )}
           {module === 'analitica' && user.role === 'admin' && (
             <Analitica orders={orders} />
+          )}
+          {module === 'configuracion' && user.role === 'admin' && (
+            <Configuracion />
           )}
         </div>
       </main>
