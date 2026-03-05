@@ -46,6 +46,49 @@ const EMPLOYEE_BOWL_PRICE = 6000;
 const EMPLOYEE_RESTRICTED_TOPPINGS = new Set(['Champiñones', 'Tocineta', 'Guacamole']);
 const EMPLOYEE_ALLOWED_PROTEINS = new Set(['Pechuga de pollo', 'Carne desmechada']);
 const SANDWICH_DRINK_EXTRA_COST = 1000;
+const DRINK_DISCOUNT_RATE = 0.1;
+const DRINK_DISCOUNT_CATEGORIES = new Set([
+  'batidos refrescantes',
+  'funcionales',
+  'especiales',
+  'bebidas frias',
+  'bebidas calientes',
+]);
+
+const normalizeCategory = (value?: string): string => {
+  return (value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+};
+
+const roundDrinkDiscountAmount = (discount: number): number => {
+  const safeDiscount = Math.max(0, Math.round(discount));
+  const remainder = safeDiscount % 100;
+  const base = safeDiscount - remainder;
+
+  if (remainder < 50) {
+    return base;
+  }
+  if (remainder > 50) {
+    return base + 100;
+  }
+
+  const lower = base;
+  const upper = base + 100;
+  if (lower > 0 && lower % 500 === 0) {
+    return lower;
+  }
+  if (upper > 0 && upper % 500 === 0) {
+    return upper;
+  }
+  return lower;
+};
+
+const isDiscountableDrinkCategory = (category?: string): boolean => {
+  return DRINK_DISCOUNT_CATEGORIES.has(normalizeCategory(category));
+};
 
 const formatDateForInput = (date: Date): string => {
   const year = date.getFullYear();
@@ -466,6 +509,39 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
       .reduce((sum, cartItem) => sum + cartItem.cantidad, 0);
   };
 
+  const hasBowlOrSandwichInCart = useMemo(
+    () => cart.some((entry) => isBowlSalado(entry.item) || isBowlFrutal(entry.item) || isSandwichItem(entry.item)),
+    [cart]
+  );
+
+  const applyMealDrinkDiscount = (items: CartItem[]): CartItem[] => {
+    const hasBowlOrSandwich = items.some((entry) => isBowlSalado(entry.item) || isBowlFrutal(entry.item) || isSandwichItem(entry.item));
+    return items.map((entry) => {
+      const isDiscountableDrink = isDiscountableDrinkCategory(entry.item.categoria);
+
+      if (!isDiscountableDrink) {
+        return entry;
+      }
+
+      if (!hasBowlOrSandwich) {
+        return {
+          ...entry,
+          precioUnitario: entry.item.precio,
+        };
+      }
+
+      const basePrice = Math.max(0, Math.round(entry.item.precio));
+      const rawDiscount = basePrice * DRINK_DISCOUNT_RATE;
+      const roundedDiscount = roundDrinkDiscountAmount(rawDiscount);
+      const discountedPrice = Math.max(0, basePrice - roundedDiscount);
+
+      return {
+        ...entry,
+        precioUnitario: discountedPrice,
+      };
+    });
+  };
+
   const addToCart = (
     item: MenuItem,
     options?: {
@@ -483,14 +559,15 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
       );
 
       if (existing) {
-        return prev.map(cartItem =>
+        const updated = prev.map(cartItem =>
           cartItem.item.id === item.id && cartItem.customKey === options?.customKey
             ? { ...cartItem, cantidad: cartItem.cantidad + 1 }
             : cartItem
         );
+        return applyMealDrinkDiscount(updated);
       }
 
-      return [
+      const updated = [
         ...prev,
         {
           item,
@@ -502,6 +579,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
           studentDiscount: false,
         },
       ];
+      return applyMealDrinkDiscount(updated);
     });
     setSearchQuery('');
     window.setTimeout(() => {
@@ -516,28 +594,28 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   ) => {
     if (cantidad <= 0) {
       setCart(prev =>
-        prev.filter(
+        applyMealDrinkDiscount(prev.filter(
           cartItem =>
             !(cartItem.item.id === itemId && cartItem.customKey === customKey)
-        )
+        ))
       );
     } else {
       setCart(prev =>
-        prev.map(cartItem =>
+        applyMealDrinkDiscount(prev.map(cartItem =>
           cartItem.item.id === itemId && cartItem.customKey === customKey
             ? { ...cartItem, cantidad }
             : cartItem
-        )
+        ))
       );
     }
   };
 
   const removeFromCart = (itemId: string, customKey: string | undefined) => {
     setCart(prev =>
-      prev.filter(
+      applyMealDrinkDiscount(prev.filter(
         cartItem =>
           !(cartItem.item.id === itemId && cartItem.customKey === customKey)
-      )
+      ))
     );
   };
 
@@ -804,23 +882,50 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
             {filteredItems.map((item) => {
               const quantity = getCartQuantity(item.id);
               const isSelected = quantity > 0;
+              const isDiscountableDrink = isDiscountableDrinkCategory(item.categoria);
+              const shouldHighlightDiscount = hasBowlOrSandwichInCart && isDiscountableDrink;
+              const productDiscountAmount = shouldHighlightDiscount
+                ? roundDrinkDiscountAmount(item.precio * DRINK_DISCOUNT_RATE)
+                : 0;
+              const productDiscountedPrice = Math.max(0, item.precio - productDiscountAmount);
 
               return (
                 <div
                   key={item.id}
                   className={`relative ui-card ui-card-pad hover:shadow-md transition-all duration-200 border ${
-                    isSelected ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'
+                    shouldHighlightDiscount
+                      ? 'bg-emerald-50 border-emerald-300'
+                      : isSelected
+                        ? 'bg-yellow-50 border-yellow-200'
+                        : 'bg-white border-gray-100'
                   }`}
                 >
                   <div className="flex justify-between items-start mb-2">
                     <h3 className="font-semibold text-sm lg:text-base" style={{ color: COLORS.dark }}>
                       {item.nombre}
                     </h3>
-                    <span className="font-bold text-sm lg:text-base" style={{ color: COLORS.accent }}>
-                      {formatCOP(item.precio)}
-                    </span>
+                    <div className="text-right">
+                      {shouldHighlightDiscount ? (
+                        <>
+                          <p className="text-xs text-gray-500 line-through">{formatCOP(item.precio)}</p>
+                          <p className="font-bold text-sm lg:text-base" style={{ color: COLORS.accent }}>
+                            {formatCOP(productDiscountedPrice)}
+                          </p>
+                          <p className="text-[11px] font-semibold text-red-600">
+                            -{formatCOP(productDiscountAmount)}
+                          </p>
+                        </>
+                      ) : (
+                        <span className="font-bold text-sm lg:text-base" style={{ color: COLORS.accent }}>
+                          {formatCOP(item.precio)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <p className="text-sm text-gray-600 mb-1">{item.categoria}</p>
+                  {shouldHighlightDiscount && (
+                    <p className="text-xs font-medium text-red-600 mb-1">Descuento combo bowl/sandwich aplicado</p>
+                  )}
                   {item.descripcion && (
                     <p className="text-sm text-gray-500 mb-3 line-clamp-2">{item.descripcion}</p>
                   )}
@@ -869,19 +974,49 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                   {cart.map((cartItem) => (
                     <div
                       key={`${cartItem.item.id}-${cartItem.customKey ?? 'default'}`}
-                      className="bg-gray-50 rounded-lg p-3 space-y-2"
+                      className={`rounded-lg p-3 space-y-2 ${
+                        hasBowlOrSandwichInCart && isDiscountableDrinkCategory(cartItem.item.categoria)
+                          ? 'bg-emerald-50 border border-emerald-200'
+                          : 'bg-gray-50'
+                      }`}
                     >
+                      {(() => {
+                        const isDiscountedDrink = hasBowlOrSandwichInCart && isDiscountableDrinkCategory(cartItem.item.categoria);
+                        const originalUnitPrice = cartItem.item.precio;
+                        const effectiveUnitPrice = getCartItemEffectiveUnitPrice(cartItem);
+                        const effectiveSubtotal = getCartItemSubtotal(cartItem);
+                        const originalSubtotal = originalUnitPrice * cartItem.cantidad;
+                        const subtotalDiscount = Math.max(0, originalSubtotal - effectiveSubtotal);
+
+                        return (
                       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                         <div className="flex-1 space-y-1">
                           <div className="flex items-start justify-between gap-2">
                             <h4 className="font-medium text-sm">{cartItem.item.nombre}</h4>
-                            <span className="text-xs font-semibold text-gray-700">
-                              Subtotal: {formatCOP(getCartItemSubtotal(cartItem))}
-                            </span>
+                            <div className="text-right">
+                              <span className="text-xs font-semibold text-gray-700">
+                                Subtotal: {formatCOP(effectiveSubtotal)}
+                              </span>
+                              {isDiscountedDrink && subtotalDiscount > 0 && (
+                                <>
+                                  <p className="text-[11px] text-gray-500">Real: {formatCOP(originalSubtotal)}</p>
+                                  <p className="text-[11px] font-semibold text-red-600">Descuento: -{formatCOP(subtotalDiscount)}</p>
+                                </>
+                              )}
+                            </div>
                           </div>
                           <div className="text-xs text-gray-600">
                             Precio unidad:{' '}
-                            {cartItem.studentDiscount ? (
+                            {isDiscountedDrink ? (
+                              <>
+                                <span className="line-through text-gray-400 mr-2">
+                                  {formatCOP(originalUnitPrice)}
+                                </span>
+                                <span className="font-semibold text-green-700">
+                                  {formatCOP(effectiveUnitPrice)}
+                                </span>
+                              </>
+                            ) : cartItem.studentDiscount ? (
                               <>
                                 <span className="line-through text-gray-400 mr-2">
                                   {formatCOP(getCartItemBaseUnitPrice(cartItem))}
@@ -897,6 +1032,11 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                           {cartItem.studentDiscount && (
                             <span className="inline-flex items-center text-[11px] font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
                               {STUDENT_DISCOUNT_NOTE}
+                            </span>
+                          )}
+                          {isDiscountedDrink && subtotalDiscount > 0 && (
+                            <span className="inline-flex items-center text-[11px] font-medium text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
+                              Descuento bebida 10%
                             </span>
                           )}
                           {cartItem.notas && (
@@ -941,6 +1081,8 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                           </button>
                         </div>
                       </div>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>

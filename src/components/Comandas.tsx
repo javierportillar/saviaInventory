@@ -44,6 +44,26 @@ import { formatPaymentSummary, getOrderAllocations, isOrderPaid, isOrderPaymentH
 import { PaymentModal } from './PaymentModal';
 
 const ITEMS_PER_PAGE = 30;
+const DRINK_DISCOUNT_NOTE = 'Descuento bebida combo 10%';
+const DRINK_DISCOUNT_CATEGORIES = new Set([
+  'batidos refrescantes',
+  'funcionales',
+  'especiales',
+  'bebidas frias',
+  'bebidas calientes',
+]);
+
+const normalizeCategory = (value?: string): string => {
+  return (value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+};
+
+const isDiscountableDrinkCategory = (category?: string): boolean => {
+  return DRINK_DISCOUNT_CATEGORIES.has(normalizeCategory(category));
+};
 
 const getDateKey = (date: Date): string => {
   const year = date.getFullYear();
@@ -165,6 +185,29 @@ export function Comandas({
   const [statusUpdatingOrderIds, setStatusUpdatingOrderIds] = useState<Record<string, boolean>>({});
   const [creditEmployeeLabelByOrderId, setCreditEmployeeLabelByOrderId] = useState<Record<string, string>>({});
   const [creditEmployeeLabelByOrderNumero, setCreditEmployeeLabelByOrderNumero] = useState<Record<number, string>>({});
+
+  const getDrinkDiscountInfo = (cartItem: CartItem, orderHasMealCombo: boolean) => {
+    if (!orderHasMealCombo || !isDiscountableDrinkCategory(cartItem.item.categoria)) {
+      return null;
+    }
+
+    const baseUnitPrice = Math.max(0, Math.round(cartItem.item.precio ?? 0));
+    const effectiveUnitPrice = getCartItemEffectiveUnitPrice(cartItem);
+    const unitDiscount = Math.max(0, baseUnitPrice - effectiveUnitPrice);
+
+    if (unitDiscount <= 0) {
+      return null;
+    }
+
+    return {
+      baseUnitPrice,
+      effectiveUnitPrice,
+      unitDiscount,
+      baseSubtotal: baseUnitPrice * cartItem.cantidad,
+      effectiveSubtotal: getCartItemSubtotal(cartItem),
+      subtotalDiscount: unitDiscount * cartItem.cantidad,
+    };
+  };
 
   const handleOrderStatusChange = async (order: Order, nextStatus: Order['estado']) => {
     if (statusUpdatingOrderIds[order.id]) {
@@ -1028,6 +1071,10 @@ export function Comandas({
     const isDeleting = deletingOrderId === order.id;
     const isActionsExpanded = expandedActionsOrderId === order.id;
     const isStatusUpdating = Boolean(statusUpdatingOrderIds[order.id]);
+    const orderHasMealCombo = order.items.some((entry) => isBowlSalado(entry.item) || isBowlFrutal(entry.item) || isSandwichItem(entry.item));
+    const editingOrderHasMealCombo = editingOrder?.orderId === order.id
+      ? editingOrder.items.some((entry) => isBowlSalado(entry.item) || isBowlFrutal(entry.item) || isSandwichItem(entry.item))
+      : false;
 
     return (
       <div
@@ -1099,8 +1146,10 @@ export function Comandas({
         {editingOrder?.orderId === order.id ? (
           <div className="space-y-3 mb-4">
             <h4 className="font-semibold text-sm">Editando pedido:</h4>
-            {editingOrder.items.map((cartItem, index) => (
-              <div key={index} className="bg-gray-50 p-3 rounded-lg">
+            {editingOrder.items.map((cartItem, index) => {
+              const discountInfo = getDrinkDiscountInfo(cartItem, editingOrderHasMealCombo);
+              return (
+              <div key={index} className={`p-3 rounded-lg ${discountInfo ? 'bg-emerald-50 border border-emerald-200' : 'bg-gray-50'}`}>
                 <div className="flex flex-col space-y-2">
                   <div className="flex justify-between items-start">
                     <span className="font-medium text-sm">{cartItem.item.nombre}</span>
@@ -1117,10 +1166,24 @@ export function Comandas({
                       {STUDENT_DISCOUNT_NOTE}
                     </span>
                   )}
+                  {discountInfo && (
+                    <span className="inline-flex items-center text-[11px] font-medium text-red-700 bg-red-100 px-2 py-0.5 rounded-full w-fit">
+                      {DRINK_DISCOUNT_NOTE}
+                    </span>
+                  )}
 
                   <div className="text-xs text-gray-600">
                     Precio unidad:{' '}
-                    {cartItem.studentDiscount ? (
+                    {discountInfo ? (
+                      <>
+                        <span className="line-through text-gray-400 mr-2">
+                          {formatCOP(discountInfo.baseUnitPrice)}
+                        </span>
+                        <span className="font-semibold text-green-600">
+                          {formatCOP(discountInfo.effectiveUnitPrice)}
+                        </span>
+                      </>
+                    ) : cartItem.studentDiscount ? (
                       <>
                         <span className="line-through text-gray-400 mr-2">
                           {formatCOP(getCartItemBaseUnitPrice(cartItem))}
@@ -1197,10 +1260,21 @@ export function Comandas({
                     <span className="text-sm font-medium">
                       Subtotal: {formatCOP(getCartItemSubtotal(cartItem))}
                     </span>
+                    {discountInfo && (
+                      <>
+                        <p className="text-[11px] text-gray-500">
+                          Real: {formatCOP(discountInfo.baseSubtotal)}
+                        </p>
+                        <p className="text-[11px] font-semibold text-red-600">
+                          Descuento: -{formatCOP(discountInfo.subtotalDiscount)}
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
 
             <div className="flex flex-col lg:flex-row gap-2">
               <button
@@ -1273,15 +1347,38 @@ export function Comandas({
           </div>
         ) : (
           <div className="space-y-2 mb-4">
-            {order.items.map((cartItem, index) => (
-              <div key={index} className="space-y-1">
+            {order.items.map((cartItem, index) => {
+              const discountInfo = getDrinkDiscountInfo(cartItem, orderHasMealCombo);
+              return (
+              <div key={index} className={`space-y-1 rounded-lg p-2 ${discountInfo ? 'bg-emerald-50 border border-emerald-200' : ''}`}>
                 <div className="flex justify-between items-center text-xs lg:text-sm">
                   <span>{cartItem.cantidad}x {cartItem.item.nombre}</span>
-                  <span className="font-medium">{formatCOP(getCartItemSubtotal(cartItem))}</span>
+                  <div className="text-right">
+                    <span className="font-medium">{formatCOP(getCartItemSubtotal(cartItem))}</span>
+                    {discountInfo && (
+                      <>
+                        <p className="text-[11px] text-gray-500">
+                          Real: {formatCOP(discountInfo.baseSubtotal)}
+                        </p>
+                        <p className="text-[11px] font-semibold text-red-600">
+                          -{formatCOP(discountInfo.subtotalDiscount)}
+                        </p>
+                      </>
+                    )}
+                  </div>
                 </div>
                 <div className="text-[11px] lg:text-xs text-gray-600">
                   Precio unidad:{' '}
-                  {cartItem.studentDiscount ? (
+                  {discountInfo ? (
+                    <>
+                      <span className="line-through text-gray-400 mr-1">
+                        {formatCOP(discountInfo.baseUnitPrice)}
+                      </span>
+                      <span className="font-semibold text-green-600">
+                        {formatCOP(discountInfo.effectiveUnitPrice)}
+                      </span>
+                    </>
+                  ) : cartItem.studentDiscount ? (
                     <>
                       <span className="line-through text-gray-400 mr-1">
                         {formatCOP(getCartItemBaseUnitPrice(cartItem))}
@@ -1299,13 +1396,19 @@ export function Comandas({
                     {STUDENT_DISCOUNT_NOTE}
                   </span>
                 )}
+                {discountInfo && (
+                  <span className="inline-flex items-center text-[11px] font-medium text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
+                    {DRINK_DISCOUNT_NOTE}
+                  </span>
+                )}
                 {cartItem.notas && (
                   <p className="text-xs text-gray-500 whitespace-pre-line">
                     {cartItem.notas}
                   </p>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
