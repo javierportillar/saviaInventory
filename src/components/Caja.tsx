@@ -41,27 +41,16 @@ import {
 } from '../constants/bowl';
 import { formatPaymentSummary, getOrderAllocations, isOrderPaid } from '../utils/payments';
 import { PaymentModal } from './PaymentModal';
+import {
+  DEFAULT_DRINK_DISCOUNT_PERCENT,
+  DRINK_DISCOUNT_CATEGORY_KEYS,
+  normalizeDrinkDiscountCategory,
+} from '../constants/drinkDiscount';
 
 const EMPLOYEE_BOWL_PRICE = 6000;
 const EMPLOYEE_RESTRICTED_TOPPINGS = new Set(['Champiñones', 'Tocineta', 'Guacamole']);
 const EMPLOYEE_ALLOWED_PROTEINS = new Set(['Pechuga de pollo', 'Carne desmechada']);
 const SANDWICH_DRINK_EXTRA_COST = 1000;
-const DEFAULT_DRINK_DISCOUNT_PERCENT = 10;
-const DRINK_DISCOUNT_CATEGORIES = new Set([
-  'batidos refrescantes',
-  'funcionales',
-  'especiales',
-  'bebidas frias',
-  'bebidas calientes',
-]);
-
-const normalizeCategory = (value?: string): string => {
-  return (value ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
-};
 
 const roundDrinkDiscountAmount = (discount: number): number => {
   const safeDiscount = Math.max(0, Math.round(discount));
@@ -87,7 +76,7 @@ const roundDrinkDiscountAmount = (discount: number): number => {
 };
 
 const isDiscountableDrinkCategory = (category?: string): boolean => {
-  return DRINK_DISCOUNT_CATEGORIES.has(normalizeCategory(category));
+  return DRINK_DISCOUNT_CATEGORY_KEYS.includes(normalizeDrinkDiscountCategory(category));
 };
 
 const formatDateForInput = (date: Date): string => {
@@ -176,7 +165,10 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   const [includeSaladoCombo, setIncludeSaladoCombo] = useState(false);
   const [includeGreekYogurt, setIncludeGreekYogurt] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [drinkDiscountEnabled, setDrinkDiscountEnabled] = useState<boolean>(true);
   const [drinkDiscountPercent, setDrinkDiscountPercent] = useState<number>(DEFAULT_DRINK_DISCOUNT_PERCENT);
+  const [drinkDiscountCategories, setDrinkDiscountCategories] = useState<string[]>([...DRINK_DISCOUNT_CATEGORY_KEYS]);
+  const [drinkDiscountProductIds, setDrinkDiscountProductIds] = useState<string[]>([]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const drinkDiscountRate = drinkDiscountPercent / 100;
   const drinkDiscountLabel = Number.isInteger(drinkDiscountPercent)
@@ -457,7 +449,10 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     const loadSettings = async () => {
       try {
         const settings = await dataService.fetchAppSettings();
+        setDrinkDiscountEnabled(settings.drinkComboDiscountEnabled);
         setDrinkDiscountPercent(settings.drinkComboDiscountPercent);
+        setDrinkDiscountCategories(settings.drinkComboDiscountCategories);
+        setDrinkDiscountProductIds(settings.drinkComboDiscountProductIds);
       } catch (error) {
         console.error('No se pudo cargar la configuración de descuentos:', error);
       }
@@ -531,16 +526,40 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     [cart]
   );
 
+  const shouldApplyDrinkDiscount = (category?: string): boolean => {
+    if (!drinkDiscountEnabled) {
+      return false;
+    }
+    const normalizedCategory = normalizeDrinkDiscountCategory(category);
+    if (!isDiscountableDrinkCategory(normalizedCategory)) {
+      return false;
+    }
+    return drinkDiscountCategories.includes(normalizedCategory);
+  };
+
+  const shouldApplyDrinkDiscountToItem = (item: MenuItem): boolean => {
+    if (!shouldApplyDrinkDiscount(item.categoria)) {
+      return false;
+    }
+
+    if (drinkDiscountProductIds.length === 0) {
+      return true;
+    }
+
+    return drinkDiscountProductIds.includes(item.id);
+  };
+
   const applyMealDrinkDiscount = (items: CartItem[]): CartItem[] => {
     const hasBowlOrSandwich = items.some((entry) => isBowlSalado(entry.item) || isBowlFrutal(entry.item) || isSandwichItem(entry.item));
     return items.map((entry) => {
-      const isDiscountableDrink = isDiscountableDrinkCategory(entry.item.categoria);
+      const isManagedDrink = isDiscountableDrinkCategory(entry.item.categoria);
+      const isDiscountableDrink = shouldApplyDrinkDiscountToItem(entry.item);
 
-      if (!isDiscountableDrink) {
+      if (!isManagedDrink) {
         return entry;
       }
 
-      if (!hasBowlOrSandwich) {
+      if (!hasBowlOrSandwich || !isDiscountableDrink) {
         return {
           ...entry,
           precioUnitario: entry.item.precio,
@@ -561,7 +580,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
 
   useEffect(() => {
     setCart((prev) => applyMealDrinkDiscount(prev));
-  }, [drinkDiscountPercent]);
+  }, [drinkDiscountEnabled, drinkDiscountPercent, drinkDiscountCategories, drinkDiscountProductIds]);
 
   const addToCart = (
     item: MenuItem,
@@ -911,8 +930,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
             {filteredItems.map((item) => {
               const quantity = getCartQuantity(item.id);
               const isSelected = quantity > 0;
-              const isDiscountableDrink = isDiscountableDrinkCategory(item.categoria);
-              const shouldHighlightDiscount = hasBowlOrSandwichInCart && isDiscountableDrink;
+              const shouldHighlightDiscount = hasBowlOrSandwichInCart && shouldApplyDrinkDiscountToItem(item);
               const productDiscountAmount = shouldHighlightDiscount
                 ? roundDrinkDiscountAmount(item.precio * drinkDiscountRate)
                 : 0;
@@ -1004,13 +1022,13 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                     <div
                       key={`${cartItem.item.id}-${cartItem.customKey ?? 'default'}`}
                       className={`rounded-lg p-3 space-y-2 h-full ${
-                        hasBowlOrSandwichInCart && isDiscountableDrinkCategory(cartItem.item.categoria)
+                        hasBowlOrSandwichInCart && shouldApplyDrinkDiscountToItem(cartItem.item)
                           ? 'bg-emerald-50 border border-emerald-200'
                           : 'bg-gray-50'
                       }`}
                     >
                       {(() => {
-                        const isDiscountedDrink = hasBowlOrSandwichInCart && isDiscountableDrinkCategory(cartItem.item.categoria);
+                        const isDiscountedDrink = hasBowlOrSandwichInCart && shouldApplyDrinkDiscountToItem(cartItem.item);
                         const originalUnitPrice = cartItem.item.precio;
                         const effectiveUnitPrice = getCartItemEffectiveUnitPrice(cartItem);
                         const effectiveSubtotal = getCartItemSubtotal(cartItem);

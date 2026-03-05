@@ -34,6 +34,11 @@ import {
   normalizeCartTotal,
 } from '../utils/cart';
 import {
+  DEFAULT_DRINK_DISCOUNT_PERCENT,
+  DRINK_DISCOUNT_CATEGORY_KEYS,
+  normalizeDrinkDiscountCategory,
+} from '../constants/drinkDiscount';
+import {
   determinePaymentStatus,
   getAllocationsTotal,
   getOrderAllocations,
@@ -90,7 +95,10 @@ const INVENTORY_PRICE_HISTORY_STORAGE_KEY = 'savia-inventory-price-history';
 const APP_SETTINGS_STORAGE_KEY = 'savia-app-settings';
 const APP_SETTINGS_DISCOUNT_KEY = 'caja_combo_descuento_bebidas';
 const DEFAULT_APP_SETTINGS: AppSettings = {
-  drinkComboDiscountPercent: 10,
+  drinkComboDiscountEnabled: true,
+  drinkComboDiscountPercent: DEFAULT_DRINK_DISCOUNT_PERCENT,
+  drinkComboDiscountCategories: [...DRINK_DISCOUNT_CATEGORY_KEYS],
+  drinkComboDiscountProductIds: [],
 };
 
 const notifyEmployeeCreditUpdate = () => {
@@ -535,8 +543,50 @@ const normalizeDiscountPercent = (value: unknown): number => {
   return Math.min(100, Math.max(0, Math.round(numeric * 100) / 100));
 };
 
+const normalizeDiscountEnabled = (value: unknown): boolean => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  return DEFAULT_APP_SETTINGS.drinkComboDiscountEnabled;
+};
+
+const normalizeDiscountCategories = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [...DEFAULT_APP_SETTINGS.drinkComboDiscountCategories];
+  }
+
+  const normalized = Array.from(
+    new Set(
+      value
+        .map((entry) => normalizeDrinkDiscountCategory(typeof entry === 'string' ? entry : ''))
+        .filter((entry) => DRINK_DISCOUNT_CATEGORY_KEYS.includes(entry))
+    )
+  );
+
+  return normalized.length > 0
+    ? normalized
+    : [...DEFAULT_APP_SETTINGS.drinkComboDiscountCategories];
+};
+
+const normalizeDiscountProductIds = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+        .filter((entry) => entry.length > 0)
+    )
+  );
+};
+
 const normalizeAppSettings = (value: Partial<AppSettings> | null | undefined): AppSettings => ({
+  drinkComboDiscountEnabled: normalizeDiscountEnabled(value?.drinkComboDiscountEnabled),
   drinkComboDiscountPercent: normalizeDiscountPercent(value?.drinkComboDiscountPercent),
+  drinkComboDiscountCategories: normalizeDiscountCategories(value?.drinkComboDiscountCategories),
+  drinkComboDiscountProductIds: normalizeDiscountProductIds(value?.drinkComboDiscountProductIds),
 });
 
 const extractPaymentMethodValue = (record: any): string | null => {
@@ -4191,7 +4241,10 @@ export const fetchAppSettings = async (): Promise<AppSettings> => {
             {
               key: APP_SETTINGS_DISCOUNT_KEY,
               value_json: {
+                drinkComboDiscountEnabled: DEFAULT_APP_SETTINGS.drinkComboDiscountEnabled,
                 drinkComboDiscountPercent: DEFAULT_APP_SETTINGS.drinkComboDiscountPercent,
+                drinkComboDiscountCategories: DEFAULT_APP_SETTINGS.drinkComboDiscountCategories,
+                drinkComboDiscountProductIds: DEFAULT_APP_SETTINGS.drinkComboDiscountProductIds,
               },
             },
           ], { onConflict: 'key' });
@@ -4228,7 +4281,10 @@ export const saveAppSettings = async (updates: Partial<AppSettings>): Promise<Ap
           {
             key: APP_SETTINGS_DISCOUNT_KEY,
             value_json: {
+              drinkComboDiscountEnabled: merged.drinkComboDiscountEnabled,
               drinkComboDiscountPercent: merged.drinkComboDiscountPercent,
+              drinkComboDiscountCategories: merged.drinkComboDiscountCategories,
+              drinkComboDiscountProductIds: merged.drinkComboDiscountProductIds,
             },
           },
         ], { onConflict: 'key' });

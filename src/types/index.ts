@@ -236,7 +236,10 @@ export interface BalanceResumen {
 }
 
 export interface AppSettings {
+  drinkComboDiscountEnabled: boolean;
   drinkComboDiscountPercent: number;
+  drinkComboDiscountCategories: string[];
+  drinkComboDiscountProductIds: string[];
 }
 
 export type ModuleType =
