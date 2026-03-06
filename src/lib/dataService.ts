@@ -100,7 +100,9 @@ const PAYROLL_SETTINGS_STORAGE_KEY = 'savia-payroll-settings';
 const APP_SETTINGS_PAYROLL_KEY = 'empleados_nomina_config';
 const DEFAULT_APP_SETTINGS: AppSettings = {
   drinkComboDiscountEnabled: true,
+  sandwichComboDiscountEnabled: true,
   drinkComboDiscountPercent: DEFAULT_DRINK_DISCOUNT_PERCENT,
+  sandwichComboDiscountPercent: DEFAULT_DRINK_DISCOUNT_PERCENT,
   drinkComboDiscountCategories: [...DRINK_DISCOUNT_CATEGORY_KEYS],
   drinkComboDiscountProductIds: [],
 };
@@ -589,7 +591,9 @@ const normalizeDiscountProductIds = (value: unknown): string[] => {
 
 const normalizeAppSettings = (value: Partial<AppSettings> | null | undefined): AppSettings => ({
   drinkComboDiscountEnabled: normalizeDiscountEnabled(value?.drinkComboDiscountEnabled),
+  sandwichComboDiscountEnabled: normalizeDiscountEnabled(value?.sandwichComboDiscountEnabled),
   drinkComboDiscountPercent: normalizeDiscountPercent(value?.drinkComboDiscountPercent),
+  sandwichComboDiscountPercent: normalizeDiscountPercent(value?.sandwichComboDiscountPercent),
   drinkComboDiscountCategories: normalizeDiscountCategories(value?.drinkComboDiscountCategories),
   drinkComboDiscountProductIds: normalizeDiscountProductIds(value?.drinkComboDiscountProductIds),
 });
@@ -4290,7 +4294,9 @@ export const fetchAppSettings = async (): Promise<AppSettings> => {
               key: APP_SETTINGS_DISCOUNT_KEY,
               value_json: {
                 drinkComboDiscountEnabled: DEFAULT_APP_SETTINGS.drinkComboDiscountEnabled,
+                sandwichComboDiscountEnabled: DEFAULT_APP_SETTINGS.sandwichComboDiscountEnabled,
                 drinkComboDiscountPercent: DEFAULT_APP_SETTINGS.drinkComboDiscountPercent,
+                sandwichComboDiscountPercent: DEFAULT_APP_SETTINGS.sandwichComboDiscountPercent,
                 drinkComboDiscountCategories: DEFAULT_APP_SETTINGS.drinkComboDiscountCategories,
                 drinkComboDiscountProductIds: DEFAULT_APP_SETTINGS.drinkComboDiscountProductIds,
               },
@@ -4330,7 +4336,9 @@ export const saveAppSettings = async (updates: Partial<AppSettings>): Promise<Ap
             key: APP_SETTINGS_DISCOUNT_KEY,
             value_json: {
               drinkComboDiscountEnabled: merged.drinkComboDiscountEnabled,
+              sandwichComboDiscountEnabled: merged.sandwichComboDiscountEnabled,
               drinkComboDiscountPercent: merged.drinkComboDiscountPercent,
+              sandwichComboDiscountPercent: merged.sandwichComboDiscountPercent,
               drinkComboDiscountCategories: merged.drinkComboDiscountCategories,
               drinkComboDiscountProductIds: merged.drinkComboDiscountProductIds,
             },

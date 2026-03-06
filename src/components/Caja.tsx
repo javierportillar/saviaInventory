@@ -166,14 +166,20 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   const [includeGreekYogurt, setIncludeGreekYogurt] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [drinkDiscountEnabled, setDrinkDiscountEnabled] = useState<boolean>(true);
+  const [sandwichDiscountEnabled, setSandwichDiscountEnabled] = useState<boolean>(true);
   const [drinkDiscountPercent, setDrinkDiscountPercent] = useState<number>(DEFAULT_DRINK_DISCOUNT_PERCENT);
+  const [sandwichDiscountPercent, setSandwichDiscountPercent] = useState<number>(DEFAULT_DRINK_DISCOUNT_PERCENT);
   const [drinkDiscountCategories, setDrinkDiscountCategories] = useState<string[]>([...DRINK_DISCOUNT_CATEGORY_KEYS]);
   const [drinkDiscountProductIds, setDrinkDiscountProductIds] = useState<string[]>([]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const drinkDiscountRate = drinkDiscountPercent / 100;
+  const sandwichDiscountRate = sandwichDiscountPercent / 100;
   const drinkDiscountLabel = Number.isInteger(drinkDiscountPercent)
     ? String(drinkDiscountPercent)
     : drinkDiscountPercent.toFixed(2).replace(/\.?0+$/, '');
+  const sandwichDiscountLabel = Number.isInteger(sandwichDiscountPercent)
+    ? String(sandwichDiscountPercent)
+    : sandwichDiscountPercent.toFixed(2).replace(/\.?0+$/, '');
 
   const resetBowlSelections = () => {
     setSelectedBowlBases([]);
@@ -450,7 +456,9 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
       try {
         const settings = await dataService.fetchAppSettings();
         setDrinkDiscountEnabled(settings.drinkComboDiscountEnabled);
+        setSandwichDiscountEnabled(settings.sandwichComboDiscountEnabled);
         setDrinkDiscountPercent(settings.drinkComboDiscountPercent);
+        setSandwichDiscountPercent(settings.sandwichComboDiscountPercent);
         setDrinkDiscountCategories(settings.drinkComboDiscountCategories);
         setDrinkDiscountProductIds(settings.drinkComboDiscountProductIds);
       } catch (error) {
@@ -549,14 +557,45 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     return drinkDiscountProductIds.includes(item.id);
   };
 
+  const getSandwichBaseUnitPrice = (entry: CartItem): number => {
+    const hasSandwichDrink = entry.customKey?.includes('con-bebida') ?? false;
+    const basePrice = entry.item.precio + (hasSandwichDrink ? SANDWICH_DRINK_EXTRA_COST : 0);
+    return Math.max(0, Math.round(basePrice));
+  };
+
   const applyMealDrinkDiscount = (items: CartItem[]): CartItem[] => {
     const hasBowlOrSandwich = items.some((entry) => isBowlSalado(entry.item) || isBowlFrutal(entry.item) || isSandwichItem(entry.item));
     return items.map((entry) => {
       const isManagedDrink = isDiscountableDrinkCategory(entry.item.categoria);
       const isDiscountableDrink = shouldApplyDrinkDiscountToItem(entry.item);
+      const isSandwich = isSandwichItem(entry.item);
 
       if (!isManagedDrink) {
-        return entry;
+        if (!isSandwich) {
+          return entry;
+        }
+
+        const sandwichBasePrice = getSandwichBaseUnitPrice(entry);
+        const shouldDiscountSandwich =
+          sandwichDiscountEnabled &&
+          sandwichDiscountRate > 0 &&
+          isSandwich;
+
+        if (!shouldDiscountSandwich) {
+          return {
+            ...entry,
+            precioUnitario: sandwichBasePrice,
+          };
+        }
+
+        const rawSandwichDiscount = sandwichBasePrice * sandwichDiscountRate;
+        const roundedSandwichDiscount = roundDrinkDiscountAmount(rawSandwichDiscount);
+        const discountedSandwichPrice = Math.max(0, sandwichBasePrice - roundedSandwichDiscount);
+
+        return {
+          ...entry,
+          precioUnitario: discountedSandwichPrice,
+        };
       }
 
       if (!hasBowlOrSandwich || !isDiscountableDrink) {
@@ -580,7 +619,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
 
   useEffect(() => {
     setCart((prev) => applyMealDrinkDiscount(prev));
-  }, [drinkDiscountEnabled, drinkDiscountPercent, drinkDiscountCategories, drinkDiscountProductIds]);
+  }, [drinkDiscountEnabled, sandwichDiscountEnabled, drinkDiscountPercent, sandwichDiscountPercent, drinkDiscountCategories, drinkDiscountProductIds]);
 
   const addToCart = (
     item: MenuItem,
@@ -930,11 +969,20 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
             {filteredItems.map((item) => {
               const quantity = getCartQuantity(item.id);
               const isSelected = quantity > 0;
-              const shouldHighlightDiscount = hasBowlOrSandwichInCart && shouldApplyDrinkDiscountToItem(item);
-              const productDiscountAmount = shouldHighlightDiscount
-                ? roundDrinkDiscountAmount(item.precio * drinkDiscountRate)
+              const shouldHighlightDrinkDiscount = hasBowlOrSandwichInCart && shouldApplyDrinkDiscountToItem(item);
+              const shouldHighlightSandwichDiscount =
+                sandwichDiscountEnabled &&
+                sandwichDiscountRate > 0 &&
+                isSandwichItem(item);
+              const shouldHighlightDiscount = shouldHighlightDrinkDiscount || shouldHighlightSandwichDiscount;
+              const discountRate = shouldHighlightSandwichDiscount ? sandwichDiscountRate : drinkDiscountRate;
+              const discountPercentLabel = shouldHighlightSandwichDiscount
+                ? sandwichDiscountLabel
+                : drinkDiscountLabel;
+              const effectiveDiscountAmount = shouldHighlightDiscount
+                ? roundDrinkDiscountAmount(item.precio * discountRate)
                 : 0;
-              const productDiscountedPrice = Math.max(0, item.precio - productDiscountAmount);
+              const productDiscountedPrice = Math.max(0, item.precio - effectiveDiscountAmount);
 
               return (
                 <div
@@ -959,7 +1007,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                             {formatCOP(productDiscountedPrice)}
                           </p>
                           <p className="text-[11px] font-semibold text-red-600">
-                            -{formatCOP(productDiscountAmount)}
+                            -{formatCOP(effectiveDiscountAmount)}
                           </p>
                         </>
                       ) : (
@@ -971,7 +1019,11 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                   </div>
                   <p className="text-sm text-gray-600 mb-1">{item.categoria}</p>
                   {shouldHighlightDiscount && (
-                    <p className="text-xs font-medium text-red-600 mb-1">Descuento combo bowl/sandwich aplicado</p>
+                    <p className="text-xs font-medium text-red-600 mb-1">
+                      {shouldHighlightSandwichDiscount
+                        ? `Descuento sandwich aplicado (${discountPercentLabel}%)`
+                        : `Descuento combo bowl/sandwich aplicado (${discountPercentLabel}%)`}
+                    </p>
                   )}
                   {item.descripcion && (
                     <p className="text-sm text-gray-500 mb-3 line-clamp-2">{item.descripcion}</p>
@@ -1022,14 +1074,21 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                     <div
                       key={`${cartItem.item.id}-${cartItem.customKey ?? 'default'}`}
                       className={`rounded-lg p-3 space-y-2 h-full ${
-                        hasBowlOrSandwichInCart && shouldApplyDrinkDiscountToItem(cartItem.item)
+                        (hasBowlOrSandwichInCart && shouldApplyDrinkDiscountToItem(cartItem.item)) ||
+                        (sandwichDiscountEnabled && sandwichDiscountRate > 0 && isSandwichItem(cartItem.item))
                           ? 'bg-emerald-50 border border-emerald-200'
                           : 'bg-gray-50'
                       }`}
                     >
                       {(() => {
                         const isDiscountedDrink = hasBowlOrSandwichInCart && shouldApplyDrinkDiscountToItem(cartItem.item);
-                        const originalUnitPrice = cartItem.item.precio;
+                        const isDiscountedSandwich =
+                          sandwichDiscountEnabled &&
+                          sandwichDiscountRate > 0 &&
+                          isSandwichItem(cartItem.item);
+                        const originalUnitPrice = isDiscountedSandwich
+                          ? getSandwichBaseUnitPrice(cartItem)
+                          : cartItem.item.precio;
                         const effectiveUnitPrice = getCartItemEffectiveUnitPrice(cartItem);
                         const effectiveSubtotal = getCartItemSubtotal(cartItem);
                         const originalSubtotal = originalUnitPrice * cartItem.cantidad;
@@ -1054,7 +1113,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                           </div>
                           <div className="text-xs text-gray-600">
                             Precio unidad:{' '}
-                            {isDiscountedDrink ? (
+                            {isDiscountedDrink || isDiscountedSandwich ? (
                               <>
                                 <span className="line-through text-gray-400 mr-2">
                                   {formatCOP(originalUnitPrice)}
@@ -1084,6 +1143,11 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                           {isDiscountedDrink && subtotalDiscount > 0 && (
                             <span className="inline-flex items-center text-[11px] font-medium text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
                               {`Descuento bebida ${drinkDiscountLabel}%`}
+                            </span>
+                          )}
+                          {isDiscountedSandwich && subtotalDiscount > 0 && (
+                            <span className="inline-flex items-center text-[11px] font-medium text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
+                              {`Descuento sandwich ${sandwichDiscountLabel}%`}
                             </span>
                           )}
                           {cartItem.notas && (

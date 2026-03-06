@@ -26,7 +26,9 @@ const areSameProductIds = (left: string[], right: string[]): boolean => {
 export function Configuracion() {
   const [settings, setSettings] = useState<AppSettings>({
     drinkComboDiscountEnabled: true,
+    sandwichComboDiscountEnabled: true,
     drinkComboDiscountPercent: 10,
+    sandwichComboDiscountPercent: 10,
     drinkComboDiscountCategories: DRINK_DISCOUNT_CATEGORY_OPTIONS.map((option) => option.key),
     drinkComboDiscountProductIds: [],
   });
@@ -68,7 +70,9 @@ export function Configuracion() {
   const hasChanges = useMemo(() => {
     return (
       settings.drinkComboDiscountEnabled !== savedSettings.drinkComboDiscountEnabled ||
+      settings.sandwichComboDiscountEnabled !== savedSettings.sandwichComboDiscountEnabled ||
       Math.abs(settings.drinkComboDiscountPercent - savedSettings.drinkComboDiscountPercent) > 0.0001 ||
+      Math.abs(settings.sandwichComboDiscountPercent - savedSettings.sandwichComboDiscountPercent) > 0.0001 ||
       !areSameCategories(settings.drinkComboDiscountCategories, savedSettings.drinkComboDiscountCategories) ||
       !areSameProductIds(settings.drinkComboDiscountProductIds, savedSettings.drinkComboDiscountProductIds)
     );
@@ -152,10 +156,10 @@ export function Configuracion() {
           </div>
           <div>
             <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
-              Descuento de bebidas por combo
+              Descuentos de combo (bebidas y sandwiches)
             </h3>
             <p className="text-sm text-gray-600">
-              Se aplica cuando la comanda incluye un bowl o sandwich y una bebida elegible.
+              Configura y controla por separado los descuentos de bebidas y sandwiches.
             </p>
           </div>
         </div>
@@ -167,14 +171,14 @@ export function Configuracion() {
           </div>
         ) : (
           <div className="space-y-6">
-            <div className="rounded-lg border border-gray-200 p-4 space-y-3">
+            <div className="rounded-lg border border-gray-200 p-4 space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold" style={{ color: COLORS.dark }}>
-                    Estado del descuento
+                    Estado descuento bebidas
                   </p>
                   <p className="text-xs text-gray-500">
-                    Habilita o deshabilita la lógica de descuento desde Caja.
+                    Habilita o deshabilita el descuento de bebidas en Caja.
                   </p>
                 </div>
                 <button
@@ -186,14 +190,36 @@ export function Configuracion() {
                       : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                   }`}
                 >
-                  {settings.drinkComboDiscountEnabled ? 'Descuento habilitado' : 'Descuento deshabilitado'}
+                  {settings.drinkComboDiscountEnabled ? 'Bebidas habilitado' : 'Bebidas deshabilitado'}
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                    Estado descuento sandwiches
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Habilita o deshabilita el descuento de sandwiches en Caja.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSettings((prev) => ({ ...prev, sandwichComboDiscountEnabled: !prev.sandwichComboDiscountEnabled }))}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                    settings.sandwichComboDiscountEnabled
+                      ? 'bg-green-600 text-white border-green-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  {settings.sandwichComboDiscountEnabled ? 'Sandwiches habilitado' : 'Sandwiches deshabilitado'}
                 </button>
               </div>
             </div>
 
             <div className="space-y-4">
               <label className="block text-sm font-medium text-gray-700">
-                Porcentaje de descuento
+                Porcentaje de descuento en bebidas
               </label>
               <div className="flex items-center gap-3">
                 <div className="relative w-52 max-w-full">
@@ -220,6 +246,39 @@ export function Configuracion() {
                 </div>
                 <span className="text-sm text-gray-500">
                   Guardado: {savedSettings.drinkComboDiscountPercent}%
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <label className="block text-sm font-medium text-gray-700">
+                Porcentaje de descuento en sandwiches
+              </label>
+              <div className="flex items-center gap-3">
+                <div className="relative w-52 max-w-full">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    value={settings.sandwichComboDiscountPercent}
+                    onChange={(event) => {
+                      const raw = Number(event.target.value);
+                      if (!Number.isFinite(raw)) {
+                        setSettings((prev) => ({ ...prev, sandwichComboDiscountPercent: 0 }));
+                        return;
+                      }
+                      const clamped = Math.min(100, Math.max(0, raw));
+                      setSettings((prev) => ({ ...prev, sandwichComboDiscountPercent: clamped }));
+                    }}
+                    className="w-full px-3 py-2 pr-9 border border-gray-300 rounded-lg focus:outline-none focus:ring-2"
+                    style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+                    disabled={!settings.sandwichComboDiscountEnabled}
+                  />
+                  <Percent size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                </div>
+                <span className="text-sm text-gray-500">
+                  Guardado: {savedSettings.sandwichComboDiscountPercent}%
                 </span>
               </div>
             </div>

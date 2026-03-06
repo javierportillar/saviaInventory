@@ -248,7 +248,9 @@ export interface BalanceResumen {
 
 export interface AppSettings {
   drinkComboDiscountEnabled: boolean;
+  sandwichComboDiscountEnabled: boolean;
   drinkComboDiscountPercent: number;
+  sandwichComboDiscountPercent: number;
   drinkComboDiscountCategories: string[];
   drinkComboDiscountProductIds: string[];
 }

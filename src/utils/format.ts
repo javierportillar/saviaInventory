@@ -31,8 +31,27 @@ export const formatDate = (date: Date): string => {
   return formatted.charAt(0).toUpperCase() + formatted.slice(1);
 };
 
+const ORDER_NUMBER_STORAGE_KEY = "savia-next-order-number";
+let fallbackOrderNumber = 1;
+
 export const generateOrderNumber = (): number => {
-  return Math.floor(Math.random() * 9000) + 1000;
+  if (typeof window === "undefined") {
+    const next = fallbackOrderNumber;
+    fallbackOrderNumber += 1;
+    return next;
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(ORDER_NUMBER_STORAGE_KEY);
+    const parsed = Number(storedValue);
+    const currentNumber = Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+    window.localStorage.setItem(ORDER_NUMBER_STORAGE_KEY, String(currentNumber + 1));
+    return currentNumber;
+  } catch {
+    const next = fallbackOrderNumber;
+    fallbackOrderNumber += 1;
+    return next;
+  }
 };
 
 export const formatDateInputValue = (date: Date): string => {
