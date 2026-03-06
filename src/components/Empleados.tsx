@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Empleado, DayKey, DaySchedule, WeeklySchedule, WeeklyHours } from '../types';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Empleado, DayKey, DaySchedule, WeeklySchedule, WeeklyHours, PayrollSettings, User } from '../types';
 import {
   Users,
   Edit3,
@@ -27,7 +27,10 @@ import {
   buildWeeklyHoursFromBase,
   sumWeeklyHours,
   formatHours,
-  formatDifference
+  formatDifference,
+  DEFAULT_PAYROLL_SETTINGS,
+  normalizePayrollSettings,
+  calculateEmployeeWeeklyPayment,
 } from '../utils/employeeHours';
 import dataService, { EMPLOYEE_CREDIT_UPDATED_EVENT } from '../lib/dataService';
 import { HistoricoEmpleados } from './HistoricoEmpleados';
@@ -44,7 +47,30 @@ const createHistoryState = (): HistoryState => ({ expanded: false, loading: fals
 
 const compareWeeksDesc = (a: string, b: string) => getStartOfWeek(b).getTime() - getStartOfWeek(a).getTime();
 
-export function Empleados() {
+const toDateInputValue = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getCurrentQuincenaRange = (): { start: string; end: string } => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const day = now.getDate();
+  const monthLastDay = new Date(year, month + 1, 0).getDate();
+  const start = new Date(year, month, day <= 15 ? 1 : 16);
+  const end = new Date(year, month, day <= 15 ? 15 : monthLastDay);
+  return { start: toDateInputValue(start), end: toDateInputValue(end) };
+};
+
+interface EmpleadosProps {
+  user: User;
+}
+
+export function Empleados({ user }: EmpleadosProps) {
+  const canViewPayroll = ['javier', 'briyith'].includes(user.username?.toLowerCase?.() ?? '');
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -52,11 +78,20 @@ export function Empleados() {
     nombre: '',
     telefono: '',
     email: '',
+    tipo_contrato: 'por_horas' as Empleado['tipo_contrato'],
     horas_dia: 8,
     dias_semana: 5,
     salario_hora: 0,
+    salario_mensual: 0,
+    incluye_auxilio_transporte: true,
     activo: true
   });
+  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>(DEFAULT_PAYROLL_SETTINGS);
+  const [payrollSaving, setPayrollSaving] = useState(false);
+  const [employeeHoursHistory, setEmployeeHoursHistory] = useState<Record<string, Record<string, WeeklyHours>>>({});
+  const [payrollView, setPayrollView] = useState<'gestion' | 'pago_nomina'>('gestion');
+  const [payrollLoading, setPayrollLoading] = useState(false);
+  const [quincenaRange, setQuincenaRange] = useState<{ start: string; end: string }>(getCurrentQuincenaRange());
   const [horariosBase, setHorariosBase] = useState<Record<string, WeeklySchedule>>({});
   const [horariosSemanales, setHorariosSemanales] = useState<Record<string, EmployeeWeeklyRecords>>({});
   const [scheduleEmpleado, setScheduleEmpleado] = useState<Empleado | null>(null);
@@ -83,6 +118,16 @@ export function Empleados() {
 
   useEffect(() => {
     fetchEmpleados();
+    void loadPayrollSettings();
+  }, []);
+
+  const loadPayrollSettings = useCallback(async () => {
+    try {
+      const settings = await dataService.fetchPayrollSettings();
+      setPayrollSettings(normalizePayrollSettings(settings));
+    } catch (error) {
+      console.error('Error cargando configuración de nómina:', error);
+    }
   }, []);
 
   useEffect(() => {
@@ -102,6 +147,48 @@ export function Empleados() {
       }
     };
   }, [refreshEmployeeCredits]);
+
+  useEffect(() => {
+    if (payrollView !== 'pago_nomina' || empleados.length === 0) {
+      return;
+    }
+
+    let active = true;
+    const loadAllHistory = async () => {
+      try {
+        setPayrollLoading(true);
+        const entries = await Promise.all(
+          empleados.map(async (empleado) => {
+            const history = await dataService.fetchEmployeeWeeklyHoursHistory(empleado.id);
+            return [empleado.id, history] as const;
+          })
+        );
+        if (!active) return;
+        const next: Record<string, Record<string, WeeklyHours>> = {};
+        entries.forEach(([id, history]) => {
+          next[id] = history || {};
+        });
+        setEmployeeHoursHistory(next);
+      } catch (error) {
+        console.error('Error cargando historial de horas para nómina:', error);
+      } finally {
+        if (active) {
+          setPayrollLoading(false);
+        }
+      }
+    };
+
+    void loadAllHistory();
+    return () => {
+      active = false;
+    };
+  }, [payrollView, empleados]);
+
+  useEffect(() => {
+    if (!canViewPayroll && payrollView === 'pago_nomina') {
+      setPayrollView('gestion');
+    }
+  }, [canViewPayroll, payrollView]);
 
   const loadBaseSchedules = useCallback(async (employeeList: Empleado[]) => {
     try {
@@ -279,9 +366,12 @@ export function Empleados() {
       nombre: empleado.nombre,
       telefono: empleado.telefono || '',
       email: empleado.email || '',
+      tipo_contrato: empleado.tipo_contrato || 'por_horas',
       horas_dia: empleado.horas_dia,
       dias_semana: empleado.dias_semana,
       salario_hora: empleado.salario_hora,
+      salario_mensual: empleado.salario_mensual || 0,
+      incluye_auxilio_transporte: empleado.incluye_auxilio_transporte ?? true,
       activo: empleado.activo
     });
     setEditingId(empleado.id);
@@ -300,9 +390,12 @@ export function Empleados() {
       nombre: '',
       telefono: '',
       email: '',
+      tipo_contrato: 'por_horas',
       horas_dia: 8,
       dias_semana: 5,
       salario_hora: 0,
+      salario_mensual: 0,
+      incluye_auxilio_transporte: true,
       activo: true
     });
     setEditingId(null);
@@ -539,11 +632,123 @@ export function Empleados() {
 
   const calcularHorasSemana = (schedule: WeeklySchedule) => sumWeeklyHours(buildWeeklyHoursFromBase(schedule));
 
-  const calcularHorasMes = (schedule: WeeklySchedule) => calcularHorasSemana(schedule) * 4.33; // Promedio de semanas por mes
-
-  const calcularSalarioMensual = (schedule: WeeklySchedule, salario_hora: number) => {
-    return calcularHorasMes(schedule) * salario_hora;
+  const handleSavePayrollSettings = async () => {
+    try {
+      setPayrollSaving(true);
+      const saved = await dataService.savePayrollSettings(payrollSettings);
+      setPayrollSettings(normalizePayrollSettings(saved));
+    } catch (error) {
+      console.error('No se pudo guardar configuración de nómina:', error);
+    } finally {
+      setPayrollSaving(false);
+    }
   };
+
+  const parseRangeDate = (value: string): Date | null => {
+    if (!value) return null;
+    const date = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return null;
+    return date;
+  };
+
+  const getDailyWorkedHours = (empleado: Empleado, date: Date): number => {
+    const weekKey = calculateIsoWeekKey(date);
+    const weeklyOverride = employeeHoursHistory[empleado.id]?.[weekKey];
+    const startOfWeek = getStartOfWeek(weekKey);
+    const dayOffset = Math.floor((date.getTime() - startOfWeek.getTime()) / 86400000);
+    const dayKey = DAY_ORDER[dayOffset] as DayKey | undefined;
+    if (!dayKey) return 0;
+
+    if (weeklyOverride) {
+      return Math.max(0, Number(weeklyOverride[dayKey]) || 0);
+    }
+
+    const baseSchedule = ensureSchedule(empleado, horariosBase[empleado.id]);
+    const baseDay = baseSchedule[dayKey];
+    if (!baseDay?.active) return 0;
+    return Math.max(0, Number(baseDay.hours) || 0);
+  };
+
+  const payrollRows = useMemo(() => {
+    const start = parseRangeDate(quincenaRange.start);
+    const end = parseRangeDate(quincenaRange.end);
+    if (!start || !end || start > end) {
+      return [];
+    }
+    const daysInPeriod = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+
+    return empleados.map((empleado) => {
+      const weeklyHours = {} as WeeklyHours;
+      DAY_ORDER.forEach(day => { weeklyHours[day] = 0; });
+
+      let hoursInPeriod = 0;
+      let daysWorked = 0;
+
+      const cursor = new Date(start);
+      while (cursor <= end) {
+        const worked = getDailyWorkedHours(empleado, cursor);
+        hoursInPeriod += worked;
+        if (worked > 0) {
+          daysWorked += 1;
+        }
+
+        const weekKey = calculateIsoWeekKey(cursor);
+        const startOfWeek = getStartOfWeek(weekKey);
+        const dayOffset = Math.floor((cursor.getTime() - startOfWeek.getTime()) / 86400000);
+        const dayKey = DAY_ORDER[dayOffset] as DayKey | undefined;
+        if (dayKey) {
+          weeklyHours[dayKey] = (weeklyHours[dayKey] || 0) + worked;
+        }
+
+        cursor.setDate(cursor.getDate() + 1);
+      }
+
+      const simulatedWeeklyHours = {} as WeeklyHours;
+      DAY_ORDER.forEach(day => {
+        // Escala al equivalente de una semana para reutilizar cálculo existente de salario por horas.
+        simulatedWeeklyHours[day] = weeklyHours[day];
+      });
+
+      const payroll = calculateEmployeeWeeklyPayment(empleado, simulatedWeeklyHours, payrollSettings);
+      const salarioDiario = payroll.salarioMensualBase / payrollSettings.diasMesBase;
+      const salarioQuincenalFijo = payroll.salarioMensualBase / 2;
+      const useFixedQuincenaForFixedContract = empleado.tipo_contrato === 'salario_fijo' && daysInPeriod === 15;
+      const salaryByContract = empleado.tipo_contrato === 'salario_fijo'
+        ? Math.round(useFixedQuincenaForFixedContract ? salarioQuincenalFijo : salarioDiario * daysWorked)
+        : Math.round(payroll.salarioHora * hoursInPeriod);
+      const auxilioDiario = payrollSettings.auxilioTransporte / payrollSettings.diasMesBase;
+      const auxilio = payroll.qualifiesTransport
+        ? Math.round(auxilioDiario * daysWorked)
+        : 0;
+      const total = salaryByContract + auxilio;
+
+      return {
+        empleado,
+        hoursInPeriod,
+        daysInPeriod,
+        daysWorked,
+        salarioMensual: payroll.salarioMensualBase,
+        salarioHora: payroll.salarioHora,
+        salarioDiario: Math.round(salarioDiario),
+        salarioQuincenalFijo: Math.round(salarioQuincenalFijo),
+        auxilioDiario: Math.round(auxilioDiario),
+        useFixedQuincenaForFixedContract,
+        qualifiesTransport: payroll.qualifiesTransport,
+        salaryByContract,
+        auxilio,
+        total,
+      };
+    });
+  }, [empleados, quincenaRange, payrollSettings, employeeHoursHistory, horariosBase]);
+
+  const payrollTotals = useMemo(() => {
+    return payrollRows.reduce((acc, row) => {
+      acc.salary += row.salaryByContract;
+      acc.auxilio += row.auxilio;
+      acc.total += row.total;
+      return acc;
+    }, { salary: 0, auxilio: 0, total: 0 });
+  }, [payrollRows]);
 
   const modalBaseWeekHours = modalBaseSchedule ? calcularHorasSemana(modalBaseSchedule) : 0;
   const modalWeekRegisteredHours = modalWeeklyHours ? sumWeeklyHours(modalWeeklyHours) : 0;
@@ -586,12 +791,113 @@ export function Empleados() {
         </div>
       </div>
 
-      {showGeneralHistory && (
+      <div className="inline-flex rounded-xl border border-gray-200 bg-white p-1">
+        <button
+          type="button"
+          onClick={() => setPayrollView('gestion')}
+          className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+            payrollView === 'gestion' ? 'text-white' : 'text-gray-600 hover:bg-gray-100'
+          }`}
+          style={{ backgroundColor: payrollView === 'gestion' ? COLORS.dark : 'transparent' }}
+        >
+          Gestión
+        </button>
+        {canViewPayroll && (
+          <button
+            type="button"
+            onClick={() => setPayrollView('pago_nomina')}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+              payrollView === 'pago_nomina' ? 'text-white' : 'text-gray-600 hover:bg-gray-100'
+            }`}
+            style={{ backgroundColor: payrollView === 'pago_nomina' ? COLORS.dark : 'transparent' }}
+          >
+            Pago nómina
+          </button>
+        )}
+      </div>
+
+      {payrollView === 'gestion' && showGeneralHistory && (
         <div className="ui-card ui-card-pad">
           <HistoricoEmpleados />
         </div>
       )}
 
+      {canViewPayroll && payrollView === 'gestion' && (
+      <div className="ui-card ui-card-pad space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-lg font-bold" style={{ color: COLORS.dark }}>
+            Parámetros de nómina
+          </h3>
+          <button
+            type="button"
+            onClick={() => void handleSavePayrollSettings()}
+            disabled={payrollSaving}
+            className="px-4 py-2 rounded-lg text-white text-sm font-semibold disabled:opacity-70"
+            style={{ backgroundColor: COLORS.dark }}
+          >
+            {payrollSaving ? 'Guardando...' : 'Guardar parámetros'}
+          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">SMMLV</label>
+            <input
+              type="number"
+              min="0"
+              step="100"
+              value={payrollSettings.smmlv}
+              onChange={(e) => setPayrollSettings(prev => normalizePayrollSettings({ ...prev, smmlv: Number(e.target.value) }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Auxilio transporte</label>
+            <input
+              type="number"
+              min="0"
+              step="100"
+              value={payrollSettings.auxilioTransporte}
+              onChange={(e) => setPayrollSettings(prev => normalizePayrollSettings({ ...prev, auxilioTransporte: Number(e.target.value) }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Horas mes base</label>
+            <input
+              type="number"
+              min="1"
+              value={payrollSettings.horasMesBase}
+              onChange={(e) => setPayrollSettings(prev => normalizePayrollSettings({ ...prev, horasMesBase: Number(e.target.value) }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Días mes base</label>
+            <input
+              type="number"
+              min="1"
+              value={payrollSettings.diasMesBase}
+              onChange={(e) => setPayrollSettings(prev => normalizePayrollSettings({ ...prev, diasMesBase: Number(e.target.value) }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Tope auxilio (x SMMLV)</label>
+            <input
+              type="number"
+              min="1"
+              step="0.1"
+              value={payrollSettings.limiteAuxilioSmmlv}
+              onChange={(e) => setPayrollSettings(prev => normalizePayrollSettings({ ...prev, limiteAuxilioSmmlv: Number(e.target.value) }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            />
+          </div>
+        </div>
+      </div>
+      )}
+
+      {payrollView === 'gestion' && (
+      <>
       {/* Formulario */}
       {showForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -638,6 +944,18 @@ export function Empleados() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
+                  <label className="block text-sm font-medium mb-1">Tipo de contrato</label>
+                  <select
+                    value={formData.tipo_contrato}
+                    onChange={(e) => setFormData({ ...formData, tipo_contrato: e.target.value as Empleado['tipo_contrato'] })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+                    style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+                  >
+                    <option value="por_horas">Por horas</option>
+                    <option value="salario_fijo">Salario fijo</option>
+                  </select>
+                </div>
+                <div>
                   <label className="block text-sm font-medium mb-1">Horas por día</label>
                   <input
                     type="number"
@@ -664,16 +982,40 @@ export function Empleados() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">Salario por hora</label>
+                <label className="block text-sm font-medium mb-1">Salario mensual</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="100"
+                  value={formData.salario_mensual}
+                  onChange={(e) => setFormData({ ...formData, salario_mensual: Number(e.target.value) || 0 })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+                  style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Salario por hora (opcional)</label>
                 <input
                   type="number"
                   min="0"
                   step="100"
                   value={formData.salario_hora}
-                  onChange={(e) => setFormData({ ...formData, salario_hora: parseFloat(e.target.value) })}
+                  onChange={(e) => setFormData({ ...formData, salario_hora: parseFloat(e.target.value) || 0 })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
                   style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
                 />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="incluye_auxilio_transporte"
+                  checked={formData.incluye_auxilio_transporte}
+                  onChange={(e) => setFormData({ ...formData, incluye_auxilio_transporte: e.target.checked })}
+                  className="rounded"
+                />
+                <label htmlFor="incluye_auxilio_transporte" className="text-sm font-medium">Aplica auxilio transporte</label>
               </div>
 
               <div className="flex items-center gap-2">
@@ -884,6 +1226,7 @@ export function Empleados() {
           const diff = workedWeeklyHours - baseWeeklyHours;
           const diffClass = Math.abs(diff) < 0.01 ? 'text-gray-500' : diff > 0 ? 'text-green-600' : 'text-orange-500';
           const weekLabel = formatWeekRange(currentWeekKey);
+          const weeklyPayroll = calculateEmployeeWeeklyPayment(empleado, weeklyHoursRecord, payrollSettings);
           const historyStatus = historyState[empleado.id] ?? createHistoryState();
           const savedRecords = horariosSemanales[empleado.id] || {};
           const historyRecords: Record<string, WeeklyHours> = { ...savedRecords };
@@ -1003,21 +1346,32 @@ export function Empleados() {
                   </div>
                 </div>
 
-                <div className="pt-4 border-t">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <DollarSign size={16} className="text-gray-500" />
-                      <span className="text-sm">Salario/hora</span>
+                {canViewPayroll && (
+                  <div className="pt-4 border-t">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <DollarSign size={16} className="text-gray-500" />
+                        <span className="text-sm">
+                          {empleado.tipo_contrato === 'salario_fijo' ? 'Salario mensual' : 'Salario/hora'}
+                        </span>
+                      </div>
+                      <span className="text-sm font-medium">
+                        {empleado.tipo_contrato === 'salario_fijo'
+                          ? formatCOP(weeklyPayroll.salarioMensualBase)
+                          : formatCOP(weeklyPayroll.salarioHora)}
+                      </span>
                     </div>
-                    <span className="text-sm font-medium">{formatCOP(empleado.salario_hora)}</span>
+                    <div className="text-center p-2 rounded" style={{ backgroundColor: `${COLORS.accent}20` }}>
+                      <p className="text-sm text-gray-600">Pago semanal estimado</p>
+                      <p className="font-bold" style={{ color: COLORS.dark }}>
+                        {formatCOP(weeklyPayroll.totalSemanal)}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Base: {formatCOP(weeklyPayroll.salarioSemanal)} · Auxilio: {formatCOP(weeklyPayroll.auxilioSemanal)}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-center p-2 rounded" style={{ backgroundColor: `${COLORS.accent}20` }}>
-                    <p className="text-sm text-gray-600">Salario mensual estimado</p>
-                    <p className="font-bold" style={{ color: COLORS.dark }}>
-                      {formatCOP(calcularSalarioMensual(baseSchedule, empleado.salario_hora))}
-                    </p>
-                  </div>
-                </div>
+                )}
                 <div className="mt-4 rounded-lg bg-gray-50 p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-gray-600">
@@ -1134,6 +1488,128 @@ export function Empleados() {
           <Users size={48} className="mx-auto text-gray-400 mb-4" />
           <h3 className="text-lg font-semibold text-gray-600 mb-2">No hay empleados registrados</h3>
           <p className="text-gray-500">Agrega tu primer empleado para comenzar</p>
+        </div>
+      )}
+      </>
+      )}
+
+      {canViewPayroll && payrollView === 'pago_nomina' && (
+        <div className="space-y-4">
+          <div className="ui-card ui-card-pad">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Inicio quincena</label>
+                <input
+                  type="date"
+                  value={quincenaRange.start}
+                  onChange={(e) => setQuincenaRange(prev => ({ ...prev, start: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Fin quincena</label>
+                <input
+                  type="date"
+                  value={quincenaRange.end}
+                  onChange={(e) => setQuincenaRange(prev => ({ ...prev, end: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div className="rounded-lg bg-gray-50 p-3">
+                <p className="text-xs text-gray-500">Subtotal salarios</p>
+                <p className="text-lg font-bold" style={{ color: COLORS.dark }}>{formatCOP(payrollTotals.salary)}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 p-3">
+                <p className="text-xs text-gray-500">Total quincena</p>
+                <p className="text-lg font-bold" style={{ color: COLORS.dark }}>{formatCOP(payrollTotals.total)}</p>
+                <p className="text-xs text-gray-500">Incluye auxilio: {formatCOP(payrollTotals.auxilio)}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="ui-card overflow-hidden">
+            {payrollLoading ? (
+              <div className="p-6 text-sm text-gray-500">Cargando información de horas y pagos...</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[980px] text-sm">
+                  <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold">Empleado</th>
+                      <th className="px-4 py-3 text-left font-semibold">Contrato</th>
+                      <th className="px-4 py-3 text-right font-semibold">Horas quincena</th>
+                      <th className="px-4 py-3 text-right font-semibold">Días trabajados</th>
+                      <th className="px-4 py-3 text-right font-semibold">Salario base</th>
+                      <th className="px-4 py-3 text-right font-semibold">Auxilio transporte</th>
+                      <th className="px-4 py-3 text-right font-semibold">Total a pagar</th>
+                      <th className="px-4 py-3 text-left font-semibold">Detalle cálculo</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {payrollRows.map((row) => (
+                      <tr key={row.empleado.id}>
+                        <td className="px-4 py-3 font-medium text-gray-800">{row.empleado.nombre}</td>
+                        <td className="px-4 py-3 text-gray-600">
+                          {row.empleado.tipo_contrato === 'salario_fijo' ? 'Salario fijo' : 'Por horas'}
+                        </td>
+                        <td className="px-4 py-3 text-right text-gray-700">{formatHours(row.hoursInPeriod)} h</td>
+                        <td className="px-4 py-3 text-right text-gray-700">{row.daysWorked}</td>
+                        <td className="px-4 py-3 text-right text-gray-700">{formatCOP(row.salaryByContract)}</td>
+                        <td className="px-4 py-3 text-right text-gray-700">{formatCOP(row.auxilio)}</td>
+                        <td className="px-4 py-3 text-right font-semibold" style={{ color: COLORS.dark }}>
+                          {formatCOP(row.total)}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-600 align-top">
+                          {row.empleado.tipo_contrato === 'por_horas' ? (
+                            <div className="space-y-1">
+                              <p>
+                                Valor hora = {formatCOP(row.salarioMensual)} / {payrollSettings.horasMesBase} = <b>{formatCOP(row.salarioHora)}</b>
+                              </p>
+                              <p>
+                                Salario = {formatCOP(row.salarioHora)} x {formatHours(row.hoursInPeriod)}h = <b>{formatCOP(row.salaryByContract)}</b>
+                              </p>
+                              <p>
+                                Auxilio diario = {formatCOP(payrollSettings.auxilioTransporte)} / {payrollSettings.diasMesBase} = <b>{formatCOP(row.auxilioDiario)}</b>
+                              </p>
+                              <p>
+                                Auxilio = {row.qualifiesTransport ? `${formatCOP(row.auxilioDiario)} x ${row.daysWorked} días = ${formatCOP(row.auxilio)}` : 'No aplica (sin auxilio o supera tope)'}
+                              </p>
+                              <p className="font-semibold">Total = {formatCOP(row.salaryByContract)} + {formatCOP(row.auxilio)} = {formatCOP(row.total)}</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <p>
+                                Valor día = {formatCOP(row.salarioMensual)} / {payrollSettings.diasMesBase} = <b>{formatCOP(row.salarioDiario)}</b>
+                              </p>
+                              <p>
+                                Salario base = {row.useFixedQuincenaForFixedContract
+                                  ? `${formatCOP(row.salarioMensual)} / 2 = ${formatCOP(row.salaryByContract)} (quincena fija)`
+                                  : `${formatCOP(row.salarioDiario)} x ${row.daysWorked} días = ${formatCOP(row.salaryByContract)}`}
+                              </p>
+                              <p>
+                                Auxilio diario = {formatCOP(payrollSettings.auxilioTransporte)} / {payrollSettings.diasMesBase} = <b>{formatCOP(row.auxilioDiario)}</b>
+                              </p>
+                              <p>
+                                Auxilio = {row.qualifiesTransport ? `${formatCOP(row.auxilioDiario)} x ${row.daysWorked} días = ${formatCOP(row.auxilio)}` : 'No aplica (sin auxilio o supera tope)'}
+                              </p>
+                              <p className="font-semibold">Total = {formatCOP(row.salaryByContract)} + {formatCOP(row.auxilio)} = {formatCOP(row.total)}</p>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {payrollRows.length === 0 && (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-500">
+                          Ajusta un rango válido para calcular la nómina.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </section>

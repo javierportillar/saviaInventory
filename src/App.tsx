@@ -638,7 +638,7 @@ function App() {
               onDeleteCustomer={handleDeleteCustomer}
             />
           )}
-          {module === 'empleados' && <Empleados />}
+          {module === 'empleados' && <Empleados user={user} />}
           {module === 'gastos' && (
             <Gastos
               focusRequest={gastosFocus}

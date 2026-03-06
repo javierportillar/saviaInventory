@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Clock, RefreshCcw, Save, RotateCcw, AlertTriangle, CheckCircle2, Users, Wallet } from 'lucide-react';
-import { Empleado, WeeklyHours, WeeklySchedule, DayKey } from '../types';
+import { Empleado, WeeklyHours, WeeklySchedule, DayKey, PayrollSettings } from '../types';
 import dataService from '../lib/dataService';
 import { COLORS } from '../data/menu';
 import {
@@ -12,7 +12,10 @@ import {
   formatDifference,
   formatHours,
   getCurrentWeekKey,
-  formatWeekRange
+  formatWeekRange,
+  DEFAULT_PAYROLL_SETTINGS,
+  normalizePayrollSettings,
+  calculateEmployeeWeeklyPayment,
 } from '../utils/employeeHours';
 import { formatCOP } from '../utils/format';
 
@@ -34,20 +37,6 @@ const cloneWeeklyHours = (source: WeeklyHours): WeeklyHours => {
   return clone;
 };
 
-const BASE_SALARY = 1_423_500;
-const HOURS_PER_MONTH = 220;
-const STANDARD_WEEKLY_HOURS = 44;
-const TRANSPORT_ALLOWANCE = 200_000;
-const HOURLY_RATE = BASE_SALARY / HOURS_PER_MONTH;
-const OVERTIME_RATE = HOURLY_RATE * 1.25;
-const TRANSPORT_DAILY_RATE = TRANSPORT_ALLOWANCE / 30;
-
-const roundPesos = (value: number): number => {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-  return Math.round(value);
-};
 
 // Parses a single 12h/24h time string ("7:30 pm" or "19:30") into decimal hours.
 const parseTimeComponent = (value: string): number | null => {
@@ -143,31 +132,6 @@ const parseHoursInput = (value: string): number | null => {
   return Math.round(Math.max(0, numeric) * 100) / 100;
 };
 
-const calculateWeeklyPayment = (hours: WeeklyHours) => {
-  const totalHours = sumWeeklyHours(hours);
-  const regularHours = Math.min(totalHours, STANDARD_WEEKLY_HOURS);
-  const overtimeHours = Math.max(0, totalHours - STANDARD_WEEKLY_HOURS);
-  const basePay = roundPesos(regularHours * HOURLY_RATE);
-  const overtimePay = roundPesos(overtimeHours * OVERTIME_RATE);
-  const daysWorked = DAY_ORDER.reduce((count, day) => {
-    const workedHours = Number(hours[day] ?? 0);
-    return workedHours > 0 ? count + 1 : count;
-  }, 0);
-  const transport = roundPesos(daysWorked * TRANSPORT_DAILY_RATE);
-  const totalPay = basePay + overtimePay + transport;
-
-  return {
-    totalHours,
-    regularHours,
-    overtimeHours,
-    basePay,
-    overtimePay,
-    transport,
-    totalPay,
-    daysWorked
-  };
-};
-
 export function HistoricoEmpleados() {
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [baseSchedules, setBaseSchedules] = useState<Record<string, WeeklySchedule>>({});
@@ -179,6 +143,7 @@ export function HistoricoEmpleados() {
   const [weekLoading, setWeekLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<Record<string, SaveState>>({});
+  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>(DEFAULT_PAYROLL_SETTINGS);
   const timeoutsRef = useRef<Record<string, number>>({});
 
   const clearRowTimeout = useCallback((empleadoId: string) => {
@@ -195,9 +160,10 @@ export function HistoricoEmpleados() {
     const loadInitialData = async () => {
       try {
         setInitialLoading(true);
-        const [employeeList, base] = await Promise.all([
+        const [employeeList, base, payroll] = await Promise.all([
           dataService.fetchEmpleados(),
-          dataService.fetchEmployeeBaseSchedules()
+          dataService.fetchEmployeeBaseSchedules(),
+          dataService.fetchPayrollSettings(),
         ]);
 
         if (!isMounted) return;
@@ -212,6 +178,7 @@ export function HistoricoEmpleados() {
           }
         });
         setBaseSchedules(sanitizedBase);
+        setPayrollSettings(normalizePayrollSettings(payroll));
       } catch (error) {
         console.error('No se pudieron cargar los empleados o los horarios base:', error);
         if (isMounted) {
@@ -455,7 +422,7 @@ export function HistoricoEmpleados() {
       const effective = pending ?? storedHours;
       totalBase += sumWeeklyHours(baseHours);
       totalWorked += sumWeeklyHours(effective);
-      totalPay += calculateWeeklyPayment(effective).totalPay;
+      totalPay += calculateEmployeeWeeklyPayment(empleado, effective, payrollSettings).totalSemanal;
     });
 
     return {
@@ -464,7 +431,7 @@ export function HistoricoEmpleados() {
       diff: totalWorked - totalBase,
       totalPay
     };
-  }, [empleados, baseSchedules, weeklyHours, editedHours]);
+  }, [empleados, baseSchedules, weeklyHours, editedHours, payrollSettings]);
 
   const hasEmployees = empleados.length > 0;
 
@@ -613,8 +580,7 @@ export function HistoricoEmpleados() {
                 const hasPending = pending ? !weeklyHoursEqual(pending, storedHours) : false;
                 const rowSaveState = saveState[empleado.id]?.status ?? 'idle';
                 const rowMessage = saveState[empleado.id]?.message;
-                const payment = calculateWeeklyPayment(workingHours);
-                const hasOvertime = payment.overtimeHours > 0.01;
+                const payment = calculateEmployeeWeeklyPayment(empleado, workingHours, payrollSettings);
                 const canSave = hasPending && rowSaveState !== 'saving';
 
                 return (
@@ -696,20 +662,16 @@ export function HistoricoEmpleados() {
                     <td className="px-4 py-4 text-center align-top text-gray-700">
                       <div className="flex flex-col items-center gap-1.5">
                         <span className="text-base font-semibold text-gray-800">
-                          {formatCOP(payment.totalPay)}
+                          {formatCOP(payment.totalSemanal)}
                         </span>
                         <span className="text-[11px] text-gray-500">
-                          Base: {formatCOP(payment.basePay)}
-                          {hasOvertime && ` · Extras: ${formatCOP(payment.overtimePay)}`}
+                          Base: {formatCOP(payment.salarioSemanal)}
                         </span>
                         <span className="text-[11px] text-gray-500">
-                          Aux. transporte: {formatCOP(payment.transport)}
+                          Aux. transporte: {formatCOP(payment.auxilioSemanal)}
                         </span>
                         <span className="text-[11px] text-gray-400">
-                          {formatHours(payment.regularHours)} h base
-                          {hasOvertime && ` · ${formatHours(payment.overtimeHours)} h extra`}
-                          {' · '}
-                          {payment.daysWorked} día{payment.daysWorked === 1 ? '' : 's'}
+                          {formatHours(payment.totalHours)} h · {payment.daysWorked} día{payment.daysWorked === 1 ? '' : 's'}
                         </span>
                       </div>
                     </td>

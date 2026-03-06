@@ -1,4 +1,4 @@
-import { Empleado, DayKey, WeeklySchedule, WeeklyHours, DAY_KEYS } from '../types';
+import { Empleado, DayKey, WeeklySchedule, WeeklyHours, DAY_KEYS, PayrollSettings } from '../types';
 
 export const DAY_ORDER: DayKey[] = [...DAY_KEYS];
 
@@ -112,4 +112,78 @@ export const formatDifference = (value: number) => {
   }
   const formatted = formatHours(Math.abs(value));
   return `${value > 0 ? '+' : '-'}${formatted} h vs base`;
+};
+
+export const DEFAULT_PAYROLL_SETTINGS: PayrollSettings = {
+  smmlv: 1750905,
+  auxilioTransporte: 249095,
+  horasMesBase: 220,
+  diasMesBase: 30,
+  limiteAuxilioSmmlv: 2,
+};
+
+const clampPositive = (value: number, fallback: number): number => {
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return value;
+};
+
+export const normalizePayrollSettings = (value?: Partial<PayrollSettings> | null): PayrollSettings => {
+  const merged = {
+    ...DEFAULT_PAYROLL_SETTINGS,
+    ...(value || {}),
+  };
+
+  return {
+    smmlv: clampPositive(Number(merged.smmlv), DEFAULT_PAYROLL_SETTINGS.smmlv),
+    auxilioTransporte: clampPositive(Number(merged.auxilioTransporte), DEFAULT_PAYROLL_SETTINGS.auxilioTransporte),
+    horasMesBase: clampPositive(Number(merged.horasMesBase), DEFAULT_PAYROLL_SETTINGS.horasMesBase),
+    diasMesBase: clampPositive(Number(merged.diasMesBase), DEFAULT_PAYROLL_SETTINGS.diasMesBase),
+    limiteAuxilioSmmlv: clampPositive(Number(merged.limiteAuxilioSmmlv), DEFAULT_PAYROLL_SETTINGS.limiteAuxilioSmmlv),
+  };
+};
+
+const roundPeso = (value: number): number => {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(value);
+};
+
+export const calculateEmployeeWeeklyPayment = (
+  empleado: Empleado,
+  weeklyHours: WeeklyHours,
+  settingsInput?: Partial<PayrollSettings> | null
+) => {
+  const settings = normalizePayrollSettings(settingsInput);
+  const totalHours = sumWeeklyHours(weeklyHours);
+  const daysWorked = DAY_ORDER.reduce((count, day) => (Number(weeklyHours[day] || 0) > 0 ? count + 1 : count), 0);
+
+  const salarioMensualBase = Number(empleado.salario_mensual || 0) > 0
+    ? Number(empleado.salario_mensual)
+    : settings.smmlv;
+
+  const salarioHoraCalculado = salarioMensualBase / settings.horasMesBase;
+  const salarioHora = Number(empleado.salario_hora || 0) > 0
+    ? Number(empleado.salario_hora)
+    : salarioHoraCalculado;
+
+  const salarioSemanal = empleado.tipo_contrato === 'salario_fijo'
+    ? (salarioMensualBase / settings.diasMesBase) * daysWorked
+    : salarioHora * totalHours;
+
+  const qualifiesTransport = empleado.incluye_auxilio_transporte &&
+    salarioMensualBase <= settings.smmlv * settings.limiteAuxilioSmmlv;
+  const auxilioDiario = settings.auxilioTransporte / settings.diasMesBase;
+  const auxilioSemanal = qualifiesTransport ? auxilioDiario * daysWorked : 0;
+
+  const total = salarioSemanal + auxilioSemanal;
+
+  return {
+    totalHours,
+    daysWorked,
+    salarioHora: roundPeso(salarioHora),
+    salarioMensualBase: roundPeso(salarioMensualBase),
+    salarioSemanal: roundPeso(salarioSemanal),
+    auxilioSemanal: roundPeso(auxilioSemanal),
+    totalSemanal: roundPeso(total),
+    qualifiesTransport,
+  };
 };

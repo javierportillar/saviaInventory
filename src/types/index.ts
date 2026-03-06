@@ -125,13 +125,24 @@ export interface Empleado {
   nombre: string;
   telefono?: string;
   email?: string;
+  tipo_contrato: 'por_horas' | 'salario_fijo';
   horas_dia: number;
   dias_semana: number;
   salario_hora: number;
+  salario_mensual: number;
+  incluye_auxilio_transporte: boolean;
   activo: boolean;
   created_at?: Date;
   updated_at?: Date;
   horario_base?: WeeklySchedule | null;
+}
+
+export interface PayrollSettings {
+  smmlv: number;
+  auxilioTransporte: number;
+  horasMesBase: number;
+  diasMesBase: number;
+  limiteAuxilioSmmlv: number;
 }
 
 export interface EmployeeCreditHistoryEntry {

@@ -134,6 +134,17 @@ const parseDateInput = (value?: string) => {
   return new Date(year, month - 1, day);
 };
 
+const sameDay = (a: Date, b: Date) => normalizeDate(a).getTime() === normalizeDate(b).getTime();
+
+const getMonthRangeFromDate = (date: Date) => {
+  const start = new Date(date.getFullYear(), date.getMonth(), 1);
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  return {
+    start: formatDateInput(start),
+    end: formatDateInput(end),
+  };
+};
+
 const filterAndSortByDateRange = <T,>(
   items: T[],
   startDate: string,
@@ -226,6 +237,48 @@ export function Balance() {
     [transfers, startDate, endDate],
   );
 
+  const isSingleDaySelection = useMemo(() => {
+    const start = parseDateInput(startDate);
+    const end = parseDateInput(endDate);
+    return !!(start && end && sameDay(start, end));
+  }, [startDate, endDate]);
+
+  const monthlyOrders = useMemo(() => {
+    if (!isSingleDaySelection) {
+      return [] as Order[];
+    }
+    const reference = parseDateInput(startDate);
+    if (!reference) {
+      return [] as Order[];
+    }
+    const monthRange = getMonthRangeFromDate(reference);
+    return filterAndSortByDateRange(orders, monthRange.start, monthRange.end, (order) => getOrderPaymentDate(order));
+  }, [isSingleDaySelection, orders, startDate]);
+
+  const monthlyGastos = useMemo(() => {
+    if (!isSingleDaySelection) {
+      return [] as Gasto[];
+    }
+    const reference = parseDateInput(startDate);
+    if (!reference) {
+      return [] as Gasto[];
+    }
+    const monthRange = getMonthRangeFromDate(reference);
+    return filterAndSortByDateRange(gastos, monthRange.start, monthRange.end, (gasto) => gasto.fecha);
+  }, [gastos, isSingleDaySelection, startDate]);
+
+  const monthlyTransfers = useMemo(() => {
+    if (!isSingleDaySelection) {
+      return [] as ProvisionTransfer[];
+    }
+    const reference = parseDateInput(startDate);
+    if (!reference) {
+      return [] as ProvisionTransfer[];
+    }
+    const monthRange = getMonthRangeFromDate(reference);
+    return filterAndSortByDateRange(transfers, monthRange.start, monthRange.end, (transfer) => transfer.fecha);
+  }, [isSingleDaySelection, startDate, transfers]);
+
   const totals = useMemo(() => {
     const paidOrders = filteredOrders.filter(isOrderPaid);
     const ventas = paidOrders.reduce((acc, order) => acc + order.total, 0);
@@ -238,17 +291,19 @@ export function Balance() {
     };
   }, [filteredOrders, filteredGastos]);
 
-  const overallTotals = useMemo(() => {
-    const paidOrders = orders.filter(isOrderPaid);
+  const contextualHistoricalTotals = useMemo(() => {
+    const sourceOrders = isSingleDaySelection ? monthlyOrders : filteredOrders;
+    const sourceGastos = isSingleDaySelection ? monthlyGastos : filteredGastos;
+    const paidOrders = sourceOrders.filter(isOrderPaid);
     const ventas = paidOrders.reduce((acc, order) => acc + order.total, 0);
-    const gastosTotal = gastos.reduce((acc, gasto) => acc + gasto.monto, 0);
+    const gastosTotal = sourceGastos.reduce((acc, gasto) => acc + gasto.monto, 0);
 
     return {
       ventas,
       gastos: gastosTotal,
       balance: ventas - gastosTotal,
     };
-  }, [orders, gastos]);
+  }, [filteredGastos, filteredOrders, isSingleDaySelection, monthlyGastos, monthlyOrders]);
 
   const hasAnyData = orders.length > 0 || gastos.length > 0;
   const hasFilteredData = filteredOrders.length > 0 || filteredGastos.length > 0;
@@ -276,6 +331,14 @@ export function Balance() {
       }),
     [],
   );
+  const monthYearFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat('es-CO', {
+        month: 'long',
+        year: 'numeric',
+      }),
+    [],
+  );
 
   const selectedRangeLabel = useMemo(() => {
     const start = parseDateInput(startDate);
@@ -296,23 +359,40 @@ export function Balance() {
     return 'Todo el histórico';
   }, [dateFormatter, startDate, endDate]);
 
-  const periodSummaryLabel = hasFilteredData
-    ? `Movimientos en el período (${selectedRangeLabel}): ${filteredOrders.length + filteredGastos.length}`
-    : `No hay movimientos en el período seleccionado (${selectedRangeLabel}).`;
+  const isTodaySingleDaySelection = useMemo(() => {
+    const start = parseDateInput(startDate);
+    const end = parseDateInput(endDate);
+    if (!start || !end) {
+      return false;
+    }
+    return sameDay(start, end) && sameDay(start, today);
+  }, [endDate, startDate, today]);
+
+  const monthlyContextLabel = useMemo(() => {
+    const start = parseDateInput(startDate);
+    const reference = start ?? today;
+    return monthYearFormatter.format(reference);
+  }, [monthYearFormatter, startDate, today]);
+
+  const periodSummaryLabel = isTodaySingleDaySelection
+    ? `Movimiento general (${monthlyContextLabel}): ${filteredOrders.length + filteredGastos.length}`
+    : `Movimiento general (${selectedRangeLabel}): ${filteredOrders.length + filteredGastos.length}`;
 
   const closingLabel = lastMovementDate
     ? `Último movimiento: ${formatDateTime(lastMovementDate)}`
-    : hasAnyData
-      ? `No hay movimientos en el rango (${selectedRangeLabel}).`
-      : 'Sin registros disponibles.';
+    : '';
 
   const rangeMethodTotals = useMemo(
     () => computeMethodTotals(filteredOrders, filteredGastos, filteredTransfers),
     [filteredGastos, filteredOrders, filteredTransfers],
   );
-  const overallMethodTotals = useMemo(
-    () => computeMethodTotals(orders, gastos, transfers),
-    [gastos, orders, transfers],
+  const contextualHistoricalMethodTotals = useMemo(
+    () => computeMethodTotals(
+      isSingleDaySelection ? monthlyOrders : filteredOrders,
+      isSingleDaySelection ? monthlyGastos : filteredGastos,
+      isSingleDaySelection ? monthlyTransfers : filteredTransfers,
+    ),
+    [filteredGastos, filteredOrders, filteredTransfers, isSingleDaySelection, monthlyGastos, monthlyOrders, monthlyTransfers],
   );
 
   const totalProvisionDepositsRange = useMemo(
@@ -322,11 +402,11 @@ export function Balance() {
     [filteredTransfers],
   );
 
-  const totalProvisionDepositsOverall = useMemo(
-    () => transfers
+  const totalProvisionDepositsHistorical = useMemo(
+    () => (isSingleDaySelection ? monthlyTransfers : filteredTransfers)
       .filter((transfer) => transfer.bolsilloDestino === 'provision_caja')
       .reduce((sum, transfer) => sum + transfer.monto, 0),
-    [transfers],
+    [filteredTransfers, isSingleDaySelection, monthlyTransfers],
   );
 
   const totalProvisionWithdrawalsRange = useMemo(
@@ -336,17 +416,17 @@ export function Balance() {
     [filteredTransfers],
   );
 
-  const totalProvisionWithdrawalsOverall = useMemo(
-    () => transfers
+  const totalProvisionWithdrawalsHistorical = useMemo(
+    () => (isSingleDaySelection ? monthlyTransfers : filteredTransfers)
       .filter((transfer) => transfer.bolsilloOrigen === 'provision_caja')
       .reduce((sum, transfer) => sum + transfer.monto, 0),
-    [transfers],
+    [filteredTransfers, isSingleDaySelection, monthlyTransfers],
   );
 
   const provisionBalanceRange = totalProvisionDepositsRange - totalProvisionWithdrawalsRange;
-  const provisionBalanceOverall = totalProvisionDepositsOverall - totalProvisionWithdrawalsOverall;
+  const provisionBalanceHistorical = totalProvisionDepositsHistorical - totalProvisionWithdrawalsHistorical;
   const provisionBalanceRangeClass = valueColor(provisionBalanceRange);
-  const provisionBalanceOverallClass = valueColor(provisionBalanceOverall);
+  const provisionBalanceHistoricalClass = valueColor(provisionBalanceHistorical);
 
   const methodBreakdown: MethodSummary[] = useMemo(
     () =>
@@ -357,10 +437,12 @@ export function Balance() {
         gastos: rangeMethodTotals[method].egresos,
         balance: rangeMethodTotals[method].ingresos - rangeMethodTotals[method].egresos,
         balanceHistorico:
-          overallMethodTotals[method].ingresos - overallMethodTotals[method].egresos,
+          contextualHistoricalMethodTotals[method].ingresos - contextualHistoricalMethodTotals[method].egresos,
       })),
-    [overallMethodTotals, rangeMethodTotals],
+    [contextualHistoricalMethodTotals, rangeMethodTotals],
   );
+
+  const historicalLabel = isSingleDaySelection ? 'Balance histórico mensual' : 'Balance histórico del rango';
 
   return (
     <section className="space-y-4 sm:space-y-6">
@@ -479,7 +561,7 @@ export function Balance() {
               <p className="text-xs text-gray-500 mb-1 hidden sm:block">{periodSummaryLabel}</p>
               <p className="text-xs text-gray-500 mb-1 hidden sm:block">{closingLabel}</p>
               <p className="text-sm sm:text-lg lg:text-2xl font-bold" style={{ color: COLORS.dark }}>
-                {formatCOP(overallTotals.balance)}
+                {formatCOP(contextualHistoricalTotals.balance)}
               </p>
             </div>
           </div>
@@ -502,7 +584,7 @@ export function Balance() {
                     {formatCOP(method.balance)}
                   </p>
                   <p className="text-xs text-gray-500 mt-3">
-                    Balance histórico: {formatCOP(method.balanceHistorico)}
+                    {historicalLabel}: {formatCOP(method.balanceHistorico)}
                   </p>
                 </div>
               ))}
@@ -524,8 +606,8 @@ export function Balance() {
               </div>
               <div className="text-right">
                 <p className="text-xs uppercase text-gray-500 font-medium">Saldo histórico</p>
-                <p className={`text-sm font-semibold ${provisionBalanceOverallClass}`}>
-                  {formatCOP(provisionBalanceOverall)}
+                <p className={`text-sm font-semibold ${provisionBalanceHistoricalClass}`}>
+                  {formatCOP(provisionBalanceHistorical)}
                 </p>
               </div>
             </div>

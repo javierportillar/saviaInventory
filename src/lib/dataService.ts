@@ -20,6 +20,7 @@ import {
   WeeklyHours,
   DAY_KEYS,
   AppSettings,
+  PayrollSettings,
 } from '../types';
 import { supabase } from './supabaseClient';
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -47,6 +48,7 @@ import {
   mergeAllocations,
   sanitizeAllocations,
 } from '../utils/payments';
+import { DEFAULT_PAYROLL_SETTINGS, normalizePayrollSettings } from '../utils/employeeHours';
 
 // Verificar si Supabase está disponible
 const isSupabaseAvailable = () => {
@@ -94,12 +96,15 @@ const GASTO_INVENTARIO_ITEMS_STORAGE_KEY = 'savia-gasto-inventario-items';
 const INVENTORY_PRICE_HISTORY_STORAGE_KEY = 'savia-inventory-price-history';
 const APP_SETTINGS_STORAGE_KEY = 'savia-app-settings';
 const APP_SETTINGS_DISCOUNT_KEY = 'caja_combo_descuento_bebidas';
+const PAYROLL_SETTINGS_STORAGE_KEY = 'savia-payroll-settings';
+const APP_SETTINGS_PAYROLL_KEY = 'empleados_nomina_config';
 const DEFAULT_APP_SETTINGS: AppSettings = {
   drinkComboDiscountEnabled: true,
   drinkComboDiscountPercent: DEFAULT_DRINK_DISCOUNT_PERCENT,
   drinkComboDiscountCategories: [...DRINK_DISCOUNT_CATEGORY_KEYS],
   drinkComboDiscountProductIds: [],
 };
+const DEFAULT_EMPLOYEE_PAYROLL_SETTINGS: PayrollSettings = { ...DEFAULT_PAYROLL_SETTINGS };
 
 const notifyEmployeeCreditUpdate = () => {
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
@@ -3172,25 +3177,67 @@ export const deleteCustomer = async (id: string): Promise<void> => {
 };
 
 // EMPLEADOS
+const normalizeEmpleadoRecord = (record: any): Empleado => {
+  const tipoContrato = record?.tipo_contrato === 'salario_fijo' ? 'salario_fijo' : 'por_horas';
+  const salarioMensualRaw = Number(record?.salario_mensual ?? 0);
+  const salarioHoraRaw = Number(record?.salario_hora ?? 0);
+
+  return {
+    id: typeof record?.id === 'string' ? record.id : (typeof crypto !== 'undefined' ? crypto.randomUUID() : `emp-${Math.random().toString(36).slice(2, 10)}`),
+    nombre: typeof record?.nombre === 'string' ? record.nombre : '',
+    telefono: typeof record?.telefono === 'string' ? record.telefono : '',
+    email: typeof record?.email === 'string' ? record.email : '',
+    tipo_contrato: tipoContrato,
+    horas_dia: Math.max(0, Number(record?.horas_dia ?? 8) || 8),
+    dias_semana: Math.max(0, Number(record?.dias_semana ?? 5) || 5),
+    salario_hora: Number.isFinite(salarioHoraRaw) ? Math.max(0, salarioHoraRaw) : 0,
+    salario_mensual: Number.isFinite(salarioMensualRaw) ? Math.max(0, salarioMensualRaw) : 0,
+    incluye_auxilio_transporte: typeof record?.incluye_auxilio_transporte === 'boolean' ? record.incluye_auxilio_transporte : true,
+    activo: typeof record?.activo === 'boolean' ? record.activo : true,
+    created_at: record?.created_at ? new Date(record.created_at) : undefined,
+    updated_at: record?.updated_at ? new Date(record.updated_at) : undefined,
+    horario_base: normalizeWeeklySchedule(record?.horario_base),
+  };
+};
+
+const toEmpleadoPayload = (empleado: Empleado) => {
+  const normalized = normalizeEmpleadoRecord(empleado);
+  return {
+    id: normalized.id,
+    nombre: normalized.nombre,
+    telefono: normalized.telefono || null,
+    email: normalized.email || null,
+    tipo_contrato: normalized.tipo_contrato,
+    horas_dia: normalized.horas_dia,
+    dias_semana: normalized.dias_semana,
+    salario_hora: normalized.salario_hora,
+    salario_mensual: normalized.salario_mensual,
+    incluye_auxilio_transporte: normalized.incluye_auxilio_transporte,
+    activo: normalized.activo,
+    horario_base: normalized.horario_base ?? null,
+  };
+};
+
 export const fetchEmpleados = async (): Promise<Empleado[]> => {
   if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase.from('empleados').select('*').order('nombre');
       if (error) throw error;
-      return data || [];
+      return (data || []).map(normalizeEmpleadoRecord);
     } catch (error) {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  return getLocalData<Empleado[]>('savia-empleados', []);
+  return getLocalData<Empleado[]>('savia-empleados', []).map(normalizeEmpleadoRecord);
 };
 
 export const createEmpleado = async (empleado: Empleado): Promise<Empleado> => {
+  const payload = toEmpleadoPayload(empleado);
   if (await ensureSupabaseReady()) {
     try {
-      const { data, error } = await supabase.from('empleados').insert([empleado]).select().single();
+      const { data, error } = await supabase.from('empleados').insert([payload]).select().single();
       if (error) throw error;
-      return data;
+      return normalizeEmpleadoRecord(data);
     } catch (error) {
       console.warn('Supabase not available, using local data:', error);
     }
@@ -3198,20 +3245,21 @@ export const createEmpleado = async (empleado: Empleado): Promise<Empleado> => {
 
   // Local storage fallback
   const empleados = getLocalData<Empleado[]>('savia-empleados', []);
-  const newEmpleados = [...empleados, empleado];
+  const newEmpleados = [...empleados, normalizeEmpleadoRecord(payload)];
   setLocalData('savia-empleados', newEmpleados);
-  return empleado;
+  return normalizeEmpleadoRecord(payload);
 };
 
 export const updateEmpleado = async (empleado: Empleado): Promise<Empleado> => {
+  const payload = toEmpleadoPayload(empleado);
   if (await ensureSupabaseReady()) {
     try {
       const { error } = await supabase
         .from('empleados')
-        .update(empleado)
-        .eq('id', empleado.id);
+        .update(payload)
+        .eq('id', payload.id);
       if (error) throw error;
-      return empleado;
+      return normalizeEmpleadoRecord(payload);
     } catch (error) {
       console.warn('Supabase not available, using local data:', error);
     }
@@ -3219,9 +3267,9 @@ export const updateEmpleado = async (empleado: Empleado): Promise<Empleado> => {
 
   // Local storage fallback
   const empleados = getLocalData<Empleado[]>('savia-empleados', []);
-  const updatedEmpleados = empleados.map(e => e.id === empleado.id ? empleado : e);
+  const updatedEmpleados = empleados.map(e => e.id === payload.id ? normalizeEmpleadoRecord(payload) : normalizeEmpleadoRecord(e));
   setLocalData('savia-empleados', updatedEmpleados);
-  return empleado;
+  return normalizeEmpleadoRecord(payload);
 };
 
 export const deleteEmpleado = async (id: string): Promise<void> => {
@@ -4298,6 +4346,74 @@ export const saveAppSettings = async (updates: Partial<AppSettings>): Promise<Ap
   return merged;
 };
 
+export const fetchPayrollSettings = async (): Promise<PayrollSettings> => {
+  const localSettings = normalizePayrollSettings(
+    getLocalData<Partial<PayrollSettings>>(PAYROLL_SETTINGS_STORAGE_KEY, DEFAULT_EMPLOYEE_PAYROLL_SETTINGS)
+  );
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const { data, error } = await supabase
+        .from('app_settings')
+        .select('key, value_json')
+        .eq('key', APP_SETTINGS_PAYROLL_KEY)
+        .maybeSingle();
+      if (error) throw error;
+
+      if (!data) {
+        const { error: upsertError } = await supabase
+          .from('app_settings')
+          .upsert([
+            {
+              key: APP_SETTINGS_PAYROLL_KEY,
+              value_json: DEFAULT_EMPLOYEE_PAYROLL_SETTINGS,
+            },
+          ], { onConflict: 'key' });
+        if (upsertError) throw upsertError;
+        setLocalData(PAYROLL_SETTINGS_STORAGE_KEY, DEFAULT_EMPLOYEE_PAYROLL_SETTINGS);
+        return DEFAULT_EMPLOYEE_PAYROLL_SETTINGS;
+      }
+
+      const valueJson = (data as { value_json?: unknown }).value_json;
+      const parsed = normalizePayrollSettings(
+        typeof valueJson === 'object' && valueJson !== null
+          ? (valueJson as Partial<PayrollSettings>)
+          : undefined
+      );
+      setLocalData(PAYROLL_SETTINGS_STORAGE_KEY, parsed);
+      return parsed;
+    } catch (error) {
+      console.warn('[dataService] No se pudo leer la configuración de nómina desde Supabase. Usando local.', error);
+    }
+  }
+
+  return localSettings;
+};
+
+export const savePayrollSettings = async (updates: Partial<PayrollSettings>): Promise<PayrollSettings> => {
+  const current = await fetchPayrollSettings();
+  const merged = normalizePayrollSettings({ ...current, ...updates });
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const { error } = await supabase
+        .from('app_settings')
+        .upsert([
+          {
+            key: APP_SETTINGS_PAYROLL_KEY,
+            value_json: merged,
+          },
+        ], { onConflict: 'key' });
+      if (error) throw error;
+    } catch (error) {
+      console.warn('[dataService] No se pudo guardar la configuración de nómina en Supabase. Guardando local.', error);
+    }
+  }
+
+  setLocalData(PAYROLL_SETTINGS_STORAGE_KEY, merged);
+  return merged;
+};
+
 export const dataService = {
   fetchMenuItems,
   createMenuItem,
@@ -4343,6 +4459,8 @@ export const dataService = {
   fetchBalanceResumen,
   fetchAppSettings,
   saveAppSettings,
+  fetchPayrollSettings,
+  savePayrollSettings,
   checkDatabaseConnection,
 } as const;
 
