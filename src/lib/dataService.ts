@@ -3111,56 +3111,87 @@ export const deleteOrder = async (orderId: string): Promise<void> => {
 };
 
 // CUSTOMERS
+const normalizeCustomerRecord = (record: any): Customer => {
+  const rawAge = Number(record?.edad);
+  const normalizedAge = Number.isInteger(rawAge) && rawAge > 0 ? rawAge : undefined;
+  const normalizedAddress = typeof record?.direccion === 'string' && record.direccion.trim().length > 0
+    ? record.direccion.trim()
+    : undefined;
+
+  return {
+    id: typeof record?.id === 'string' ? record.id : (typeof crypto !== 'undefined' ? crypto.randomUUID() : `cust-${Math.random().toString(36).slice(2, 10)}`),
+    nombre: typeof record?.nombre === 'string' ? record.nombre : '',
+    telefono: typeof record?.telefono === 'string' ? record.telefono : '',
+    direccion: normalizedAddress,
+    edad: normalizedAge,
+  };
+};
+
+const toCustomerPayload = (customer: Customer) => {
+  const normalized = normalizeCustomerRecord(customer);
+  return {
+    id: normalized.id,
+    nombre: normalized.nombre,
+    telefono: normalized.telefono,
+    direccion: normalized.direccion ?? null,
+    edad: normalized.edad ?? null,
+  };
+};
+
 export const fetchCustomers = async (): Promise<Customer[]> => {
   if (await ensureSupabaseReady()) {
     try {
       const { data, error } = await supabase.from('customers').select('*');
       if (error) throw error;
-      return data || [];
+      return (data || []).map(normalizeCustomerRecord);
     } catch (error) {
       console.warn('Supabase not available, using local data:', error);
     }
   }
-  return getLocalData<Customer[]>('savia-customers', []);
+  return getLocalData<Customer[]>('savia-customers', []).map(normalizeCustomerRecord);
 };
 
 export const createCustomer = async (customer: Customer): Promise<Customer> => {
+  const payload = toCustomerPayload(customer);
   if (await ensureSupabaseReady()) {
     try {
-      const { data, error } = await supabase.from('customers').insert([customer]).select().single();
+      const { data, error } = await supabase.from('customers').insert([payload]).select().single();
       if (error) throw error;
-      return data;
+      return normalizeCustomerRecord(data);
     } catch (error) {
       console.warn('Supabase not available, using local data:', error);
     }
   }
 
   // Local storage fallback
-  const customers = getLocalData<Customer[]>('savia-customers', []);
-  const newCustomers = [...customers, customer];
+  const normalized = normalizeCustomerRecord(customer);
+  const customers = getLocalData<Customer[]>('savia-customers', []).map(normalizeCustomerRecord);
+  const newCustomers = [...customers, normalized];
   setLocalData('savia-customers', newCustomers);
-  return customer;
+  return normalized;
 };
 
 export const updateCustomer = async (customer: Customer): Promise<Customer> => {
+  const payload = toCustomerPayload(customer);
+  const normalized = normalizeCustomerRecord(customer);
   if (await ensureSupabaseReady()) {
     try {
       const { error } = await supabase
         .from('customers')
-        .update(customer)
+        .update(payload)
         .eq('id', customer.id);
       if (error) throw error;
-      return customer;
+      return normalized;
     } catch (error) {
       console.warn('Supabase not available, using local data:', error);
     }
   }
 
   // Local storage fallback
-  const customers = getLocalData<Customer[]>('savia-customers', []);
-  const updatedCustomers = customers.map(c => c.id === customer.id ? customer : c);
+  const customers = getLocalData<Customer[]>('savia-customers', []).map(normalizeCustomerRecord);
+  const updatedCustomers = customers.map(c => c.id === customer.id ? normalized : c);
   setLocalData('savia-customers', updatedCustomers);
-  return customer;
+  return normalized;
 };
 
 export const deleteCustomer = async (id: string): Promise<void> => {
@@ -3175,7 +3206,7 @@ export const deleteCustomer = async (id: string): Promise<void> => {
   }
 
   // Local storage fallback
-  const customers = getLocalData<Customer[]>('savia-customers', []);
+  const customers = getLocalData<Customer[]>('savia-customers', []).map(normalizeCustomerRecord);
   const filteredCustomers = customers.filter(customer => customer.id !== id);
   setLocalData('savia-customers', filteredCustomers);
 };

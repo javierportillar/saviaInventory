@@ -13,19 +13,34 @@ interface ClientesProps {
 export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteCustomer }: ClientesProps) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
+  const [age, setAge] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const handleSubmit = () => {
     if (!name.trim() || !phone.trim()) return;
     const trimmedName = name.trim();
     const trimmedPhone = phone.trim();
+    const trimmedAddress = address.trim();
+    const parsedAge = Number(age);
+    const sanitizedAge = Number.isInteger(parsedAge) && parsedAge > 0 ? parsedAge : undefined;
+    const customerPayload: Customer = {
+      id: editingId ?? crypto.randomUUID(),
+      nombre: trimmedName,
+      telefono: trimmedPhone,
+      direccion: trimmedAddress || undefined,
+      edad: sanitizedAge,
+    };
+
     if (editingId) {
-      onUpdateCustomer({ id: editingId, nombre: trimmedName, telefono: trimmedPhone });
+      onUpdateCustomer(customerPayload);
     } else {
-      onAddCustomer({ id: crypto.randomUUID(), nombre: trimmedName, telefono: trimmedPhone });
+      onAddCustomer(customerPayload);
     }
     setName('');
     setPhone('');
+    setAddress('');
+    setAge('');
     setEditingId(null);
   };
 
@@ -33,12 +48,16 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
     setEditingId(customer.id);
     setName(customer.nombre);
     setPhone(customer.telefono);
+    setAddress(customer.direccion ?? '');
+    setAge(typeof customer.edad === 'number' ? String(customer.edad) : '');
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setName('');
     setPhone('');
+    setAddress('');
+    setAge('');
   };
 
   return (
@@ -71,6 +90,28 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
             style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
           />
         </div>
+        <div className="flex-1">
+          <input
+            type="text"
+            placeholder="Dirección"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            className="w-full px-3 lg:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
+            style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+          />
+        </div>
+        <div className="w-full lg:w-40">
+          <input
+            type="number"
+            min={1}
+            max={120}
+            placeholder="Edad"
+            value={age}
+            onChange={(e) => setAge(e.target.value)}
+            className="w-full px-3 lg:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent text-sm"
+            style={{ '--tw-ring-color': COLORS.accent } as React.CSSProperties}
+          />
+        </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
           <button
             onClick={handleSubmit}
@@ -97,6 +138,8 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
               <tr className="bg-gray-50">
                 <th className="px-3 lg:px-4 py-2 text-left text-sm font-semibold text-gray-700">Nombre</th>
                 <th className="px-3 lg:px-4 py-2 text-left text-sm font-semibold text-gray-700">Teléfono</th>
+                <th className="px-3 lg:px-4 py-2 text-left text-sm font-semibold text-gray-700">Dirección</th>
+                <th className="px-3 lg:px-4 py-2 text-left text-sm font-semibold text-gray-700">Edad</th>
                 <th className="px-3 lg:px-4 py-2"></th>
               </tr>
             </thead>
@@ -105,6 +148,8 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
                 <tr key={c.id} className="border-t">
                   <td className="px-3 lg:px-4 py-2 text-sm">{c.nombre}</td>
                   <td className="px-3 lg:px-4 py-2 text-sm">{c.telefono}</td>
+                  <td className="px-3 lg:px-4 py-2 text-sm">{c.direccion ?? '—'}</td>
+                  <td className="px-3 lg:px-4 py-2 text-sm">{c.edad ?? '—'}</td>
                   <td className="px-3 lg:px-4 py-2 flex gap-2">
                     <button
                       onClick={() => startEdit(c)}
@@ -123,7 +168,7 @@ export function Clientes({ customers, onAddCustomer, onUpdateCustomer, onDeleteC
               ))}
               {customers.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="px-3 lg:px-4 py-4 text-center text-gray-500 text-sm">
+                  <td colSpan={5} className="px-3 lg:px-4 py-4 text-center text-gray-500 text-sm">
                     No hay clientes registrados
                   </td>
                 </tr>

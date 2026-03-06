@@ -7,9 +7,10 @@ import { formatDateTime } from '../utils/format';
 interface CocinaProps {
   orders: Order[];
   onUpdateOrderStatus: (order: Order, status: Order['estado']) => Promise<void> | void;
+  onViewOrder?: (order: Order) => void;
 }
 
-export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
+export function Cocina({ orders, onUpdateOrderStatus, onViewOrder }: CocinaProps) {
   const [statusUpdatingOrderIds, setStatusUpdatingOrderIds] = useState<Record<string, boolean>>({});
 
   const handleOrderStatusChange = async (order: Order, nextStatus: Order['estado']) => {
@@ -48,6 +49,31 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
     if (minutes > 15) return 'urgent';
     if (minutes > 10) return 'warning';
     return 'normal';
+  };
+
+  const renderItemDetails = (notes?: string) => {
+    if (!notes) {
+      return null;
+    }
+
+    const lines = notes
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (lines.length === 0) {
+      return null;
+    }
+
+    return (
+      <ul className="mt-1 space-y-0.5">
+        {lines.map((line, idx) => (
+          <li key={`${line}-${idx}`} className="text-[11px] text-gray-500 leading-4">
+            • {line}
+          </li>
+        ))}
+      </ul>
+    );
   };
 
   return (
@@ -94,9 +120,14 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
                     >
                       <div className="flex justify-between items-start mb-3">
                         <div>
-                          <h4 className="text-base lg:text-lg font-bold" style={{ color: COLORS.dark }}>
+                          <button
+                            type="button"
+                            onClick={() => onViewOrder?.(order)}
+                            className="text-base lg:text-lg font-bold hover:underline"
+                            style={{ color: COLORS.dark }}
+                          >
                             #{order.numero}
-                          </h4>
+                          </button>
                           <div className="flex items-center gap-1 text-sm text-gray-600">
                             <Clock size={14} />
                             <span>{getOrderAge(order.timestamp)}</span>
@@ -122,8 +153,11 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
 
                       <div className="space-y-2 mb-4">
                         {order.items.map((cartItem, index) => (
-                          <div key={index} className="flex justify-between items-center text-sm">
-                            <span className="font-medium">{cartItem.cantidad}x {cartItem.item.nombre}</span>
+                          <div key={index} className="rounded-lg bg-gray-50 border border-gray-100 p-2">
+                            <div className="flex justify-between items-start text-sm">
+                              <span className="font-medium">{cartItem.cantidad}x {cartItem.item.nombre}</span>
+                            </div>
+                            {renderItemDetails(cartItem.notas)}
                           </div>
                         ))}
                       </div>
@@ -192,7 +226,13 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
                     className="bg-green-50 border border-green-200 rounded-lg p-3 lg:p-4"
                   >
                     <div className="flex justify-between items-start mb-2">
-                      <h4 className="font-bold text-green-800 text-sm lg:text-base">#{order.numero}</h4>
+                      <button
+                        type="button"
+                        onClick={() => onViewOrder?.(order)}
+                        className="font-bold text-green-800 text-sm lg:text-base hover:underline"
+                      >
+                        #{order.numero}
+                      </button>
                       <span className="text-xs text-green-600">
                         {formatDateTime(order.timestamp)}
                       </span>
@@ -202,8 +242,16 @@ export function Cocina({ orders, onUpdateOrderStatus }: CocinaProps) {
                       <p className="text-sm text-green-700 mb-2">{order.cliente}</p>
                     )}
                     
-                    <div className="text-sm text-green-700">
-                      {order.items.length} {order.items.length === 1 ? 'producto' : 'productos'}
+                    <div className="text-sm text-green-700 space-y-1">
+                      <p>{order.items.length} {order.items.length === 1 ? 'producto' : 'productos'}</p>
+                      <div className="space-y-1">
+                        {order.items.map((cartItem, index) => (
+                          <div key={index} className="rounded-md bg-white/60 border border-green-100 p-2">
+                            <p className="text-xs font-medium text-green-900">{cartItem.cantidad}x {cartItem.item.nombre}</p>
+                            {renderItemDetails(cartItem.notas)}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ))}

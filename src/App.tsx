@@ -628,6 +628,7 @@ function App() {
             <Cocina 
               orders={orders} 
               onUpdateOrderStatus={handleUpdateOrderStatus}
+              onViewOrder={handleNavigateToComandasFromCredit}
             />
           )}
           {module === 'clientes' && (
