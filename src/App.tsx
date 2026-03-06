@@ -660,7 +660,10 @@ function App() {
             />
           )}
           {module === 'analitica' && user.role === 'admin' && (
-            <Analitica orders={orders} />
+            <Analitica
+              orders={orders}
+              onViewOrder={handleNavigateToComandasFromCredit}
+            />
           )}
           {module === 'configuracion' && user.role === 'admin' && (
             <Configuracion />

@@ -185,6 +185,7 @@ export function Comandas({
   const [statusUpdatingOrderIds, setStatusUpdatingOrderIds] = useState<Record<string, boolean>>({});
   const [creditEmployeeLabelByOrderId, setCreditEmployeeLabelByOrderId] = useState<Record<string, string>>({});
   const [creditEmployeeLabelByOrderNumero, setCreditEmployeeLabelByOrderNumero] = useState<Record<number, string>>({});
+  const [highlightedOrderId, setHighlightedOrderId] = useState<string | null>(null);
 
   const getDrinkDiscountInfo = (cartItem: CartItem, orderHasMealCombo: boolean) => {
     if (!orderHasMealCombo || !isDiscountableDrinkCategory(cartItem.item.categoria)) {
@@ -250,6 +251,10 @@ export function Comandas({
           setCurrentPage(1);
         }
         setExpandedActionsOrderId(orderId);
+        setHighlightedOrderId(orderId);
+        window.setTimeout(() => {
+          setHighlightedOrderId((current) => (current === orderId ? null : current));
+        }, 3500);
         setEditingOrder(null);
         setShowAddProduct(false);
         return;
@@ -328,6 +333,7 @@ export function Comandas({
       setSelectedDateKey(getDateKey(new Date()));
       setCurrentPage(1);
       setExpandedActionsOrderId(null);
+      setHighlightedOrderId(null);
       return;
     }
   }, [focusRequest?.requestId]);
@@ -1079,7 +1085,11 @@ export function Comandas({
     return (
       <div
         key={order.id}
-        className="ui-card ui-card-pad hover:shadow-md transition-shadow duration-200"
+        className={`ui-card ui-card-pad hover:shadow-md transition-all duration-300 ${
+          highlightedOrderId === order.id
+            ? 'ring-2 ring-yellow-300 bg-yellow-50/60'
+            : ''
+        }`}
       >
         <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start mb-4 space-y-2 lg:space-y-0">
           <div className="flex-1">

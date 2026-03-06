@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarCheck, CalendarRange, Calculator, ShoppingBag, TrendingUp, Trophy, PieChart } from 'lucide-react';
+import { CalendarCheck, CalendarRange, Calculator, ShoppingBag, TrendingUp, Trophy, PieChart, X } from 'lucide-react';
 import { Gasto, Order } from '../types';
 import { COLORS } from '../data/menu';
 import { formatCOP, formatDateInputValue, parseDateInputValue } from '../utils/format';
@@ -7,6 +7,7 @@ import dataService from '../lib/dataService';
 
 interface AnaliticaProps {
   orders: Order[];
+  onViewOrder?: (order: Order) => void;
 }
 
 type FilterMode = 'range' | 'single';
@@ -36,11 +37,23 @@ type FinancialChartPoint = {
   historicalBalance: number;
 };
 
+type PaymentBreakdownEntry = {
+  method: string;
+  label: string;
+  amount: number;
+  percentage: number;
+};
+
+type PaymentMethodOrderEntry = {
+  order: Order;
+  amount: number;
+};
+
 const GRID_COLOR = '#e5e7eb';
-const SALES_COLOR = '#16a34a';
-const EXPENSES_COLOR = '#ef4444';
 const BALANCE_COLOR = '#2563eb';
 const HISTORICAL_BALANCE_COLOR = '#000000';
+const CANDLE_GAIN_COLOR = '#16a34a';
+const CANDLE_LOSS_COLOR = '#ef4444';
 
 const compactNumberFormatter = new Intl.NumberFormat('es-CO', {
   notation: 'compact',
@@ -182,6 +195,8 @@ const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) =>
     return <p className="text-sm text-gray-500">No hay datos suficientes para mostrar la gráfica.</p>;
   }
 
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
   const width = 720;
   const height = 320;
   const margin = { top: 24, right: 32, bottom: 56, left: 80 };
@@ -204,17 +219,33 @@ const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) =>
   const buildPath = (points: { x: number; y: number }[]) =>
     points.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x},${point.y}`).join(' ');
 
-  const salesPoints = buildPoints(point => point.sales);
-  const expensesPoints = buildPoints(point => point.expenses);
   const balancePoints = buildPoints(point => point.balance);
   const historicalBalancePoints = buildPoints(point => point.historicalBalance);
+  const barPoints = data.map((point, index) => {
+    const x = margin.left + index * xStep;
+    const salesValue = point.sales;
+    const expensesValue = point.expenses;
+    const salesY = margin.top + innerHeight - ((salesValue - minValue) / range) * innerHeight;
+    const expensesY = margin.top + innerHeight - ((expensesValue - minValue) / range) * innerHeight;
+    return {
+      x,
+      salesY,
+      expensesY,
+      label: point.label,
+      sales: salesValue,
+      expenses: expensesValue,
+    };
+  });
 
   const yTickCount = 5;
   const yTicks = Array.from({ length: yTickCount }, (_, index) => minValue + (range / (yTickCount - 1)) * index);
   const xTickEvery = Math.max(1, Math.ceil(data.length / 6));
-  const xTicks = salesPoints.filter(point => point.index % xTickEvery === 0 || point.index === salesPoints.length - 1);
+  const xTicks = barPoints.filter((point, index) => index % xTickEvery === 0 || index === barPoints.length - 1);
+  const hoverBandWidth = data.length > 1 ? xStep : innerWidth;
 
   const zeroY = margin.top + innerHeight - ((0 - minValue) / range) * innerHeight;
+  const hoveredPoint = hoveredIndex !== null ? barPoints[hoveredIndex] : null;
+  const hoveredData = hoveredIndex !== null ? data[hoveredIndex] : null;
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-80">
@@ -230,9 +261,9 @@ const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) =>
         );
       })}
       <line x1={margin.left} x2={margin.left + innerWidth} y1={zeroY} y2={zeroY} stroke="#9ca3af" strokeWidth={1.5} />
-      {xTicks.map(point => (
+      {xTicks.map((point, index) => (
         <line
-          key={`x-financial-${point.index}`}
+          key={`x-financial-${index}`}
           x1={point.x}
           x2={point.x}
           y1={margin.top}
@@ -241,16 +272,64 @@ const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) =>
           strokeDasharray="4 4"
         />
       ))}
-      <path d={buildPath(expensesPoints)} fill="none" stroke={EXPENSES_COLOR} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
-      <path d={buildPath(salesPoints)} fill="none" stroke={SALES_COLOR} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+      {barPoints.map((point, index) => (
+        <rect
+          key={`hover-band-${index}`}
+          x={point.x - hoverBandWidth / 2}
+          y={margin.top}
+          width={hoverBandWidth}
+          height={innerHeight}
+          fill="transparent"
+          onMouseEnter={() => setHoveredIndex(index)}
+          onMouseMove={() => setHoveredIndex(index)}
+          onMouseLeave={() => setHoveredIndex(null)}
+        />
+      ))}
+      {barPoints.map((point, index) => {
+        const barWidth = Math.max(5, Math.min(14, xStep * 0.28));
+        const salesBarX = point.x - barWidth - 1.5;
+        const expensesBarX = point.x + 1.5;
+        const salesBarY = Math.min(zeroY, point.salesY);
+        const expensesBarY = Math.min(zeroY, point.expensesY);
+        const salesBarHeight = Math.abs(zeroY - point.salesY);
+        const expensesBarHeight = Math.abs(zeroY - point.expensesY);
+
+        return (
+          <g key={`bars-${index}`}>
+            <rect
+              x={salesBarX}
+              y={salesBarY}
+              width={barWidth}
+              height={salesBarHeight}
+              rx={2}
+              fill={CANDLE_GAIN_COLOR}
+              fillOpacity={0.9}
+            />
+            <rect
+              x={expensesBarX}
+              y={expensesBarY}
+              width={barWidth}
+              height={expensesBarHeight}
+              rx={2}
+              fill={CANDLE_LOSS_COLOR}
+              fillOpacity={0.9}
+            />
+          </g>
+        );
+      })}
+      {hoveredPoint && (
+        <line
+          x1={hoveredPoint.x}
+          x2={hoveredPoint.x}
+          y1={margin.top}
+          y2={margin.top + innerHeight}
+          stroke="#9ca3af"
+          strokeDasharray="3 3"
+          strokeWidth={1.5}
+        />
+      )}
       <path d={buildPath(balancePoints)} fill="none" stroke={BALANCE_COLOR} strokeWidth={2.5} strokeDasharray="6 4" strokeLinecap="round" strokeLinejoin="round" />
       <path d={buildPath(historicalBalancePoints)} fill="none" stroke={HISTORICAL_BALANCE_COLOR} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
-      {salesPoints.map(point => (
-        <circle key={`sales-${point.index}`} cx={point.x} cy={point.y} r={4} fill="#fff" stroke={SALES_COLOR} strokeWidth={2} />
-      ))}
-      {expensesPoints.map(point => (
-        <circle key={`expenses-${point.index}`} cx={point.x} cy={point.y} r={4} fill="#fff" stroke={EXPENSES_COLOR} strokeWidth={2} />
-      ))}
       {balancePoints.map(point => (
         <circle key={`balance-${point.index}`} cx={point.x} cy={point.y} r={4} fill="#fff" stroke={BALANCE_COLOR} strokeWidth={2} />
       ))}
@@ -290,11 +369,23 @@ const FinancialPerformanceChart = ({ data }: { data: FinancialChartPoint[] }) =>
       >
         Días analizados
       </text>
-      {xTicks.map(point => (
-        <text key={`label-${point.index}`} x={point.x} y={margin.top + innerHeight + 20} textAnchor="middle" className="text-xs fill-gray-500">
+      {xTicks.map((point, index) => (
+        <text key={`label-${index}`} x={point.x} y={margin.top + innerHeight + 20} textAnchor="middle" className="text-xs fill-gray-500">
           {point.label}
         </text>
       ))}
+      {hoveredPoint && hoveredData && (
+        <g transform={`translate(${Math.max(margin.left + 6, Math.min(hoveredPoint.x + 10, width - 190))},${margin.top + 10})`}>
+          <rect width={180} height={92} rx={8} fill="#111827" fillOpacity={0.96} />
+          <text x={10} y={18} className="text-[11px] fill-white font-semibold">
+            {hoveredData.date.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
+          </text>
+          <text x={10} y={36} className="text-[10px] fill-emerald-300">Ventas: {formatCOP(Math.round(hoveredData.sales))}</text>
+          <text x={10} y={50} className="text-[10px] fill-rose-300">Gastos: {formatCOP(Math.round(hoveredData.expenses))}</text>
+          <text x={10} y={66} className="text-[10px] fill-blue-300">Balance diario: {formatCOP(Math.round(hoveredData.balance))}</text>
+          <text x={10} y={82} className="text-[10px] fill-gray-200">Balance histórico: {formatCOP(Math.round(hoveredData.historicalBalance))}</text>
+        </g>
+      )}
     </svg>
   );
 };
@@ -342,7 +433,7 @@ const getNormalizedRange = (startInput: string, endInput: string) => {
   return { start: normalizedStart, end: normalizedEnd };
 };
 
-export function Analitica({ orders }: AnaliticaProps) {
+export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
   const today = useMemo(() => {
     const now = new Date();
     return formatDateInputValue(now);
@@ -360,6 +451,7 @@ export function Analitica({ orders }: AnaliticaProps) {
   const [singleDate, setSingleDate] = useState<string>(today);
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [financialZoom, setFinancialZoom] = useState<'7' | '30' | '90' | 'all'>('30');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -589,10 +681,10 @@ export function Analitica({ orders }: AnaliticaProps) {
     return formatRangeLabel(start, end);
   }, [zoomedFinancialData]);
 
-  const paymentBreakdown = useMemo(() => {
-    const summary: Record<string, number> = {};
+  const paymentMethodOrders = useMemo(() => {
+    const grouped: Record<string, PaymentMethodOrderEntry[]> = {};
 
-    filteredOrders.forEach(order => {
+    filteredOrders.forEach((order) => {
       const allocations = (order.paymentAllocations && order.paymentAllocations.length > 0)
         ? order.paymentAllocations
         : order.metodoPago
@@ -600,13 +692,23 @@ export function Analitica({ orders }: AnaliticaProps) {
           : [];
 
       if (allocations.length === 0) {
-        summary.sin_registro = (summary.sin_registro ?? 0) + order.total;
+        grouped.sin_registro = [...(grouped.sin_registro ?? []), { order, amount: order.total }];
         return;
       }
 
       allocations.forEach(({ metodo, monto }) => {
-        summary[metodo] = (summary[metodo] ?? 0) + monto;
+        grouped[metodo] = [...(grouped[metodo] ?? []), { order, amount: monto }];
       });
+    });
+
+    return grouped;
+  }, [filteredOrders]);
+
+  const paymentBreakdown = useMemo(() => {
+    const summary: Record<string, number> = {};
+
+    Object.entries(paymentMethodOrders).forEach(([method, entries]) => {
+      summary[method] = entries.reduce((sum, entry) => sum + entry.amount, 0);
     });
 
     return Object.entries(summary)
@@ -617,7 +719,20 @@ export function Analitica({ orders }: AnaliticaProps) {
         percentage: totalSales > 0 ? (amount / totalSales) * 100 : 0,
       }))
       .sort((a, b) => b.amount - a.amount);
-  }, [filteredOrders, totalSales]);
+  }, [paymentMethodOrders, totalSales]);
+
+  const selectedPaymentMethodEntry = useMemo(
+    () => paymentBreakdown.find((entry) => entry.method === selectedPaymentMethod),
+    [paymentBreakdown, selectedPaymentMethod],
+  );
+
+  const selectedPaymentMethodOrders = useMemo(() => {
+    if (!selectedPaymentMethod) {
+      return [] as PaymentMethodOrderEntry[];
+    }
+    const entries = paymentMethodOrders[selectedPaymentMethod] ?? [];
+    return [...entries].sort((a, b) => b.order.timestamp.getTime() - a.order.timestamp.getTime());
+  }, [paymentMethodOrders, selectedPaymentMethod]);
 
   const dailySummary = useMemo(() => {
     const summaryMap = new Map<string, { total: number; orders: number }>();
@@ -700,6 +815,19 @@ export function Analitica({ orders }: AnaliticaProps) {
     const todayValue = formatDateInputValue(new Date());
     setFilterMode('single');
     setSingleDate(todayValue);
+  };
+
+  const handleOpenPaymentMethod = (method: string) => {
+    setSelectedPaymentMethod(method);
+  };
+
+  const handleClosePaymentMethodModal = () => {
+    setSelectedPaymentMethod(null);
+  };
+
+  const handleViewOrderFromPaymentMethod = (order: Order) => {
+    onViewOrder?.(order);
+    setSelectedPaymentMethod(null);
   };
 
   const infoCards = [
@@ -914,7 +1042,12 @@ export function Analitica({ orders }: AnaliticaProps) {
           {paymentBreakdown.length > 0 ? (
             <div className="space-y-4">
               {paymentBreakdown.map((entry) => (
-                <div key={entry.method}>
+                <button
+                  key={entry.method}
+                  type="button"
+                  onClick={() => handleOpenPaymentMethod(entry.method)}
+                  className="w-full text-left rounded-lg border border-gray-100 p-3 hover:border-gray-300 hover:bg-gray-50 transition-colors"
+                >
                   <div className="flex items-center justify-between text-sm font-medium text-gray-700">
                     <span>{entry.label}</span>
                     <span>{formatCOP(entry.amount)}</span>
@@ -928,8 +1061,11 @@ export function Analitica({ orders }: AnaliticaProps) {
                       }}
                     />
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">{entry.percentage.toFixed(1)}% del periodo</div>
-                </div>
+                  <div className="text-xs text-gray-500 mt-1 flex items-center justify-between">
+                    <span>{entry.percentage.toFixed(1)}% del periodo</span>
+                    <span className="font-medium text-gray-600">Ver órdenes</span>
+                  </div>
+                </button>
               ))}
             </div>
           ) : (
@@ -972,10 +1108,10 @@ export function Analitica({ orders }: AnaliticaProps) {
               <FinancialPerformanceChart data={zoomedFinancialData} />
               <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
                 <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full" style={{ backgroundColor: SALES_COLOR }} /> Ventas
+                  <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: CANDLE_GAIN_COLOR }} /> Ventas (barra)
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full" style={{ backgroundColor: EXPENSES_COLOR }} /> Gastos
+                  <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: CANDLE_LOSS_COLOR }} /> Gastos (barra)
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-5 border-t-2 border-dashed" style={{ borderColor: BALANCE_COLOR }} /> Balance diario
@@ -1162,6 +1298,63 @@ export function Analitica({ orders }: AnaliticaProps) {
           )}
         </section>
       </div>
+
+      {selectedPaymentMethod && (
+        <div className="fixed inset-0 z-50 bg-black/40 p-4 flex items-center justify-center">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden border border-gray-200">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <div>
+                <h4 className="text-lg font-semibold text-gray-900">
+                  Órdenes por método: {selectedPaymentMethodEntry?.label ?? selectedPaymentMethod}
+                </h4>
+                <p className="text-xs text-gray-500">
+                  {selectedPaymentMethodOrders.length} órdenes · {formatCOP(Math.round(selectedPaymentMethodEntry?.amount ?? 0))}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleClosePaymentMethodModal}
+                className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Cerrar"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto max-h-[70vh] space-y-2">
+              {selectedPaymentMethodOrders.length > 0 ? (
+                selectedPaymentMethodOrders.map((entry) => (
+                  <div
+                    key={`${selectedPaymentMethod}-${entry.order.id}-${entry.amount}`}
+                    className="flex items-center justify-between rounded-lg border border-gray-100 p-3"
+                  >
+                    <div className="min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => handleViewOrderFromPaymentMethod(entry.order)}
+                        className="text-sm font-semibold text-blue-700 hover:text-blue-800 hover:underline"
+                      >
+                        Comanda #{entry.order.numero}
+                      </button>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {entry.order.timestamp.toLocaleDateString('es-CO', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </p>
+                    </div>
+                    <span className="text-sm font-semibold text-gray-800">{formatCOP(Math.round(entry.amount))}</span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-gray-500">No hay órdenes asociadas a este método para el periodo.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
