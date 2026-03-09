@@ -9,7 +9,6 @@ import {
   getCartItemEffectiveUnitPrice,
   getCartItemSubtotal,
   isSandwichItem,
-  STUDENT_DISCOUNT_NOTE,
 } from '../utils/cart';
 import dataService from '../lib/dataService';
 import {
@@ -167,6 +166,11 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [drinkDiscountEnabled, setDrinkDiscountEnabled] = useState<boolean>(true);
   const [sandwichDiscountEnabled, setSandwichDiscountEnabled] = useState<boolean>(true);
+  const [followerOrderDiscountEnabled, setFollowerOrderDiscountEnabled] = useState<boolean>(false);
+  const [followerOrderDiscountPercent, setFollowerOrderDiscountPercent] = useState<number>(5);
+  const [applyFollowerOrderDiscount, setApplyFollowerOrderDiscount] = useState<boolean>(false);
+  const [studentProductDiscountEnabled, setStudentProductDiscountEnabled] = useState<boolean>(false);
+  const [studentProductDiscountPercent, setStudentProductDiscountPercent] = useState<number>(10);
   const [drinkDiscountPercent, setDrinkDiscountPercent] = useState<number>(DEFAULT_DRINK_DISCOUNT_PERCENT);
   const [sandwichDiscountPercent, setSandwichDiscountPercent] = useState<number>(DEFAULT_DRINK_DISCOUNT_PERCENT);
   const [drinkDiscountCategories, setDrinkDiscountCategories] = useState<string[]>([...DRINK_DISCOUNT_CATEGORY_KEYS]);
@@ -457,6 +461,10 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
         const settings = await dataService.fetchAppSettings();
         setDrinkDiscountEnabled(settings.drinkComboDiscountEnabled);
         setSandwichDiscountEnabled(settings.sandwichComboDiscountEnabled);
+        setFollowerOrderDiscountEnabled(settings.followerOrderDiscountEnabled);
+        setFollowerOrderDiscountPercent(settings.followerOrderDiscountPercent);
+        setStudentProductDiscountEnabled(settings.studentProductDiscountEnabled);
+        setStudentProductDiscountPercent(settings.studentProductDiscountPercent);
         setDrinkDiscountPercent(settings.drinkComboDiscountPercent);
         setSandwichDiscountPercent(settings.sandwichComboDiscountPercent);
         setDrinkDiscountCategories(settings.drinkComboDiscountCategories);
@@ -467,6 +475,22 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     };
     loadSettings();
   }, []);
+
+  useEffect(() => {
+    if (!followerOrderDiscountEnabled || cart.length === 0) {
+      setApplyFollowerOrderDiscount(false);
+    }
+  }, [followerOrderDiscountEnabled, cart.length]);
+
+  useEffect(() => {
+    if (!studentProductDiscountEnabled) {
+      setCart((prev) =>
+        prev.map((entry) =>
+          entry.studentDiscount ? { ...entry, studentDiscount: false } : entry
+        )
+      );
+    }
+  }, [studentProductDiscountEnabled]);
 
   const fetchMenuItems = async () => {
     const data = await dataService.fetchMenuItems();
@@ -503,6 +527,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     setSandwichPreviewItem(null);
     setIncludeSandwichDrink(false);
     setBowlModalItem(null);
+    setApplyFollowerOrderDiscount(false);
     resetBowlSelections();
   };
 
@@ -698,6 +723,33 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
     );
   };
 
+  const isStudentDiscountEligible = (cartItem: CartItem): boolean => {
+    return isSandwichItem(cartItem.item);
+  };
+
+  const toggleStudentDiscount = (itemId: string, customKey: string | undefined) => {
+    if (!studentProductDiscountEnabled) {
+      return;
+    }
+
+    setCart((prev) =>
+      applyMealDrinkDiscount(
+        prev.map((cartItem) => {
+          if (cartItem.item.id !== itemId || cartItem.customKey !== customKey) {
+            return cartItem;
+          }
+          if (!isStudentDiscountEligible(cartItem)) {
+            return cartItem;
+          }
+          return {
+            ...cartItem,
+            studentDiscount: !cartItem.studentDiscount,
+          };
+        })
+      )
+    );
+  };
+
   const isFrutalModal = bowlModalItem ? isBowlFrutal(bowlModalItem) : false;
   const baseLimitReached = selectedBowlBases.length >= (isFrutalModal ? BOWL_FRUTAL_BASE_LIMIT : (isEmployeeCajaMode ? 1 : BOWL_BASE_LIMIT));
   const toppingLimitReached = false;
@@ -736,7 +788,12 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
           selectedBowlBases.length <= BOWL_BASE_LIMIT &&
           selectedBowlToppings.length >= BOWL_TOPPING_MIN;
 
-  const total = calculateCartTotal(cart);
+  const subtotal = calculateCartTotal(cart);
+  const followerDiscountRate = followerOrderDiscountPercent / 100;
+  const followerDiscountAmount = followerOrderDiscountEnabled && applyFollowerOrderDiscount
+    ? Math.max(0, Math.round(subtotal * followerDiscountRate))
+    : 0;
+  const total = Math.max(0, subtotal - followerDiscountAmount);
 
   const ordersForSelectedDate = useMemo(
     () => orders.filter(order => doesTimestampMatchDateKey(order.timestamp, selectedDate)),
@@ -809,7 +866,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
 
       const order: Order = {
         id: crypto.randomUUID(),
-        numero: generateOrderNumber(),
+        numero: generateOrderNumber(orders.map((entry) => entry.numero)),
         items: cart,
         total,
         estado: 'pendiente',
@@ -834,6 +891,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
 
       setCart([]);
       setShowCheckout(false);
+      setApplyFollowerOrderDiscount(false);
       setCustomerName('');
       setSelectedCustomer(null);
       setEmployeeName('');
@@ -1137,7 +1195,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                           </div>
                           {cartItem.studentDiscount && (
                             <span className="inline-flex items-center text-[11px] font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-                              {STUDENT_DISCOUNT_NOTE}
+                              {`Descuento estudiante ${studentProductDiscountPercent}%`}
                             </span>
                           )}
                           {isDiscountedDrink && subtotalDiscount > 0 && (
@@ -1155,8 +1213,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                               {cartItem.notas}
                             </p>
                           )}
-                          {/* Descuento estudiantil desactivado temporalmente.
-                          {isSandwichItem(cartItem.item) && (
+                          {studentProductDiscountEnabled && isStudentDiscountEligible(cartItem) && (
                             <button
                               onClick={() => toggleStudentDiscount(cartItem.item.id, cartItem.customKey)}
                               className={`mt-1 inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
@@ -1167,7 +1224,7 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                             >
                               {cartItem.studentDiscount ? 'Quitar descuento' : 'Aplicar descuento estudiante'}
                             </button>
-                          )} */}
+                          )}
                         </div>
                         <div className="flex items-center gap-2 self-start">
                           <button
@@ -1199,11 +1256,35 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
                 </div>
 
                 <div className="border-t pt-4">
-                  <div className="flex justify-between items-center mb-4">
-                    <span className="text-lg font-bold">Total:</span>
-                    <span className="text-xl lg:text-2xl font-bold" style={{ color: COLORS.accent }}>
-                      {formatCOP(total)}
-                    </span>
+                  {followerOrderDiscountEnabled && (
+                    <label className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 mb-3 cursor-pointer">
+                      <span className="text-sm font-medium text-gray-700">
+                        Aplicar descuento seguidor ({followerOrderDiscountPercent}%)
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={applyFollowerOrderDiscount}
+                        onChange={(event) => setApplyFollowerOrderDiscount(event.target.checked)}
+                      />
+                    </label>
+                  )}
+                  <div className="space-y-2 mb-4">
+                    <div className="flex justify-between items-center text-sm text-gray-600">
+                      <span>Subtotal:</span>
+                      <span className="font-medium">{formatCOP(subtotal)}</span>
+                    </div>
+                    {followerDiscountAmount > 0 && (
+                      <div className="flex justify-between items-center text-sm text-red-600">
+                        <span>Descuento seguidor:</span>
+                        <span className="font-semibold">-{formatCOP(followerDiscountAmount)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center">
+                      <span className="text-lg font-bold">Total:</span>
+                      <span className="text-xl lg:text-2xl font-bold" style={{ color: COLORS.accent }}>
+                        {formatCOP(total)}
+                      </span>
+                    </div>
                   </div>
                   
                   <button
@@ -1669,11 +1750,23 @@ export function Caja({ orders, onModuleChange, onCreateOrder, onRecordOrderPayme
               </div>
 
               <div className="pt-4 border-t">
-                <div className="flex justify-between items-center mb-4">
-                  <span className="text-lg font-bold">Total a pagar:</span>
-                  <span className="text-xl lg:text-2xl font-bold" style={{ color: COLORS.accent }}>
-                    {formatCOP(total)}
-                  </span>
+                <div className="space-y-2 mb-4">
+                  <div className="flex justify-between items-center text-sm text-gray-600">
+                    <span>Subtotal:</span>
+                    <span className="font-medium">{formatCOP(subtotal)}</span>
+                  </div>
+                  {followerDiscountAmount > 0 && (
+                    <div className="flex justify-between items-center text-sm text-red-600">
+                      <span>Descuento seguidor ({followerOrderDiscountPercent}%):</span>
+                      <span className="font-semibold">-{formatCOP(followerDiscountAmount)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center">
+                    <span className="text-lg font-bold">Total a pagar:</span>
+                    <span className="text-xl lg:text-2xl font-bold" style={{ color: COLORS.accent }}>
+                      {formatCOP(total)}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="flex gap-3">

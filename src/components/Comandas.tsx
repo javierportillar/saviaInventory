@@ -949,13 +949,98 @@ export function Comandas({
       return;
     }
 
+    const distributeOrderLevelDiscountAcrossItems = (sourceOrder: Order): CartItem[] => {
+      const sourceItems = sourceOrder.items;
+      const targetTotal = Math.max(0, Math.round(sourceOrder.total));
+      const computedTotal = Math.max(0, Math.round(calculateCartTotal(sourceItems)));
+      const orderLevelDiscount = Math.max(0, computedTotal - targetTotal);
+
+      if (orderLevelDiscount <= 0) {
+        return sourceItems;
+      }
+
+      const unitItems: Array<{ item: CartItem; baseUnitPrice: number }> = [];
+      sourceItems.forEach((cartItem, index) => {
+        const quantity = Math.max(0, Math.round(cartItem.cantidad));
+        const effectiveUnitPrice = Math.max(0, Math.round(getCartItemEffectiveUnitPrice(cartItem)));
+        for (let unit = 0; unit < quantity; unit += 1) {
+          unitItems.push({
+            baseUnitPrice: effectiveUnitPrice,
+            item: {
+              ...cartItem,
+              cantidad: 1,
+              // Congela el precio ya prorrateado para evitar dobles descuentos.
+              precioUnitario: effectiveUnitPrice,
+              studentDiscount: false,
+              customKey: `${cartItem.customKey ?? 'unit'}|pay-${index}-${unit}`,
+            },
+          });
+        }
+      });
+
+      if (unitItems.length === 0) {
+        return sourceItems;
+      }
+
+      const baseTotal = unitItems.reduce((sum, entry) => sum + entry.baseUnitPrice, 0);
+      if (baseTotal <= 0) {
+        return sourceItems;
+      }
+
+      const maxDiscount = Math.min(orderLevelDiscount, baseTotal);
+      const distributedDiscounts = unitItems.map((entry) => {
+        const rawShare = (maxDiscount * entry.baseUnitPrice) / baseTotal;
+        const baseShare = Math.floor(rawShare);
+        return {
+          value: Math.min(baseShare, entry.baseUnitPrice),
+          fraction: rawShare - baseShare,
+          cap: entry.baseUnitPrice,
+        };
+      });
+
+      let assigned = distributedDiscounts.reduce((sum, entry) => sum + entry.value, 0);
+      let remainder = Math.max(0, maxDiscount - assigned);
+      if (remainder > 0) {
+        const indicesByPriority = distributedDiscounts
+          .map((entry, idx) => ({ idx, fraction: entry.fraction, cap: entry.cap }))
+          .sort((a, b) => {
+            if (b.fraction !== a.fraction) return b.fraction - a.fraction;
+            return b.cap - a.cap;
+          })
+          .map((entry) => entry.idx);
+
+        let pointer = 0;
+        while (remainder > 0 && indicesByPriority.length > 0) {
+          const idx = indicesByPriority[pointer % indicesByPriority.length];
+          const current = distributedDiscounts[idx];
+          if (current.value < current.cap) {
+            current.value += 1;
+            remainder -= 1;
+          }
+          pointer += 1;
+          if (pointer > indicesByPriority.length * 200) {
+            break;
+          }
+        }
+      }
+
+      return unitItems.map((entry, idx) => ({
+        ...entry.item,
+        precioUnitario: Math.max(0, entry.baseUnitPrice - distributedDiscounts[idx].value),
+      }));
+    };
+
     const orderForPayment = options?.overrideItems
       ? {
           ...latestOrder,
           items: options.overrideItems,
           total: options.overrideTotal ?? calculateCartTotal(options.overrideItems),
         }
-      : latestOrder;
+      : {
+          ...latestOrder,
+          items: distributeOrderLevelDiscountAcrossItems(latestOrder),
+          total: Math.round(latestOrder.total),
+        };
 
     setExpandedActionsOrderId(null);
     setPaymentOrder(orderForPayment);
@@ -1081,6 +1166,9 @@ export function Comandas({
     const editingOrderHasMealCombo = editingOrder?.orderId === order.id
       ? editingOrder.items.some((entry) => isBowlSalado(entry.item) || isBowlFrutal(entry.item) || isSandwichItem(entry.item))
       : false;
+    const computedItemsTotal = calculateCartTotal(order.items);
+    const orderLevelDiscount = Math.max(0, Math.round(computedItemsTotal - order.total));
+    const hasOrderLevelDiscount = orderLevelDiscount > 0;
 
     return (
       <div
@@ -1425,12 +1513,31 @@ export function Comandas({
         {editingOrder?.orderId !== order.id && (
           <React.Fragment>
             <div className="border-t pt-3 mb-4">
-              <div className="flex justify-between items-center">
-                <span className="font-bold">Total:</span>
-                <span className="font-bold text-lg" style={{ color: COLORS.accent }}>
-                  {formatCOP(order.total)}
-                </span>
-              </div>
+              {hasOrderLevelDiscount ? (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 space-y-1">
+                  <div className="flex justify-between items-center text-sm text-gray-700">
+                    <span>Subtotal:</span>
+                    <span className="font-medium">{formatCOP(computedItemsTotal)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm text-red-600">
+                    <span className="font-semibold">Descuento aplicado:</span>
+                    <span className="font-semibold">-{formatCOP(orderLevelDiscount)}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold">Total final:</span>
+                    <span className="font-bold text-lg" style={{ color: COLORS.accent }}>
+                      {formatCOP(order.total)}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-between items-center">
+                  <span className="font-bold">Total:</span>
+                  <span className="font-bold text-lg" style={{ color: COLORS.accent }}>
+                    {formatCOP(order.total)}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">

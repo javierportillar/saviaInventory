@@ -101,8 +101,12 @@ const APP_SETTINGS_PAYROLL_KEY = 'empleados_nomina_config';
 const DEFAULT_APP_SETTINGS: AppSettings = {
   drinkComboDiscountEnabled: true,
   sandwichComboDiscountEnabled: true,
+  followerOrderDiscountEnabled: false,
+  studentProductDiscountEnabled: false,
   drinkComboDiscountPercent: DEFAULT_DRINK_DISCOUNT_PERCENT,
   sandwichComboDiscountPercent: DEFAULT_DRINK_DISCOUNT_PERCENT,
+  followerOrderDiscountPercent: 5,
+  studentProductDiscountPercent: 10,
   drinkComboDiscountCategories: [...DRINK_DISCOUNT_CATEGORY_KEYS],
   drinkComboDiscountProductIds: [],
 };
@@ -542,10 +546,13 @@ const normalizePaymentMethod = (method?: string | null, fallback: PaymentMethod 
   return toOptionalPaymentMethod(method) ?? fallback;
 };
 
-const normalizeDiscountPercent = (value: unknown): number => {
+const normalizeDiscountPercent = (
+  value: unknown,
+  fallback = DEFAULT_APP_SETTINGS.drinkComboDiscountPercent
+): number => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
-    return DEFAULT_APP_SETTINGS.drinkComboDiscountPercent;
+    return fallback;
   }
   return Math.min(100, Math.max(0, Math.round(numeric * 100) / 100));
 };
@@ -592,8 +599,24 @@ const normalizeDiscountProductIds = (value: unknown): string[] => {
 const normalizeAppSettings = (value: Partial<AppSettings> | null | undefined): AppSettings => ({
   drinkComboDiscountEnabled: normalizeDiscountEnabled(value?.drinkComboDiscountEnabled),
   sandwichComboDiscountEnabled: normalizeDiscountEnabled(value?.sandwichComboDiscountEnabled),
-  drinkComboDiscountPercent: normalizeDiscountPercent(value?.drinkComboDiscountPercent),
-  sandwichComboDiscountPercent: normalizeDiscountPercent(value?.sandwichComboDiscountPercent),
+  followerOrderDiscountEnabled: normalizeDiscountEnabled(value?.followerOrderDiscountEnabled),
+  studentProductDiscountEnabled: normalizeDiscountEnabled(value?.studentProductDiscountEnabled),
+  drinkComboDiscountPercent: normalizeDiscountPercent(
+    value?.drinkComboDiscountPercent,
+    DEFAULT_APP_SETTINGS.drinkComboDiscountPercent
+  ),
+  sandwichComboDiscountPercent: normalizeDiscountPercent(
+    value?.sandwichComboDiscountPercent,
+    DEFAULT_APP_SETTINGS.sandwichComboDiscountPercent
+  ),
+  followerOrderDiscountPercent: normalizeDiscountPercent(
+    value?.followerOrderDiscountPercent,
+    DEFAULT_APP_SETTINGS.followerOrderDiscountPercent
+  ),
+  studentProductDiscountPercent: normalizeDiscountPercent(
+    value?.studentProductDiscountPercent,
+    DEFAULT_APP_SETTINGS.studentProductDiscountPercent
+  ),
   drinkComboDiscountCategories: normalizeDiscountCategories(value?.drinkComboDiscountCategories),
   drinkComboDiscountProductIds: normalizeDiscountProductIds(value?.drinkComboDiscountProductIds),
 });
@@ -1201,12 +1224,17 @@ const mapOrderRecord = (record: any): Order => {
   }, 0);
   const normalizedComputedTotal = normalizeCartTotal(rawComputedTotal);
   const rawStoredTotal = Number(record?.total ?? 0);
-  const hasStoredTotal = Number.isFinite(rawStoredTotal) && rawStoredTotal > 0;
+  const hasStoredTotal = Number.isFinite(rawStoredTotal) && rawStoredTotal >= 0;
+  const normalizedStoredTotal = hasStoredTotal
+    ? normalizeCartTotal(rawStoredTotal)
+    : 0;
 
-  const finalTotal = rawComputedTotal > 0
-    ? normalizedComputedTotal
-    : hasStoredTotal
-      ? normalizeCartTotal(rawStoredTotal)
+  // Respeta el total persistido (por ejemplo descuentos aplicados al pedido completo).
+  // Si no existe total persistido, usa el total calculado a partir de los ítems.
+  const finalTotal = hasStoredTotal
+    ? normalizedStoredTotal
+    : rawComputedTotal > 0
+      ? normalizedComputedTotal
       : 0;
 
   const baseOrder: Order = {
@@ -4326,8 +4354,12 @@ export const fetchAppSettings = async (): Promise<AppSettings> => {
               value_json: {
                 drinkComboDiscountEnabled: DEFAULT_APP_SETTINGS.drinkComboDiscountEnabled,
                 sandwichComboDiscountEnabled: DEFAULT_APP_SETTINGS.sandwichComboDiscountEnabled,
+                followerOrderDiscountEnabled: DEFAULT_APP_SETTINGS.followerOrderDiscountEnabled,
+                studentProductDiscountEnabled: DEFAULT_APP_SETTINGS.studentProductDiscountEnabled,
                 drinkComboDiscountPercent: DEFAULT_APP_SETTINGS.drinkComboDiscountPercent,
                 sandwichComboDiscountPercent: DEFAULT_APP_SETTINGS.sandwichComboDiscountPercent,
+                followerOrderDiscountPercent: DEFAULT_APP_SETTINGS.followerOrderDiscountPercent,
+                studentProductDiscountPercent: DEFAULT_APP_SETTINGS.studentProductDiscountPercent,
                 drinkComboDiscountCategories: DEFAULT_APP_SETTINGS.drinkComboDiscountCategories,
                 drinkComboDiscountProductIds: DEFAULT_APP_SETTINGS.drinkComboDiscountProductIds,
               },
@@ -4368,8 +4400,12 @@ export const saveAppSettings = async (updates: Partial<AppSettings>): Promise<Ap
             value_json: {
               drinkComboDiscountEnabled: merged.drinkComboDiscountEnabled,
               sandwichComboDiscountEnabled: merged.sandwichComboDiscountEnabled,
+              followerOrderDiscountEnabled: merged.followerOrderDiscountEnabled,
+              studentProductDiscountEnabled: merged.studentProductDiscountEnabled,
               drinkComboDiscountPercent: merged.drinkComboDiscountPercent,
               sandwichComboDiscountPercent: merged.sandwichComboDiscountPercent,
+              followerOrderDiscountPercent: merged.followerOrderDiscountPercent,
+              studentProductDiscountPercent: merged.studentProductDiscountPercent,
               drinkComboDiscountCategories: merged.drinkComboDiscountCategories,
               drinkComboDiscountProductIds: merged.drinkComboDiscountProductIds,
             },

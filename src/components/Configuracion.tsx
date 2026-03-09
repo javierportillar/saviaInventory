@@ -27,8 +27,12 @@ export function Configuracion() {
   const [settings, setSettings] = useState<AppSettings>({
     drinkComboDiscountEnabled: true,
     sandwichComboDiscountEnabled: true,
+    followerOrderDiscountEnabled: false,
+    studentProductDiscountEnabled: false,
     drinkComboDiscountPercent: 10,
     sandwichComboDiscountPercent: 10,
+    followerOrderDiscountPercent: 5,
+    studentProductDiscountPercent: 10,
     drinkComboDiscountCategories: DRINK_DISCOUNT_CATEGORY_OPTIONS.map((option) => option.key),
     drinkComboDiscountProductIds: [],
   });
@@ -71,8 +75,12 @@ export function Configuracion() {
     return (
       settings.drinkComboDiscountEnabled !== savedSettings.drinkComboDiscountEnabled ||
       settings.sandwichComboDiscountEnabled !== savedSettings.sandwichComboDiscountEnabled ||
+      settings.followerOrderDiscountEnabled !== savedSettings.followerOrderDiscountEnabled ||
+      settings.studentProductDiscountEnabled !== savedSettings.studentProductDiscountEnabled ||
       Math.abs(settings.drinkComboDiscountPercent - savedSettings.drinkComboDiscountPercent) > 0.0001 ||
       Math.abs(settings.sandwichComboDiscountPercent - savedSettings.sandwichComboDiscountPercent) > 0.0001 ||
+      Math.abs(settings.followerOrderDiscountPercent - savedSettings.followerOrderDiscountPercent) > 0.0001 ||
+      Math.abs(settings.studentProductDiscountPercent - savedSettings.studentProductDiscountPercent) > 0.0001 ||
       !areSameCategories(settings.drinkComboDiscountCategories, savedSettings.drinkComboDiscountCategories) ||
       !areSameProductIds(settings.drinkComboDiscountProductIds, savedSettings.drinkComboDiscountProductIds)
     );
@@ -214,6 +222,60 @@ export function Configuracion() {
                 >
                   {settings.sandwichComboDiscountEnabled ? 'Sandwiches habilitado' : 'Sandwiches deshabilitado'}
                 </button>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 p-4 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                    Descuento estudiantil por producto
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Permite aplicar descuento a sandwiches y bowls en la sección de Caja.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSettings((prev) => ({ ...prev, studentProductDiscountEnabled: !prev.studentProductDiscountEnabled }))}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                    settings.studentProductDiscountEnabled
+                      ? 'bg-green-600 text-white border-green-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  {settings.studentProductDiscountEnabled ? 'Estudiantil habilitado' : 'Estudiantil deshabilitado'}
+                </button>
+              </div>
+              <div className="text-sm text-gray-600">
+                Porcentaje fijo: <span className="font-semibold text-gray-800">{settings.studentProductDiscountPercent}%</span>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 p-4 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                    Descuento seguidor (orden completa)
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Habilita esta opción para permitir aplicar descuento del 5% al total de la orden desde el carrito.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSettings((prev) => ({ ...prev, followerOrderDiscountEnabled: !prev.followerOrderDiscountEnabled }))}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                    settings.followerOrderDiscountEnabled
+                      ? 'bg-green-600 text-white border-green-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  {settings.followerOrderDiscountEnabled ? 'Seguidor habilitado' : 'Seguidor deshabilitado'}
+                </button>
+              </div>
+              <div className="text-sm text-gray-600">
+                Porcentaje fijo: <span className="font-semibold text-gray-800">{settings.followerOrderDiscountPercent}%</span>
               </div>
             </div>
 

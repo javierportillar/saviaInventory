@@ -32,9 +32,33 @@ export const formatDate = (date: Date): string => {
 };
 
 const ORDER_NUMBER_STORAGE_KEY = "savia-next-order-number";
-let fallbackOrderNumber = 1;
+const ORDER_NUMBER_START = 1000;
+let fallbackOrderNumber = ORDER_NUMBER_START;
 
-export const generateOrderNumber = (): number => {
+const getMaxOrderNumberFromLocalCache = (): number => {
+  try {
+    const raw = window.localStorage.getItem("savia-orders");
+    if (!raw) {
+      return ORDER_NUMBER_START - 1;
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return ORDER_NUMBER_START - 1;
+    }
+
+    return parsed.reduce((max, entry) => {
+      const numero = Number(entry?.numero);
+      if (Number.isInteger(numero) && numero > max) {
+        return numero;
+      }
+      return max;
+    }, ORDER_NUMBER_START - 1);
+  } catch {
+    return ORDER_NUMBER_START - 1;
+  }
+};
+
+export const generateOrderNumber = (usedNumbers: number[] = []): number => {
   if (typeof window === "undefined") {
     const next = fallbackOrderNumber;
     fallbackOrderNumber += 1;
@@ -44,9 +68,19 @@ export const generateOrderNumber = (): number => {
   try {
     const storedValue = window.localStorage.getItem(ORDER_NUMBER_STORAGE_KEY);
     const parsed = Number(storedValue);
-    const currentNumber = Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
-    window.localStorage.setItem(ORDER_NUMBER_STORAGE_KEY, String(currentNumber + 1));
-    return currentNumber;
+    const storedNext = Number.isInteger(parsed) && parsed > 0 ? parsed : ORDER_NUMBER_START;
+    const maxUsedInMemory = usedNumbers.reduce((max, value) => {
+      const normalized = Number(value);
+      if (Number.isInteger(normalized) && normalized > max) {
+        return normalized;
+      }
+      return max;
+    }, ORDER_NUMBER_START - 1);
+    const maxUsedInCache = getMaxOrderNumberFromLocalCache();
+    const nextNumber = Math.max(ORDER_NUMBER_START, storedNext, maxUsedInMemory + 1, maxUsedInCache + 1);
+
+    window.localStorage.setItem(ORDER_NUMBER_STORAGE_KEY, String(nextNumber + 1));
+    return nextNumber;
   } catch {
     const next = fallbackOrderNumber;
     fallbackOrderNumber += 1;
