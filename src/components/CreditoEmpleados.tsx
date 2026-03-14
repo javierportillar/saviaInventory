@@ -112,6 +112,8 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
   const [settlementOrder, setSettlementOrder] = useState<CreditOrderView | null>(null);
   const [settlementMethod, setSettlementMethod] = useState<SettlementPaymentMethod>('efectivo');
   const [settlementError, setSettlementError] = useState<string | null>(null);
+  const [expandedEmployeeKey, setExpandedEmployeeKey] = useState<string | null>(null);
+  const [expandedRangeEmployeeKey, setExpandedRangeEmployeeKey] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -403,15 +405,73 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
 
   const netoFiltrado = useMemo(() => totalCargos - totalAbonos, [totalCargos, totalAbonos]);
 
-  const totalsByEmployee = useMemo(() => {
-    return creditRecords
-      .map((record) => ({
-        key: record.empleadoId,
-        label: buildEmployeeLabel(record.empleadoId, record.empleadoNombre),
-        pendingBalance: Math.max(0, Math.round(record.total)),
-      }))
-      .sort((a, b) => b.pendingBalance - a.pendingBalance);
-  }, [creditRecords]);
+  const filteredPendingByEmployee = useMemo(() => {
+    const summaries = new Map<
+      string,
+      { key: string; label: string; pendingBalance: number; orders: CreditOrderView[] }
+    >();
+
+    filteredCreditOrders.forEach((entry) => {
+      const key = entry.employeeId ?? UNASSIGNED_EMPLOYEE_KEY;
+      const current = summaries.get(key) ?? {
+        key,
+        label: entry.employeeLabel,
+        pendingBalance: 0,
+        orders: [],
+      };
+
+      current.pendingBalance += entry.amount;
+      current.orders.push(entry);
+      summaries.set(key, current);
+    });
+
+    return Array.from(summaries.values()).sort((a, b) => b.pendingBalance - a.pendingBalance);
+  }, [filteredCreditOrders]);
+
+  const totalPendingByEmployee = useMemo(() => {
+    const summaries = new Map<
+      string,
+      { key: string; label: string; pendingBalance: number; orders: CreditOrderView[] }
+    >();
+
+    pendingCreditOrders.forEach((entry) => {
+      const key = entry.employeeId ?? UNASSIGNED_EMPLOYEE_KEY;
+      const current = summaries.get(key) ?? {
+        key,
+        label: entry.employeeLabel,
+        pendingBalance: 0,
+        orders: [],
+      };
+
+      current.pendingBalance += entry.amount;
+      current.orders.push(entry);
+      summaries.set(key, current);
+    });
+
+    return Array.from(summaries.values()).sort((a, b) => b.pendingBalance - a.pendingBalance);
+  }, [pendingCreditOrders]);
+
+  useEffect(() => {
+    if (!expandedEmployeeKey) {
+      return;
+    }
+
+    const exists = totalPendingByEmployee.some((entry) => entry.key === expandedEmployeeKey);
+    if (!exists) {
+      setExpandedEmployeeKey(null);
+    }
+  }, [expandedEmployeeKey, totalPendingByEmployee]);
+
+  useEffect(() => {
+    if (!expandedRangeEmployeeKey) {
+      return;
+    }
+
+    const exists = filteredPendingByEmployee.some((entry) => entry.key === expandedRangeEmployeeKey);
+    if (!exists) {
+      setExpandedRangeEmployeeKey(null);
+    }
+  }, [expandedRangeEmployeeKey, filteredPendingByEmployee]);
 
   const handleOpenSettlement = (entry: CreditOrderView) => {
     setSettlementOrder(entry);
@@ -901,29 +961,159 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
         <div className="ui-card">
           <div className="px-4 py-3 border-b border-gray-100">
             <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
-              Saldo pendiente por empleado
+              Saldo pendiente por empleado (TOTAL)
             </h3>
             <p className="text-xs text-gray-500">
-              Valor consumido y aún no pagado por cada colaborador.
+              Separa el total acumulado general del resumen calculado con el rango de fechas seleccionado.
             </p>
+            <div className="mt-3 space-y-2">
+              <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-gray-500">Total general acumulado</p>
+                <p className="text-lg font-semibold" style={{ color: COLORS.dark }}>
+                  {formatCOP(outstandingTotal)}
+                </p>
+              </div>
+              <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-amber-700">Total pendiente según rango de fechas</p>
+                <p className="text-lg font-semibold" style={{ color: COLORS.accent }}>
+                  {formatCOP(filteredPendingTotal)}
+                </p>
+              </div>
+            </div>
           </div>
           <div className="divide-y divide-gray-100">
-            {totalsByEmployee.length === 0 && (
+            <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Detallado total por empleado
+              </p>
+              <p className="text-[11px] text-gray-500">
+                Acumulado general de órdenes pendientes sin aplicar filtro de fechas.
+              </p>
+            </div>
+            {totalPendingByEmployee.length === 0 && (
               <p className="px-4 py-6 text-xs lg:text-sm text-gray-500 text-center">
-                No hay créditos pendientes registrados.
+                No hay créditos pendientes acumulados.
               </p>
             )}
-            {totalsByEmployee.map(({ key, label, pendingBalance }) => (
-              <div key={key} className="px-4 py-3 flex items-center justify-between text-sm">
-                <div className="flex flex-col">
-                  <span className="font-medium text-gray-600">{label}</span>
-                  <span className="text-[11px] uppercase tracking-wide text-gray-400">Saldo pendiente</span>
+            {totalPendingByEmployee.map(({ key, label, pendingBalance, orders: employeeOrders }) => {
+              const isExpanded = expandedEmployeeKey === key;
+
+              return (
+                <div key={`total-${key}`}>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedEmployeeKey(isExpanded ? null : key)}
+                    className="w-full px-4 py-3 flex items-center justify-between gap-3 text-sm hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex flex-col text-left">
+                      <span className="font-medium text-gray-600">{label}</span>
+                      <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                        {employeeOrders.length} orden{employeeOrders.length === 1 ? '' : 'es'} pendiente{employeeOrders.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <div className="flex flex-col items-end">
+                      <span className="font-semibold" style={{ color: COLORS.dark }}>
+                        {formatCOP(pendingBalance)}
+                      </span>
+                      <span className="text-[11px]" style={{ color: COLORS.accent }}>
+                        {isExpanded ? 'Ocultar detalle' : 'Ver detalle'}
+                      </span>
+                    </div>
+                  </button>
+                  {isExpanded && (
+                    <div className="px-4 pb-3 space-y-2">
+                      {employeeOrders.map((entry) => (
+                        <button
+                          key={`total-order-${entry.order.id}`}
+                          type="button"
+                          onClick={() => onViewOrder?.(entry.order)}
+                          disabled={!onViewOrder}
+                          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-left hover:border-blue-300 hover:bg-blue-50 transition-colors disabled:hover:border-gray-200 disabled:hover:bg-white disabled:cursor-default"
+                        >
+                          <div className="flex items-center justify-between gap-3 text-xs">
+                            <span className="font-semibold" style={{ color: COLORS.dark }}>
+                              {entry.order.numero ? `Pedido #${entry.order.numero}` : `Pedido ${entry.order.id.slice(0, 8)}`}
+                            </span>
+                            <span className="font-semibold" style={{ color: COLORS.accent }}>
+                              {formatCOP(entry.amount)}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[11px] text-gray-500">
+                            Asignado: {formatAssignedAt(entry.assignedAt)}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <span className="font-semibold" style={{ color: COLORS.dark }}>
-                  {formatCOP(pendingBalance)}
-                </span>
-              </div>
-            ))}
+              );
+            })}
+            <div className="px-4 py-3 bg-amber-50 border-y border-amber-100">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                Detallado por empleado según rango de fechas
+              </p>
+              <p className="text-[11px] text-amber-700">
+                Solo incluye órdenes pendientes dentro del filtro de fechas actual.
+              </p>
+            </div>
+            {filteredPendingByEmployee.length === 0 && (
+              <p className="px-4 py-6 text-xs lg:text-sm text-gray-500 text-center">
+                No hay créditos pendientes en el rango seleccionado.
+              </p>
+            )}
+            {filteredPendingByEmployee.map(({ key, label, pendingBalance, orders: employeeOrders }) => {
+              const isExpanded = expandedRangeEmployeeKey === key;
+
+              return (
+                <div key={`range-${key}`}>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedRangeEmployeeKey(isExpanded ? null : key)}
+                    className="w-full px-4 py-3 flex items-center justify-between gap-3 text-sm hover:bg-amber-50 transition-colors"
+                  >
+                    <div className="flex flex-col text-left">
+                      <span className="font-medium text-gray-600">{label}</span>
+                      <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                        {employeeOrders.length} orden{employeeOrders.length === 1 ? '' : 'es'} pendiente{employeeOrders.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <div className="flex flex-col items-end">
+                      <span className="font-semibold" style={{ color: COLORS.dark }}>
+                        {formatCOP(pendingBalance)}
+                      </span>
+                      <span className="text-[11px]" style={{ color: COLORS.accent }}>
+                        {isExpanded ? 'Ocultar detalle' : 'Ver detalle'}
+                      </span>
+                    </div>
+                  </button>
+                  {isExpanded && (
+                    <div className="px-4 pb-3 space-y-2">
+                      {employeeOrders.map((entry) => (
+                        <button
+                          key={`range-order-${entry.order.id}`}
+                          type="button"
+                          onClick={() => onViewOrder?.(entry.order)}
+                          disabled={!onViewOrder}
+                          className="w-full rounded-lg border border-amber-200 bg-amber-50/40 px-3 py-2 text-left hover:border-blue-300 hover:bg-blue-50 transition-colors disabled:hover:border-amber-200 disabled:hover:bg-amber-50/40 disabled:cursor-default"
+                        >
+                          <div className="flex items-center justify-between gap-3 text-xs">
+                            <span className="font-semibold" style={{ color: COLORS.dark }}>
+                              {entry.order.numero ? `Pedido #${entry.order.numero}` : `Pedido ${entry.order.id.slice(0, 8)}`}
+                            </span>
+                            <span className="font-semibold" style={{ color: COLORS.accent }}>
+                              {formatCOP(entry.amount)}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[11px] text-gray-500">
+                            Asignado: {formatAssignedAt(entry.assignedAt)}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>
