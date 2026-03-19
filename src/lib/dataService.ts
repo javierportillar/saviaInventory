@@ -21,6 +21,7 @@ import {
   DAY_KEYS,
   AppSettings,
   PayrollSettings,
+  MarketingStrategyRecord,
 } from '../types';
 import { supabase } from './supabaseClient';
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -98,6 +99,7 @@ const APP_SETTINGS_STORAGE_KEY = 'savia-app-settings';
 const APP_SETTINGS_DISCOUNT_KEY = 'caja_combo_descuento_bebidas';
 const PAYROLL_SETTINGS_STORAGE_KEY = 'savia-payroll-settings';
 const APP_SETTINGS_PAYROLL_KEY = 'empleados_nomina_config';
+const AI_STRATEGIES_STORAGE_KEY = 'savia-ai-strategies';
 const DEFAULT_APP_SETTINGS: AppSettings = {
   drinkComboDiscountEnabled: true,
   sandwichComboDiscountEnabled: true,
@@ -319,6 +321,191 @@ const persistLocalWeeklyHours = (empleadoId: string, weekKey: string, hours: Wee
   };
   current[empleadoId] = employeeWeeks;
   setLocalData(WEEKLY_HOURS_STORAGE_KEY, current);
+};
+
+const readLocalAIStrategies = (): MarketingStrategyRecord[] => {
+  const stored = getLocalData<MarketingStrategyRecord[]>(AI_STRATEGIES_STORAGE_KEY, []);
+  if (!Array.isArray(stored)) {
+    return [];
+  }
+
+  return stored
+    .filter((entry): entry is MarketingStrategyRecord => Boolean(
+      entry &&
+      typeof entry.id === 'string' &&
+      typeof entry.createdAt === 'string' &&
+      typeof entry.analysisStartDate === 'string' &&
+      typeof entry.analysisEndDate === 'string' &&
+      typeof entry.applyStartDate === 'string' &&
+      typeof entry.applyEndDate === 'string' &&
+      typeof entry.model === 'string' &&
+      typeof entry.orderCount === 'number' &&
+      typeof entry.totalSales === 'number' &&
+      typeof entry.content === 'string'
+    ))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+};
+
+const mapMarketingStrategyRecord = (record: any): MarketingStrategyRecord | null => {
+  if (!record || typeof record !== 'object') {
+    return null;
+  }
+
+  const id = typeof record.id === 'string' ? record.id : undefined;
+  const createdAtRaw = record.created_at ?? record.createdAt;
+  const createdAt = typeof createdAtRaw === 'string' ? createdAtRaw : undefined;
+  const analysisStartDate = typeof record.analysis_start_date === 'string'
+    ? record.analysis_start_date
+    : typeof record.analysisStartDate === 'string'
+      ? record.analysisStartDate
+      : undefined;
+  const analysisEndDate = typeof record.analysis_end_date === 'string'
+    ? record.analysis_end_date
+    : typeof record.analysisEndDate === 'string'
+      ? record.analysisEndDate
+      : undefined;
+  const applyStartDate = typeof record.apply_start_date === 'string'
+    ? record.apply_start_date
+    : typeof record.applyStartDate === 'string'
+      ? record.applyStartDate
+      : undefined;
+  const applyEndDate = typeof record.apply_end_date === 'string'
+    ? record.apply_end_date
+    : typeof record.applyEndDate === 'string'
+      ? record.applyEndDate
+      : undefined;
+  const model = typeof record.model === 'string' ? record.model : undefined;
+  const orderCount = Number(record.order_count ?? record.orderCount);
+  const totalSales = Number(record.total_sales ?? record.totalSales);
+  const content = typeof record.content === 'string' ? record.content : undefined;
+
+  if (
+    !id ||
+    !createdAt ||
+    !analysisStartDate ||
+    !analysisEndDate ||
+    !applyStartDate ||
+    !applyEndDate ||
+    !model ||
+    !Number.isFinite(orderCount) ||
+    !Number.isFinite(totalSales) ||
+    !content
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    createdAt,
+    analysisStartDate,
+    analysisEndDate,
+    applyStartDate,
+    applyEndDate,
+    model,
+    orderCount,
+    totalSales,
+    content,
+  };
+};
+
+export const fetchMarketingStrategies = async (): Promise<MarketingStrategyRecord[]> => {
+  if (await ensureSupabaseReady()) {
+    try {
+      const { data, error } = await supabase
+        .from('marketing_strategies')
+        .select(`
+          id,
+          created_at,
+          analysis_start_date,
+          analysis_end_date,
+          apply_start_date,
+          apply_end_date,
+          model,
+          order_count,
+          total_sales,
+          content
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      const strategies = (data ?? [])
+        .map((entry) => mapMarketingStrategyRecord(entry))
+        .filter((entry): entry is MarketingStrategyRecord => entry !== null);
+
+      if (strategies.length > 0) {
+        setLocalData(AI_STRATEGIES_STORAGE_KEY, strategies);
+      }
+
+      return strategies;
+    } catch (error) {
+      console.warn('[dataService] No se pudieron cargar las estrategias de marketing desde Supabase. Usando fallback local.', error);
+    }
+  }
+
+  return readLocalAIStrategies();
+};
+
+export const saveMarketingStrategy = async (
+  strategy: Omit<MarketingStrategyRecord, 'id' | 'createdAt'>
+): Promise<MarketingStrategyRecord> => {
+  const record: MarketingStrategyRecord = {
+    ...strategy,
+    id: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+  };
+
+  if (await ensureSupabaseReady()) {
+    try {
+      const payload = {
+        id: record.id,
+        analysis_start_date: record.analysisStartDate,
+        analysis_end_date: record.analysisEndDate,
+        apply_start_date: record.applyStartDate,
+        apply_end_date: record.applyEndDate,
+        model: record.model,
+        order_count: record.orderCount,
+        total_sales: record.totalSales,
+        content: record.content,
+      };
+
+      const { data, error } = await supabase
+        .from('marketing_strategies')
+        .insert(payload)
+        .select(`
+          id,
+          created_at,
+          analysis_start_date,
+          analysis_end_date,
+          apply_start_date,
+          apply_end_date,
+          model,
+          order_count,
+          total_sales,
+          content
+        `)
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      const saved = mapMarketingStrategyRecord(data);
+      if (saved) {
+        const current = readLocalAIStrategies().filter((entry) => entry.id !== saved.id);
+        setLocalData(AI_STRATEGIES_STORAGE_KEY, [saved, ...current]);
+        return saved;
+      }
+    } catch (error) {
+      console.warn('[dataService] No se pudo guardar la estrategia en Supabase. Guardando local.', error);
+    }
+  }
+
+  const current = readLocalAIStrategies().filter((entry) => entry.id !== record.id);
+  setLocalData(AI_STRATEGIES_STORAGE_KEY, [record, ...current]);
+  return record;
 };
 
 const mapSupabaseCreditHistoryEntry = (record: any): EmployeeCreditHistoryEntry | null => {
@@ -4536,6 +4723,8 @@ export const dataService = {
   saveAppSettings,
   fetchPayrollSettings,
   savePayrollSettings,
+  fetchMarketingStrategies,
+  saveMarketingStrategy,
   checkDatabaseConnection,
 } as const;
 

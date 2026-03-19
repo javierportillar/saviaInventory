@@ -248,6 +248,19 @@ export interface BalanceResumen {
   saldoProvisionCajaAcumulado?: number;
 }
 
+export interface MarketingStrategyRecord {
+  id: string;
+  createdAt: string;
+  analysisStartDate: string;
+  analysisEndDate: string;
+  applyStartDate: string;
+  applyEndDate: string;
+  model: string;
+  orderCount: number;
+  totalSales: number;
+  content: string;
+}
+
 export interface AppSettings {
   drinkComboDiscountEnabled: boolean;
   sandwichComboDiscountEnabled: boolean;

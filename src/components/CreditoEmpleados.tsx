@@ -813,7 +813,7 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
       </section>
 
       <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="xl:col-span-2 ui-card">
+        <div className="order-2 xl:order-1 xl:col-span-2 ui-card">
           <div className="px-4 py-3 border-b border-gray-100 space-y-3">
             <div>
               <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
@@ -958,7 +958,7 @@ export function CreditoEmpleados({ orders, onSettleCredit, onViewOrder }: Credit
           </div>
         </div>
 
-        <div className="ui-card">
+        <div className="order-1 xl:order-2 ui-card">
           <div className="px-4 py-3 border-b border-gray-100">
             <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
               Saldo pendiente por empleado (TOTAL)

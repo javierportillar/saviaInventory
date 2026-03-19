@@ -75,6 +75,13 @@ const getQuantityStep = (
   return inventarioTipo === 'cantidad' ? '1' : '1';
 };
 
+const roundCurrencyAmount = (value: number): number => {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.round(value);
+};
+
 const normalizeTypedQuantity = (
   value: number,
   inventarioTipo?: 'cantidad' | 'peso'
@@ -94,9 +101,9 @@ const getQuantityUnitLabel = (item: { inventarioTipo?: 'cantidad' | 'peso'; unid
 
 const getDraftItemSubtotal = (item: Pick<DraftInventoryItem, 'cantidad' | 'precioUnitario' | 'inventarioTipo'>): number => {
   if (item.inventarioTipo === 'peso') {
-    return item.precioUnitario;
+    return roundCurrencyAmount(item.precioUnitario);
   }
-  return item.cantidad * item.precioUnitario;
+  return roundCurrencyAmount(item.cantidad * item.precioUnitario);
 };
 
 const getNormalizedDraftUnitCost = (item: Pick<DraftInventoryItem, 'cantidad' | 'precioUnitario' | 'inventarioTipo'>): number => {
@@ -114,9 +121,9 @@ const getNormalizedDraftUnitCost = (item: Pick<DraftInventoryItem, 'cantidad' | 
 const getGastoInventarioItemSubtotal = (item: GastoInventarioItem): number => {
   const price = Math.max(0, Number(item.precioUnitario ?? 0));
   if (item.inventarioTipo === 'peso') {
-    return price;
+    return roundCurrencyAmount(price);
   }
-  return Math.max(0, Number(item.cantidad ?? 0)) * price;
+  return roundCurrencyAmount(Math.max(0, Number(item.cantidad ?? 0)) * price);
 };
 
 const formatGastoInventarioItemDetail = (item: GastoInventarioItem): string => {
@@ -182,7 +189,7 @@ export function Gastos({ focusRequest, onInventoryChanged }: GastosProps) {
   }, [inventariables, inventorySearch]);
 
   const inventarioTotal = useMemo(
-    () => selectedInventoryItems.reduce((acc, item) => acc + getDraftItemSubtotal(item), 0),
+    () => roundCurrencyAmount(selectedInventoryItems.reduce((acc, item) => acc + getDraftItemSubtotal(item), 0)),
     [selectedInventoryItems]
   );
 
@@ -392,7 +399,7 @@ export function Gastos({ focusRequest, onInventoryChanged }: GastosProps) {
         const payload: Gasto = {
           id: crypto.randomUUID(),
           descripcion: formData.descripcion,
-          monto: inventarioTotal,
+          monto: roundCurrencyAmount(inventarioTotal),
           categoria: 'Inventario',
           fecha,
           metodoPago: formData.metodoPago,
@@ -660,7 +667,7 @@ export function Gastos({ focusRequest, onInventoryChanged }: GastosProps) {
                     type="number"
                     required
                     min="0"
-                    step="100"
+                    step="1"
                     value={
                       formData.tipoRegistro === 'inventariable'
                         ? inventarioTotal
@@ -782,7 +789,7 @@ export function Gastos({ focusRequest, onInventoryChanged }: GastosProps) {
                       <input
                         type="number"
                         min="0"
-                        step="100"
+                        step="any"
                         value={pendingPrecio === 0 ? '' : pendingPrecio}
                         onChange={(e) => setPendingPrecio(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
@@ -868,7 +875,7 @@ export function Gastos({ focusRequest, onInventoryChanged }: GastosProps) {
                             <input
                               type="number"
                               min="0"
-                              step="100"
+                              step="any"
                               value={item.precioUnitario === 0 ? '' : item.precioUnitario}
                               onChange={(e) => updateDraftItem(item.menuItemId, { precioUnitario: Math.max(0, parseFloat(e.target.value) || 0) })}
                               className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"

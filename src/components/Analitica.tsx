@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarCheck, CalendarRange, Calculator, ShoppingBag, TrendingUp, Trophy, PieChart, X } from 'lucide-react';
+import { CalendarCheck, CalendarRange, Calculator, ShoppingBag, TrendingUp, Trophy, PieChart, X, Sparkles } from 'lucide-react';
 import { Gasto, Order } from '../types';
 import { COLORS } from '../data/menu';
 import { formatCOP, formatDateInputValue, parseDateInputValue } from '../utils/format';
+import { getOrderAllocations } from '../utils/payments';
 import dataService from '../lib/dataService';
+import { AIStrategyModal } from './AIStrategyModal';
 
 interface AnaliticaProps {
   orders: Order[];
@@ -47,6 +49,18 @@ type PaymentBreakdownEntry = {
 type PaymentMethodOrderEntry = {
   order: Order;
   amount: number;
+};
+
+type MarketingInsight = {
+  title: string;
+  detail: string;
+  action: string;
+};
+
+type CategorySummary = {
+  category: string;
+  amount: number;
+  quantity: number;
 };
 
 const GRID_COLOR = '#e5e7eb';
@@ -433,6 +447,83 @@ const getNormalizedRange = (startInput: string, endInput: string) => {
   return { start: normalizedStart, end: normalizedEnd };
 };
 
+const getPreviousRange = (start: Date, end: Date) => {
+  const rangeMs = end.getTime() - start.getTime();
+  const previousEnd = new Date(start.getTime() - 1);
+  previousEnd.setHours(23, 59, 59, 999);
+  const previousStart = new Date(previousEnd.getTime() - rangeMs);
+  previousStart.setHours(0, 0, 0, 0);
+  return { start: previousStart, end: previousEnd };
+};
+
+const getPercentChange = (current: number, previous: number) => {
+  if (previous <= 0) {
+    return current > 0 ? 100 : 0;
+  }
+  return ((current - previous) / previous) * 100;
+};
+
+const getOrdersInRange = (orders: Order[], start: Date, end: Date) =>
+  orders.filter((order) => {
+    const timestamp = order.timestamp.getTime();
+    return timestamp >= start.getTime() && timestamp <= end.getTime();
+  });
+
+const summarizeCategories = (orders: Order[]) => {
+  const totals = new Map<string, CategorySummary>();
+
+  orders.forEach((order) => {
+    order.items.forEach(({ item, cantidad, precioUnitario }) => {
+      const category = item.categoria?.trim() || 'Sin categoría';
+      const unitPrice = typeof precioUnitario === 'number' ? precioUnitario : item.precio;
+      const itemTotal = cantidad * unitPrice;
+      const entry = totals.get(category) ?? { category, amount: 0, quantity: 0 };
+      entry.amount += itemTotal;
+      entry.quantity += cantidad;
+      totals.set(category, entry);
+    });
+  });
+
+  return Array.from(totals.values()).sort((a, b) => b.amount - a.amount);
+};
+
+const summarizeItems = (orders: Order[]) => {
+  const totals = new Map<string, { name: string; quantity: number; amount: number }>();
+
+  orders.forEach((order) => {
+    order.items.forEach(({ item, cantidad, precioUnitario }) => {
+      const key = item.id || item.nombre;
+      const unitPrice = typeof precioUnitario === 'number' ? precioUnitario : item.precio;
+      const itemTotal = cantidad * unitPrice;
+      const entry = totals.get(key) ?? { name: item.nombre, quantity: 0, amount: 0 };
+      entry.name = item.nombre;
+      entry.quantity += cantidad;
+      entry.amount += itemTotal;
+      totals.set(key, entry);
+    });
+  });
+
+  return Array.from(totals.values()).sort((a, b) => b.amount - a.amount);
+};
+
+const getRealIncomeFromOrder = (order: Order): number => {
+  const allocations = getOrderAllocations(order);
+  if (allocations.length > 0) {
+    return allocations.reduce((sum, entry) => {
+      if (entry.metodo === 'credito_empleados') {
+        return sum;
+      }
+      return sum + entry.monto;
+    }, 0);
+  }
+
+  if (order.metodoPago === 'credito_empleados') {
+    return 0;
+  }
+
+  return order.total;
+};
+
 export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
   const today = useMemo(() => {
     const now = new Date();
@@ -449,9 +540,12 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
   const [startDate, setStartDate] = useState<string>(defaultStart);
   const [endDate, setEndDate] = useState<string>(today);
   const [singleDate, setSingleDate] = useState<string>(today);
+  const [marketingStartDate, setMarketingStartDate] = useState<string>(defaultStart);
+  const [marketingEndDate, setMarketingEndDate] = useState<string>(today);
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [financialZoom, setFinancialZoom] = useState<'7' | '30' | '90' | 'all'>('30');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
+  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -475,7 +569,7 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
   }, []);
 
   const historicalTotal = useMemo(
-    () => orders.reduce((sum, order) => sum + order.total, 0),
+    () => orders.reduce((sum, order) => sum + getRealIncomeFromOrder(order), 0),
     [orders]
   );
 
@@ -525,7 +619,7 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
   );
 
   const totalSales = useMemo(
-    () => filteredOrders.reduce((sum, order) => sum + order.total, 0),
+    () => filteredOrders.reduce((sum, order) => sum + getRealIncomeFromOrder(order), 0),
     [filteredOrders]
   );
 
@@ -542,8 +636,9 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
     filteredOrders.forEach(order => {
       const hour = order.timestamp.getHours();
       const current = summary.get(hour) ?? { orders: 0, total: 0 };
+      const realIncome = getRealIncomeFromOrder(order);
       current.orders += 1;
-      current.total += order.total;
+      current.total += realIncome;
       summary.set(hour, current);
     });
 
@@ -607,7 +702,7 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
     filteredOrders.forEach(order => {
       const dateKey = formatDateInputValue(order.timestamp);
       const entry = summary.get(dateKey) ?? { sales: 0, expenses: 0 };
-      entry.sales += order.total;
+      entry.sales += getRealIncomeFromOrder(order);
       summary.set(dateKey, entry);
     });
 
@@ -740,7 +835,7 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
     filteredOrders.forEach(order => {
       const dateKey = formatDateInputValue(order.timestamp);
       const entry = summaryMap.get(dateKey) ?? { total: 0, orders: 0 };
-      entry.total += order.total;
+      entry.total += getRealIncomeFromOrder(order);
       entry.orders += 1;
       summaryMap.set(dateKey, entry);
     });
@@ -759,26 +854,241 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
   }, [filteredOrders]);
 
   const topItems = useMemo(() => {
-    const totals = new Map<string, { name: string; quantity: number; amount: number }>();
+    return summarizeItems(filteredOrders).slice(0, 5);
+  }, [filteredOrders]);
 
-    filteredOrders.forEach(order => {
-      order.items.forEach(({ item, cantidad, precioUnitario }) => {
-        const key = item.id || item.nombre;
-        const unitPrice = typeof precioUnitario === 'number' ? precioUnitario : item.precio;
-        const itemTotal = cantidad * unitPrice;
+  const lowItems = useMemo(() => {
+    return summarizeItems(filteredOrders)
+      .filter((item) => item.quantity > 0 && item.quantity <= 3)
+      .sort((a, b) => {
+        if (a.quantity === b.quantity) {
+          return a.amount - b.amount;
+        }
+        return a.quantity - b.quantity;
+      });
+  }, [filteredOrders]);
 
-        const entry = totals.get(key) ?? { name: item.nombre, quantity: 0, amount: 0 };
-        entry.name = item.nombre;
-        entry.quantity += cantidad;
-        entry.amount += itemTotal;
-        totals.set(key, entry);
+  const topCategories = useMemo(() => {
+    return summarizeCategories(filteredOrders).slice(0, 4);
+  }, [filteredOrders]);
+
+  const historicalCategoryTotals = useMemo(() => {
+    return summarizeCategories(orders);
+  }, [orders]);
+
+  const marketingRangeBoundaries = useMemo(
+    () => getNormalizedRange(marketingStartDate, marketingEndDate),
+    [marketingStartDate, marketingEndDate]
+  );
+  const marketingRangeStart = marketingRangeBoundaries.start;
+  const marketingRangeEnd = marketingRangeBoundaries.end;
+
+  const marketingFilteredOrders = useMemo(
+    () => getOrdersInRange(orders, marketingRangeStart, marketingRangeEnd),
+    [orders, marketingRangeStart, marketingRangeEnd]
+  );
+
+  const marketingTotalSales = useMemo(
+    () => marketingFilteredOrders.reduce((sum, order) => sum + getRealIncomeFromOrder(order), 0),
+    [marketingFilteredOrders]
+  );
+  const marketingOrderCount = marketingFilteredOrders.length;
+  const marketingAverageTicket = marketingOrderCount > 0 ? marketingTotalSales / marketingOrderCount : 0;
+  const marketingTopCategories = useMemo(
+    () => summarizeCategories(marketingFilteredOrders).slice(0, 4),
+    [marketingFilteredOrders]
+  );
+  const marketingTopItems = useMemo(
+    () => summarizeItems(marketingFilteredOrders).slice(0, 5),
+    [marketingFilteredOrders]
+  );
+  const marketingHourlyBreakdown = useMemo(() => {
+    const summary = new Map<number, { orders: number; total: number }>();
+
+    marketingFilteredOrders.forEach((order) => {
+      const hour = order.timestamp.getHours();
+      const current = summary.get(hour) ?? { orders: 0, total: 0 };
+      current.orders += 1;
+      current.total += getRealIncomeFromOrder(order);
+      summary.set(hour, current);
+    });
+
+    const dataset = Array.from({ length: 24 }, (_, hour) => {
+      const label = `${hour.toString().padStart(2, '0')}:00`;
+      const entry = summary.get(hour);
+      return {
+        hour,
+        label,
+        orders: entry?.orders ?? 0,
+        total: entry?.total ?? 0,
+      };
+    });
+
+    const busiest = dataset
+      .filter((entry) => entry.orders > 0)
+      .sort((a, b) => {
+        if (b.orders === a.orders) {
+          return b.total - a.total;
+        }
+        return b.orders - a.orders;
+      })
+      .slice(0, 3);
+
+    return { busiest };
+  }, [marketingFilteredOrders]);
+
+  const marketingPaymentBreakdown = useMemo(() => {
+    const summary: Record<string, number> = {};
+    marketingFilteredOrders.forEach((order) => {
+      const allocations = getOrderAllocations(order);
+      if (allocations.length === 0) {
+        summary.sin_registro = (summary.sin_registro ?? 0) + order.total;
+        return;
+      }
+      allocations.forEach((allocation) => {
+        summary[allocation.metodo] = (summary[allocation.metodo] ?? 0) + allocation.monto;
       });
     });
 
-    return Array.from(totals.values())
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 5);
-  }, [filteredOrders]);
+    return Object.entries(summary).map(([method, amount]) => ({ method, amount }));
+  }, [marketingFilteredOrders]);
+
+  const marketingComparisonWindow = useMemo(() => {
+    const previousRange = getPreviousRange(marketingRangeStart, marketingRangeEnd);
+    return {
+      currentStart: marketingRangeStart,
+      currentEnd: marketingRangeEnd,
+      previousStart: previousRange.start,
+      previousEnd: previousRange.end,
+    };
+  }, [marketingRangeStart, marketingRangeEnd]);
+
+  const marketingComparisonMetrics = useMemo(() => {
+    const previousOrders = getOrdersInRange(orders, marketingComparisonWindow.previousStart, marketingComparisonWindow.previousEnd);
+    const previousSales = previousOrders.reduce((sum, order) => sum + getRealIncomeFromOrder(order), 0);
+    const previousOrderCount = previousOrders.length;
+    const previousAverageTicket = previousOrderCount > 0 ? previousSales / previousOrderCount : 0;
+    const previousTopCategories = summarizeCategories(previousOrders);
+    const previousTopItems = summarizeItems(previousOrders);
+
+    return {
+      previousOrders,
+      previousSales,
+      previousOrderCount,
+      previousAverageTicket,
+      previousTopCategories,
+      previousTopItems,
+      salesChangePct: getPercentChange(marketingTotalSales, previousSales),
+      orderChangePct: getPercentChange(marketingOrderCount, previousOrderCount),
+      ticketChangePct: getPercentChange(marketingAverageTicket, previousAverageTicket),
+    };
+  }, [orders, marketingComparisonWindow, marketingTotalSales, marketingOrderCount, marketingAverageTicket]);
+
+  const nextPeriodLabel = useMemo(() => {
+    const days = Math.max(1, Math.floor((marketingRangeEnd.getTime() - marketingRangeStart.getTime()) / 86400000) + 1);
+    if (days <= 8) {
+      return 'la próxima semana';
+    }
+    if (days <= 31) {
+      return 'el próximo tramo del mes';
+    }
+    return 'el siguiente periodo';
+  }, [marketingRangeStart, marketingRangeEnd]);
+
+  const marketingPeriodDescription = useMemo(
+    () => formatRangeLabel(marketingRangeStart, marketingRangeEnd),
+    [marketingRangeStart, marketingRangeEnd]
+  );
+
+  const marketingInsights = useMemo(() => {
+    const insights: MarketingInsight[] = [];
+
+    if (marketingOrderCount === 0) {
+      return insights;
+    }
+
+    const topCategory = marketingTopCategories[0];
+    const secondCategory = marketingTopCategories[1];
+    const topItem = marketingTopItems[0];
+    const lowTicketThreshold = 22000;
+    const hasEmployeeCreditSales = marketingPaymentBreakdown.some((entry) => entry.method === 'credito_empleados' && entry.amount > 0);
+    const historicalAveragePerOrder = orders.length > 0 ? historicalTotal / orders.length : 0;
+    const historicalTopCategory = historicalCategoryTotals[0];
+    const currentVsHistoricalTicketDelta = historicalAveragePerOrder > 0
+      ? ((marketingAverageTicket - historicalAveragePerOrder) / historicalAveragePerOrder) * 100
+      : 0;
+    const currentTopCategory = marketingTopCategories[0];
+    const previousTopCategory = marketingComparisonMetrics.previousTopCategories[0];
+    const currentTopItem = marketingTopItems[0];
+    const previousTopItem = marketingComparisonMetrics.previousTopItems[0];
+
+    insights.push({
+      title: `Objetivo comercial para ${nextPeriodLabel}`,
+      detail: `Ventas ${marketingComparisonMetrics.salesChangePct >= 0 ? 'subieron' : 'cayeron'} ${Math.abs(marketingComparisonMetrics.salesChangePct).toFixed(1)}% frente al periodo anterior equivalente. Los pedidos ${marketingComparisonMetrics.orderChangePct >= 0 ? 'variaron al alza' : 'bajaron'} ${Math.abs(marketingComparisonMetrics.orderChangePct).toFixed(1)}%.`,
+      action:
+        marketingComparisonMetrics.salesChangePct < 0
+          ? `La próxima semana enfoca la campaña en recuperar volumen: una oferta principal, una franja horaria clara y seguimiento diario al número de pedidos.`
+          : `La próxima semana enfoca la campaña en sostener el volumen y mejorar margen con upselling sobre lo que ya está funcionando.`,
+    });
+
+    if (currentTopCategory) {
+      const topCategoryHistorical = historicalCategoryTotals.find((entry) => entry.category === currentTopCategory.category);
+      const topCategoryShareInHistory = topCategoryHistorical && historicalTopCategory
+        ? (topCategoryHistorical.amount / historicalTopCategory.amount) * 100
+        : 0;
+      insights.push({
+        title: `Define el ancla comercial de ${nextPeriodLabel}`,
+        detail: `${currentTopCategory.category} lidera el periodo actual con ${formatCOP(Math.round(currentTopCategory.amount))}${previousTopCategory ? `, mientras que en el periodo anterior lideró ${previousTopCategory.category}.` : '.'}`,
+        action: `Para ${nextPeriodLabel}, pon ${currentTopCategory.category} como frente de campaña y acompáñala con un combo visible. ${topCategoryShareInHistory > 80 ? 'Es una línea estable, así que puedes repetirla sin riesgo alto.' : 'Úsala como prueba controlada y mide si repite la tracción actual.'}`,
+      });
+    }
+
+    if (currentTopItem) {
+      insights.push({
+        title: `Usa ${currentTopItem.name} como gancho para la siguiente campaña`,
+        detail: `${currentTopItem.name} es el producto más vendido del periodo con ${currentTopItem.quantity} unidades${previousTopItem ? `; en el periodo anterior lideró ${previousTopItem.name}` : ''}.`,
+        action: `Promociónalo la próxima semana en Instagram, estados y caja como "el más pedido". No lo anuncies solo: súmale bebida, postre o topping para que arrastre ticket.`,
+      });
+    }
+
+    if (averageTicket > 0) {
+      insights.push({
+        title: marketingAverageTicket < historicalAveragePerOrder ? 'La próxima semana debe enfocarse en subir ticket' : 'La próxima semana puede enfocarse en mantener ticket y aumentar volumen',
+        detail: `El ticket promedio actual es ${formatCOP(Math.round(marketingAverageTicket))}, el histórico general es ${formatCOP(Math.round(historicalAveragePerOrder))} y el periodo anterior equivalente fue ${formatCOP(Math.round(marketingComparisonMetrics.previousAverageTicket))}.`,
+        action:
+          marketingAverageTicket < lowTicketThreshold || currentVsHistoricalTicketDelta < 0 || marketingComparisonMetrics.ticketChangePct < 0
+            ? `Para ${nextPeriodLabel}, activa combos cerrados y guion de venta en caja para bebida/postre. La meta debe ser recuperar al menos ${Math.abs(Math.min(currentVsHistoricalTicketDelta, marketingComparisonMetrics.ticketChangePct)).toFixed(1)}% del ticket perdido.`
+            : `Para ${nextPeriodLabel}, conserva el combo actual y mueve más tráfico en horas valle, porque el ticket ya está por encima o cerca del histórico.`,
+      });
+    }
+
+    if (marketingHourlyBreakdown.busiest.length > 0) {
+      const busiestHour = marketingHourlyBreakdown.busiest[0];
+      insights.push({
+        title: `Programa la comunicación antes de la hora que más convierte`,
+        detail: `${busiestHour.label} fue la franja más activa del periodo con ${busiestHour.orders} pedidos.`,
+        action: `Para ${nextPeriodLabel}, publica contenido y recordatorios entre 60 y 90 minutos antes de ${busiestHour.label}. Esa es la ventana más probable para convertir mejor.`,
+      });
+    }
+
+    if (secondCategory) {
+      insights.push({
+        title: `Planea venta cruzada con las dos familias más activas`,
+        detail: `${currentTopCategory?.category ?? 'La categoría principal'} y ${secondCategory.category} son las categorías con mejor movimiento en el periodo.`,
+        action: `Diseña la estrategia de ${nextPeriodLabel} alrededor de una dupla: producto principal de ${currentTopCategory?.category ?? 'la línea líder'} + complemento de ${secondCategory.category}. Usa esa combinación en caja y redes.`,
+      });
+    }
+
+    if (hasEmployeeCreditSales) {
+      insights.push({
+        title: 'No confundas venta con caja para la estrategia siguiente',
+        detail: 'En el periodo hubo crédito empleados, así que parte de la venta no es ingreso inmediato.',
+        action: `Para ${nextPeriodLabel}, define promociones e inventario usando ventas reales cobradas, no solo la venta bruta. Así evitas sobreestimar caja disponible.`,
+      });
+    }
+
+    return insights.slice(0, 6);
+  }, [marketingOrderCount, marketingTopCategories, marketingTopItems, marketingAverageTicket, marketingPaymentBreakdown, marketingHourlyBreakdown, orders.length, historicalTotal, historicalCategoryTotals, nextPeriodLabel, marketingComparisonMetrics]);
 
   const periodDescription = useMemo(() => {
     if (filterMode === 'single') {
@@ -871,11 +1181,20 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
             Analiza el desempeño histórico y descubre tendencias por rangos personalizados o fechas específicas.
           </p>
         </div>
-        <div className="ui-card p-3 text-right">
-          <p className="text-xs uppercase tracking-wide text-gray-500">Total histórico registrado</p>
-          <p className="text-lg font-semibold mt-1" style={{ color: COLORS.dark }}>
-            {formatCOP(historicalTotal)}
-          </p>
+        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-4">
+          <button
+            onClick={() => setIsAIModalOpen(true)}
+            className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-indigo-700 hover:shadow"
+          >
+            <Sparkles size={18} />
+            Estrategia IA
+          </button>
+          <div className="ui-card p-3 text-right">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Total histórico registrado</p>
+            <p className="text-lg font-semibold mt-1" style={{ color: COLORS.dark }}>
+              {formatCOP(historicalTotal)}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -1245,19 +1564,46 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
             Productos más vendidos
           </h3>
           {topItems.length > 0 ? (
-            <ul className="space-y-3 text-sm">
-              {topItems.map((item) => (
-                <li key={item.name} className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-700">{item.name}</p>
-                    <p className="text-xs text-gray-500">{item.quantity} unidades</p>
-                  </div>
-                  <span className="font-semibold" style={{ color: COLORS.dark }}>
-                    {formatCOP(item.amount)}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <div className="space-y-6">
+              <ul className="space-y-3 text-sm">
+                {topItems.map((item) => (
+                  <li key={`top-${item.name}`} className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-gray-700">{item.name}</p>
+                      <p className="text-xs text-gray-500">{item.quantity} unidades</p>
+                    </div>
+                    <span className="font-semibold" style={{ color: COLORS.dark }}>
+                      {formatCOP(item.amount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="border-t border-gray-100 pt-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">
+                  Productos menos vendidos
+                </h4>
+                {lowItems.length > 0 ? (
+                  <ul className="space-y-3 text-sm">
+                    {lowItems.map((item) => (
+                      <li key={`low-${item.name}`} className="flex items-center justify-between">
+                        <div>
+                          <p className="font-medium text-gray-700">{item.name}</p>
+                          <p className="text-xs text-gray-500">{item.quantity} unidades</p>
+                        </div>
+                        <span className="font-semibold text-gray-500">
+                          {formatCOP(item.amount)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-gray-500">
+                    No hay suficientes ventas para identificar productos de baja rotación.
+                  </p>
+                )}
+              </div>
+            </div>
           ) : (
             <p className="text-sm text-gray-500">No hay ventas registradas para calcular este ranking.</p>
           )}
@@ -1355,6 +1701,12 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
           </div>
         </div>
       )}
+
+      <AIStrategyModal 
+        isOpen={isAIModalOpen}
+        onClose={() => setIsAIModalOpen(false)}
+        orders={orders}
+      />
     </section>
   );
 }

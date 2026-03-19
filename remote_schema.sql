@@ -348,6 +348,17 @@ SET default_tablespace = '';
 SET default_table_access_method = "heap";
 
 
+CREATE TABLE IF NOT EXISTS "public"."app_settings" (
+    "key" "text" NOT NULL,
+    "value_json" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."app_settings" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."caja_movimientos" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "fecha" "date" DEFAULT CURRENT_DATE,
@@ -482,7 +493,10 @@ ALTER TABLE "public"."caja_transferencias" OWNER TO "postgres";
 CREATE TABLE IF NOT EXISTS "public"."customers" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "nombre" "text" NOT NULL,
-    "telefono" "text" NOT NULL
+    "telefono" "text" NOT NULL,
+    "direccion" "text",
+    "edad" integer,
+    CONSTRAINT "customers_edad_check" CHECK ((("edad" IS NULL) OR (("edad" >= 0) AND ("edad" <= 120))))
 );
 
 
@@ -500,7 +514,11 @@ CREATE TABLE IF NOT EXISTS "public"."empleados" (
     "activo" boolean DEFAULT true,
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),
-    "horario_base" "jsonb"
+    "horario_base" "jsonb",
+    "tipo_contrato" "text" DEFAULT 'por_horas'::"text" NOT NULL,
+    "salario_mensual" numeric DEFAULT 0 NOT NULL,
+    "incluye_auxilio_transporte" boolean DEFAULT true NOT NULL,
+    CONSTRAINT "empleados_tipo_contrato_check" CHECK (("tipo_contrato" = ANY (ARRAY['por_horas'::"text", 'salario_fijo'::"text"])))
 );
 
 
@@ -699,6 +717,11 @@ CREATE TABLE IF NOT EXISTS "public"."users" (
 ALTER TABLE "public"."users" OWNER TO "postgres";
 
 
+ALTER TABLE ONLY "public"."app_settings"
+    ADD CONSTRAINT "app_settings_pkey" PRIMARY KEY ("key");
+
+
+
 ALTER TABLE ONLY "public"."caja_bolsillos"
     ADD CONSTRAINT "caja_bolsillos_pkey" PRIMARY KEY ("codigo");
 
@@ -851,6 +874,10 @@ CREATE OR REPLACE TRIGGER "trg_update_employee_weekly_hours_updated_at" BEFORE U
 
 
 
+CREATE OR REPLACE TRIGGER "update_app_settings_updated_at" BEFORE UPDATE ON "public"."app_settings" FOR EACH ROW EXECUTE FUNCTION "public"."update_updated_at_column"();
+
+
+
 CREATE OR REPLACE TRIGGER "update_empleados_updated_at" BEFORE UPDATE ON "public"."empleados" FOR EACH ROW EXECUTE FUNCTION "public"."update_updated_at_column"();
 
 
@@ -954,6 +981,9 @@ ALTER TABLE ONLY "public"."product_suggestions"
 
 
 
+ALTER TABLE "public"."app_settings" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."caja_movimientos" ENABLE ROW LEVEL SECURITY;
 
 
@@ -986,6 +1016,10 @@ CREATE POLICY "product_suggestions_insert" ON "public"."product_suggestions" FOR
 
 
 CREATE POLICY "product_suggestions_select" ON "public"."product_suggestions" FOR SELECT USING (true);
+
+
+
+CREATE POLICY "public_all_app_settings" ON "public"."app_settings" USING (true) WITH CHECK (true);
 
 
 
@@ -1116,6 +1150,12 @@ GRANT ALL ON FUNCTION "public"."update_employee_weekly_hours_updated_at"() TO "s
 GRANT ALL ON FUNCTION "public"."update_updated_at_column"() TO "anon";
 GRANT ALL ON FUNCTION "public"."update_updated_at_column"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."update_updated_at_column"() TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."app_settings" TO "anon";
+GRANT ALL ON TABLE "public"."app_settings" TO "authenticated";
+GRANT ALL ON TABLE "public"."app_settings" TO "service_role";
 
 
 

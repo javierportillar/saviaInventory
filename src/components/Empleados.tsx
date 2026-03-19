@@ -102,6 +102,7 @@ export function Empleados({ user }: EmpleadosProps) {
   const [historyState, setHistoryState] = useState<Record<string, HistoryState>>({});
   const loadedWeeksRef = useRef<Set<string>>(new Set());
   const [showGeneralHistory, setShowGeneralHistory] = useState(false);
+  const [selectedPayrollEmployee, setSelectedPayrollEmployee] = useState<Empleado | null>(null);
 
   const refreshEmployeeCredits = useCallback(async () => {
     try {
@@ -169,6 +170,10 @@ export function Empleados({ user }: EmpleadosProps) {
           next[id] = history || {};
         });
         setEmployeeHoursHistory(next);
+        setHorariosSemanales(next);
+        Object.keys(next).forEach((empleadoId) => {
+          Object.keys(next[empleadoId] || {}).forEach((weekKey) => loadedWeeksRef.current.add(weekKey));
+        });
       } catch (error) {
         console.error('Error cargando historial de horas para nómina:', error);
       } finally {
@@ -583,6 +588,13 @@ export function Empleados({ user }: EmpleadosProps) {
       employeeWeeks[weekKey] = sanitized;
       return { ...prev, [empleadoId]: employeeWeeks };
     });
+    setEmployeeHoursHistory(prev => {
+      const employeeWeeks: EmployeeWeeklyRecords = {
+        ...(prev[empleadoId] || {})
+      };
+      employeeWeeks[weekKey] = sanitized;
+      return { ...prev, [empleadoId]: employeeWeeks };
+    });
 
     setModalWeeklyHours(sanitized);
 
@@ -620,6 +632,7 @@ export function Empleados({ user }: EmpleadosProps) {
           updated[empleadoId] = employeeWeeks;
           return updated;
         });
+        setEmployeeHoursHistory(prev => ({ ...prev, [empleadoId]: history }));
 
         updateHistoryState(empleadoId, prev => ({ ...prev, loading: false, loaded: true, expanded: true, error: null }));
       } catch (error) {
@@ -653,7 +666,7 @@ export function Empleados({ user }: EmpleadosProps) {
 
   const getDailyWorkedHours = (empleado: Empleado, date: Date): number => {
     const weekKey = calculateIsoWeekKey(date);
-    const weeklyOverride = employeeHoursHistory[empleado.id]?.[weekKey];
+    const weeklyOverride = horariosSemanales[empleado.id]?.[weekKey] ?? employeeHoursHistory[empleado.id]?.[weekKey];
     const startOfWeek = getStartOfWeek(weekKey);
     const dayOffset = Math.floor((date.getTime() - startOfWeek.getTime()) / 86400000);
     const dayKey = DAY_ORDER[dayOffset] as DayKey | undefined;
@@ -668,6 +681,21 @@ export function Empleados({ user }: EmpleadosProps) {
     if (!baseDay?.active) return 0;
     return Math.max(0, Number(baseDay.hours) || 0);
   };
+
+  const getPayrollWeeksInRange = useCallback((start: Date, end: Date) => {
+    const seen = new Set<string>();
+    const weeks: string[] = [];
+    const cursor = new Date(start);
+    while (cursor <= end) {
+      const weekKey = calculateIsoWeekKey(cursor);
+      if (!seen.has(weekKey)) {
+        seen.add(weekKey);
+        weeks.push(weekKey);
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return weeks.sort(compareWeeksDesc);
+  }, []);
 
   const payrollRows = useMemo(() => {
     const start = parseRangeDate(quincenaRange.start);
@@ -740,6 +768,45 @@ export function Empleados({ user }: EmpleadosProps) {
       };
     });
   }, [empleados, quincenaRange, payrollSettings, employeeHoursHistory, horariosBase]);
+
+  const payrollDetail = useMemo(() => {
+    if (!selectedPayrollEmployee) {
+      return null;
+    }
+
+    const start = parseRangeDate(quincenaRange.start);
+    const end = parseRangeDate(quincenaRange.end);
+    if (!start || !end || start > end) {
+      return null;
+    }
+
+    const weeks = getPayrollWeeksInRange(start, end).map((weekKey) => {
+      const weekStart = getStartOfWeek(weekKey);
+      const hours = horariosSemanales[selectedPayrollEmployee.id]?.[weekKey]
+        ?? employeeHoursHistory[selectedPayrollEmployee.id]?.[weekKey]
+        ?? buildWeeklyHoursFromBase(ensureSchedule(selectedPayrollEmployee, horariosBase[selectedPayrollEmployee.id]));
+
+      const totalHours = sumWeeklyHours(hours);
+      const intersectsQuincena = DAY_ORDER.some((day, index) => {
+        const dayDate = new Date(weekStart);
+        dayDate.setDate(weekStart.getDate() + index);
+        return dayDate >= start && dayDate <= end;
+      });
+
+      return {
+        weekKey,
+        label: formatWeekRange(weekKey),
+        hours,
+        totalHours,
+        intersectsQuincena,
+      };
+    });
+
+    return {
+      empleado: selectedPayrollEmployee,
+      weeks: weeks.filter((week) => week.intersectsQuincena),
+    };
+  }, [selectedPayrollEmployee, quincenaRange, getPayrollWeeksInRange, horariosSemanales, employeeHoursHistory, horariosBase]);
 
   const payrollTotals = useMemo(() => {
     return payrollRows.reduce((acc, row) => {
@@ -1552,7 +1619,15 @@ export function Empleados({ user }: EmpleadosProps) {
                         <td className="px-4 py-3 text-gray-600">
                           {row.empleado.tipo_contrato === 'salario_fijo' ? 'Salario fijo' : 'Por horas'}
                         </td>
-                        <td className="px-4 py-3 text-right text-gray-700">{formatHours(row.hoursInPeriod)} h</td>
+                        <td className="px-4 py-3 text-right text-gray-700">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPayrollEmployee(row.empleado)}
+                            className="font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                          >
+                            {formatHours(row.hoursInPeriod)} h
+                          </button>
+                        </td>
                         <td className="px-4 py-3 text-right text-gray-700">{row.daysWorked}</td>
                         <td className="px-4 py-3 text-right text-gray-700">{formatCOP(row.salaryByContract)}</td>
                         <td className="px-4 py-3 text-right text-gray-700">{formatCOP(row.auxilio)}</td>
@@ -1609,6 +1684,75 @@ export function Empleados({ user }: EmpleadosProps) {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {selectedPayrollEmployee && payrollDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="ui-card w-full max-w-3xl max-h-[85vh] overflow-hidden">
+            <div className="flex items-start justify-between border-b border-gray-100 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
+                  Detalle de horas por quincena
+                </h3>
+                <p className="text-sm text-gray-600">
+                  {payrollDetail.empleado.nombre} · {quincenaRange.start} a {quincenaRange.end}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedPayrollEmployee(null)}
+                className="text-gray-400 hover:text-gray-600"
+                aria-label="Cerrar detalle de nómina"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="max-h-[calc(85vh-72px)] overflow-y-auto p-5 space-y-4">
+              {payrollDetail.weeks.map((week) => (
+                <div key={week.weekKey} className="rounded-xl border border-gray-200">
+                  <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+                    <div>
+                      <p className="font-semibold text-gray-800">{week.label}</p>
+                      <p className="text-xs text-gray-500">{week.weekKey}</p>
+                    </div>
+                    <p className="text-sm font-semibold" style={{ color: COLORS.dark }}>
+                      {formatHours(week.totalHours)} h
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 p-4">
+                    {DAY_ORDER.map((day, index) => {
+                      const dayDate = new Date(getStartOfWeek(week.weekKey));
+                      dayDate.setDate(dayDate.getDate() + index);
+                      const inRange = (() => {
+                        const start = parseRangeDate(quincenaRange.start);
+                        const end = parseRangeDate(quincenaRange.end);
+                        return Boolean(start && end && dayDate >= start && dayDate <= end);
+                      })();
+
+                      return (
+                        <div
+                          key={`${week.weekKey}-${day}`}
+                          className={`rounded-lg border px-3 py-2 ${inRange ? 'border-blue-200 bg-blue-50' : 'border-gray-200 bg-gray-50'}`}
+                        >
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                            {DAY_LABELS[day]}
+                          </p>
+                          <p className="text-xs text-gray-500">{toDateInputValue(dayDate)}</p>
+                          <p className="mt-1 text-sm font-semibold" style={{ color: COLORS.dark }}>
+                            {formatHours(week.hours[day] || 0)} h
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              {payrollDetail.weeks.length === 0 && (
+                <p className="text-sm text-gray-500">No hay semanas registradas en la quincena seleccionada.</p>
+              )}
+            </div>
           </div>
         </div>
       )}
