@@ -63,6 +63,12 @@ type CategorySummary = {
   quantity: number;
 };
 
+type AnalyticsAlert = {
+  title: string;
+  detail: string;
+  tone: 'positive' | 'warning' | 'neutral';
+};
+
 const GRID_COLOR = '#e5e7eb';
 const BALANCE_COLOR = '#2563eb';
 const HISTORICAL_BALANCE_COLOR = '#000000';
@@ -200,6 +206,166 @@ const HourlyOrdersChart = ({ data, maxOrders }: { data: HourlyChartEntry[]; maxO
           {point.entry.label}
         </text>
       ))}
+    </svg>
+  );
+};
+
+const DailyPerformanceChart = ({
+  data,
+}: {
+  data: Array<{ dateKey: string; displayDate: string; total: number; orders: number }>;
+}) => {
+  if (data.length === 0) {
+    return null;
+  }
+
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+
+  const width = 760;
+  const height = 320;
+  const margin = { top: 20, right: 72, bottom: 64, left: 72 };
+  const innerWidth = width - margin.left - margin.right;
+  const innerHeight = height - margin.top - margin.bottom;
+  const maxSales = Math.max(...data.map((entry) => entry.total), 1);
+  const maxOrders = Math.max(...data.map((entry) => entry.orders), 1);
+  const step = data.length > 1 ? innerWidth / (data.length - 1) : innerWidth;
+  const barWidth = Math.max(16, Math.min(36, step * 0.52));
+
+  const salesBars = data.map((entry, index) => {
+    const x = margin.left + index * step;
+    const heightValue = (entry.total / maxSales) * innerHeight;
+    const y = margin.top + innerHeight - heightValue;
+    return { x, y, height: heightValue, entry, index };
+  });
+
+  const orderPoints = data.map((entry, index) => {
+    const x = margin.left + index * step;
+    const y = margin.top + innerHeight - (entry.orders / maxOrders) * innerHeight;
+    return { x, y, entry, index };
+  });
+
+  const orderPath = orderPoints
+    .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x},${point.y}`)
+    .join(' ');
+
+  const ySalesTicks = Array.from({ length: 5 }, (_, index) => Math.round((maxSales / 4) * index));
+  const yOrdersTicks = Array.from({ length: 5 }, (_, index) => Math.round((maxOrders / 4) * index));
+  const xTickEvery = Math.max(1, Math.ceil(data.length / 8));
+  const xTicks = salesBars.filter((_, index) => index % xTickEvery === 0 || index === salesBars.length - 1);
+  const activeBar = activeIndex !== null ? salesBars[activeIndex] : null;
+  const activePoint = activeIndex !== null ? orderPoints[activeIndex] : null;
+  const tooltipX = activePoint ? Math.max(margin.left + 8, Math.min(activePoint.x + 12, width - 180)) : 0;
+  const tooltipY = activePoint ? Math.max(margin.top + 8, activePoint.y - 70) : 0;
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-80">
+      {ySalesTicks.map((tick) => {
+        const y = margin.top + innerHeight - (tick / maxSales) * innerHeight;
+        return (
+          <g key={`sales-tick-${tick}`}>
+            <line x1={margin.left} x2={margin.left + innerWidth} y1={y} y2={y} stroke={GRID_COLOR} strokeDasharray="4 4" />
+            <text x={margin.left - 12} y={y + 4} textAnchor="end" className="text-xs fill-gray-500">
+              {compactNumberFormatter.format(tick)}
+            </text>
+          </g>
+        );
+      })}
+      {xTicks.map((point) => (
+        <line
+          key={`daily-x-${point.index}`}
+          x1={point.x}
+          x2={point.x}
+          y1={margin.top}
+          y2={margin.top + innerHeight}
+          stroke={GRID_COLOR}
+          strokeDasharray="4 4"
+        />
+      ))}
+      {salesBars.map((bar) => (
+        <rect
+          key={`interactive-band-${bar.index}`}
+          x={bar.x - Math.max(barWidth, step * 0.7) / 2}
+          y={margin.top}
+          width={Math.max(barWidth, step * 0.7)}
+          height={innerHeight}
+          fill="transparent"
+          onMouseEnter={() => setActiveIndex(bar.index)}
+          onMouseMove={() => setActiveIndex(bar.index)}
+          onMouseLeave={() => setActiveIndex(null)}
+          onClick={() => setActiveIndex((current) => (current === bar.index ? null : bar.index))}
+        />
+      ))}
+      {salesBars.map((bar) => (
+        <rect
+          key={`bar-${bar.index}`}
+          x={bar.x - barWidth / 2}
+          y={bar.y}
+          width={barWidth}
+          height={bar.height}
+          rx={6}
+          fill={COLORS.accent}
+          fillOpacity={activeIndex === bar.index ? 1 : 0.85}
+        />
+      ))}
+      <path d={orderPath} fill="none" stroke={BALANCE_COLOR} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+      {orderPoints.map((point) => (
+        <circle
+          key={`daily-point-${point.index}`}
+          cx={point.x}
+          cy={point.y}
+          r={activeIndex === point.index ? 5 : 4}
+          fill="#fff"
+          stroke={BALANCE_COLOR}
+          strokeWidth={2}
+        />
+      ))}
+      {activeBar && activePoint && (
+        <>
+          <line
+            x1={activePoint.x}
+            x2={activePoint.x}
+            y1={margin.top}
+            y2={margin.top + innerHeight}
+            stroke="#94a3b8"
+            strokeDasharray="4 4"
+            strokeWidth={1.5}
+          />
+          <g transform={`translate(${tooltipX},${tooltipY})`}>
+            <rect width={168} height={70} rx={10} fill="#111827" fillOpacity={0.96} />
+            <text x={10} y={20} className="text-[11px] fill-white font-semibold">
+              {activeBar.entry.displayDate}
+            </text>
+            <text x={10} y={40} className="text-[10px] fill-blue-200">
+              Pedidos: {activeBar.entry.orders}
+            </text>
+            <text x={10} y={56} className="text-[10px] fill-emerald-200">
+              Ventas: {formatCOP(activeBar.entry.total)}
+            </text>
+          </g>
+        </>
+      )}
+      <line x1={margin.left} x2={margin.left + innerWidth} y1={margin.top + innerHeight} y2={margin.top + innerHeight} stroke="#9ca3af" strokeWidth={1.5} />
+      <line x1={margin.left} x2={margin.left} y1={margin.top} y2={margin.top + innerHeight} stroke="#9ca3af" strokeWidth={1.5} />
+      <line x1={margin.left + innerWidth} x2={margin.left + innerWidth} y1={margin.top} y2={margin.top + innerHeight} stroke="#9ca3af" strokeWidth={1.5} />
+      {xTicks.map((point) => (
+        <text key={`daily-label-${point.index}`} x={point.x} y={margin.top + innerHeight + 22} textAnchor="middle" className="text-xs fill-gray-500">
+          {point.entry.displayDate.split(',')[0]}
+        </text>
+      ))}
+      {yOrdersTicks.map((tick) => {
+        const y = margin.top + innerHeight - (tick / maxOrders) * innerHeight;
+        return (
+          <text key={`orders-tick-${tick}`} x={margin.left + innerWidth + 12} y={y + 4} textAnchor="start" className="text-xs fill-blue-600">
+            {tick}
+          </text>
+        );
+      })}
+      <text x={margin.left / 2} y={margin.top + innerHeight / 2} transform={`rotate(-90 ${margin.left / 2} ${margin.top + innerHeight / 2})`} className="text-xs font-medium fill-gray-600">
+        Ventas (COP)
+      </text>
+      <text x={margin.left + innerWidth + 44} y={margin.top + innerHeight / 2} transform={`rotate(-90 ${margin.left + innerWidth + 44} ${margin.top + innerHeight / 2})`} className="text-xs font-medium fill-blue-600">
+        Pedidos
+      </text>
     </svg>
   );
 };
@@ -469,6 +635,13 @@ const getOrdersInRange = (orders: Order[], start: Date, end: Date) =>
     return timestamp >= start.getTime() && timestamp <= end.getTime();
   });
 
+const getExpensesInRange = (expenses: Gasto[], start: Date, end: Date) =>
+  expenses.filter((gasto) => {
+    const expenseDate = gasto.fecha instanceof Date ? gasto.fecha : new Date(gasto.fecha);
+    const timestamp = expenseDate.getTime();
+    return timestamp >= start.getTime() && timestamp <= end.getTime();
+  });
+
 const summarizeCategories = (orders: Order[]) => {
   const totals = new Map<string, CategorySummary>();
 
@@ -540,6 +713,7 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
   const [startDate, setStartDate] = useState<string>(defaultStart);
   const [endDate, setEndDate] = useState<string>(today);
   const [singleDate, setSingleDate] = useState<string>(today);
+  const [comparisonStartDate, setComparisonStartDate] = useState<string>(defaultStart);
   const [marketingStartDate, setMarketingStartDate] = useState<string>(defaultStart);
   const [marketingEndDate, setMarketingEndDate] = useState<string>(today);
   const [gastos, setGastos] = useState<Gasto[]>([]);
@@ -613,6 +787,49 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
     });
   }, [gastos, filterMode, singleDate, rangeStart, rangeEnd]);
 
+  const comparisonEndDate = useMemo(() => {
+    const currentStart = filterMode === 'single'
+      ? parseDateInputValue(singleDate)
+      : rangeStart;
+    const previousEnd = new Date(currentStart);
+    previousEnd.setDate(previousEnd.getDate() - 1);
+    return formatDateInputValue(previousEnd);
+  }, [filterMode, singleDate, rangeStart]);
+
+  useEffect(() => {
+    const currentStart = filterMode === 'single'
+      ? parseDateInputValue(singleDate)
+      : rangeStart;
+    const currentEnd = filterMode === 'single'
+      ? parseDateInputValue(singleDate)
+      : rangeEnd;
+    const automaticPreviousRange = getPreviousRange(currentStart, currentEnd);
+    setComparisonStartDate(formatDateInputValue(automaticPreviousRange.start));
+  }, [filterMode, singleDate, rangeStart, rangeEnd]);
+
+  const comparisonWindow = useMemo(() => {
+    const currentStart = filterMode === 'single'
+      ? parseDateInputValue(singleDate)
+      : rangeStart;
+    const currentEnd = filterMode === 'single'
+      ? parseDateInputValue(singleDate)
+      : rangeEnd;
+    currentStart.setHours(0, 0, 0, 0);
+    currentEnd.setHours(23, 59, 59, 999);
+
+    const previousStart = parseDateInputValue(comparisonStartDate);
+    previousStart.setHours(0, 0, 0, 0);
+    const previousEnd = parseDateInputValue(comparisonEndDate);
+    previousEnd.setHours(23, 59, 59, 999);
+
+    return {
+      currentStart,
+      currentEnd,
+      previousStart,
+      previousEnd,
+    };
+  }, [filterMode, singleDate, rangeStart, rangeEnd, comparisonStartDate, comparisonEndDate]);
+
   const sortedOrders = useMemo(
     () => [...filteredOrders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
     [filteredOrders]
@@ -622,6 +839,11 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
     () => filteredOrders.reduce((sum, order) => sum + getRealIncomeFromOrder(order), 0),
     [filteredOrders]
   );
+  const totalExpenses = useMemo(
+    () => filteredExpenses.reduce((sum, gasto) => sum + gasto.monto, 0),
+    [filteredExpenses]
+  );
+  const periodBalance = totalSales - totalExpenses;
 
   const orderCount = filteredOrders.length;
   const averageTicket = orderCount > 0 ? totalSales / orderCount : 0;
@@ -776,6 +998,83 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
     return formatRangeLabel(start, end);
   }, [zoomedFinancialData]);
 
+  const previousComparisonMetrics = useMemo(() => {
+    const previousOrders = getOrdersInRange(orders, comparisonWindow.previousStart, comparisonWindow.previousEnd);
+    const previousExpenses = getExpensesInRange(gastos, comparisonWindow.previousStart, comparisonWindow.previousEnd);
+    const previousSales = previousOrders.reduce((sum, order) => sum + getRealIncomeFromOrder(order), 0);
+    const previousExpenseTotal = previousExpenses.reduce((sum, gasto) => sum + gasto.monto, 0);
+    const previousOrderCount = previousOrders.length;
+    const previousAverageTicket = previousOrderCount > 0 ? previousSales / previousOrderCount : 0;
+    const previousBalance = previousSales - previousExpenseTotal;
+
+    return {
+      previousSales,
+      previousExpenseTotal,
+      previousOrderCount,
+      previousAverageTicket,
+      previousBalance,
+      salesChangePct: getPercentChange(totalSales, previousSales),
+      expensesChangePct: getPercentChange(totalExpenses, previousExpenseTotal),
+      ordersChangePct: getPercentChange(orderCount, previousOrderCount),
+      ticketChangePct: getPercentChange(averageTicket, previousAverageTicket),
+      balanceChangePct: getPercentChange(periodBalance, previousBalance),
+    };
+  }, [orders, gastos, comparisonWindow, totalSales, totalExpenses, orderCount, averageTicket, periodBalance]);
+
+  const comparisonLabel = useMemo(() => {
+    return formatRangeLabel(comparisonWindow.previousStart, comparisonWindow.previousEnd);
+  }, [comparisonWindow]);
+
+  const analyticsAlerts = useMemo(() => {
+    const alerts: AnalyticsAlert[] = [];
+    if (previousComparisonMetrics.salesChangePct <= -10) {
+      alerts.push({
+        title: 'Caída relevante de ventas',
+        detail: `Las ventas cayeron ${Math.abs(previousComparisonMetrics.salesChangePct).toFixed(1)}% frente al período anterior equivalente. Revisa si faltó tráfico, oferta o ejecución en horas fuertes.`,
+        tone: 'warning',
+      });
+    } else if (previousComparisonMetrics.salesChangePct >= 10) {
+      alerts.push({
+        title: 'Ventas creciendo sobre la referencia',
+        detail: `Las ventas subieron ${previousComparisonMetrics.salesChangePct.toFixed(1)}% frente al período anterior. Vale la pena repetir la oferta o franja que está funcionando.`,
+        tone: 'positive',
+      });
+    }
+
+    if (previousComparisonMetrics.ticketChangePct <= -8) {
+      alerts.push({
+        title: 'El ticket promedio perdió fuerza',
+        detail: `El ticket promedio bajó ${Math.abs(previousComparisonMetrics.ticketChangePct).toFixed(1)}%. Estás vendiendo menos valor por pedido aunque entre tráfico.`,
+        tone: 'warning',
+      });
+    }
+
+    if (previousComparisonMetrics.ordersChangePct >= 8 && previousComparisonMetrics.ticketChangePct < 0) {
+      alerts.push({
+        title: 'Suben pedidos pero no el valor por pedido',
+        detail: 'Entró más volumen, pero cada compra está dejando menos dinero. Aquí hay oportunidad de combo, postre o bebida adicional.',
+        tone: 'neutral',
+      });
+    }
+
+    if (totalExpenses > totalSales) {
+      alerts.push({
+        title: 'Los gastos superaron las ventas del período',
+        detail: 'El período cerró con presión fuerte en caja. Revisa qué gasto extraordinario afectó el balance antes de tomar decisiones de compra.',
+        tone: 'warning',
+      });
+    }
+
+    if (topSalesHour && topSalesHour.total > 0) {
+      alerts.push({
+        title: 'Hay una hora comercial para explotar',
+        detail: `${topSalesHour.label} fue la hora con más venta acumulada. Publica y empuja oferta 60-90 minutos antes de esa franja.`,
+        tone: 'positive',
+      });
+    }
+    return alerts.slice(0, 4);
+  }, [previousComparisonMetrics, totalExpenses, totalSales, topSalesHour]);
+
   const paymentMethodOrders = useMemo(() => {
     const grouped: Record<string, PaymentMethodOrderEntry[]> = {};
 
@@ -852,6 +1151,31 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
       })
       .sort((a, b) => (a.dateKey < b.dateKey ? 1 : -1));
   }, [filteredOrders]);
+
+  const dailySummaryChartData = useMemo(
+    () => [...dailySummary].reverse(),
+    [dailySummary]
+  );
+
+  const bestSalesDay = useMemo(
+    () => dailySummary.reduce<(typeof dailySummary)[number] | null>((best, entry) => {
+      if (!best || entry.total > best.total) {
+        return entry;
+      }
+      return best;
+    }, null),
+    [dailySummary]
+  );
+
+  const bestOrdersDay = useMemo(
+    () => dailySummary.reduce<(typeof dailySummary)[number] | null>((best, entry) => {
+      if (!best || entry.orders > best.orders) {
+        return entry;
+      }
+      return best;
+    }, null),
+    [dailySummary]
+  );
 
   const topItems = useMemo(() => {
     return summarizeItems(filteredOrders).slice(0, 5);
@@ -1321,33 +1645,182 @@ export function Analitica({ orders, onViewOrder }: AnaliticaProps) {
         ))}
       </section>
 
+      <section className="ui-card ui-card-pad space-y-5">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold" style={{ color: COLORS.dark }}>
+              Comparativo del período
+            </h3>
+            <p className="text-sm text-gray-500">
+              Compara el rango actual contra el período anterior equivalente: {comparisonLabel}.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <label className="flex flex-col text-sm text-gray-700">
+            <span className="mb-2 font-medium">Inicio período equivalente</span>
+            <input
+              type="date"
+              value={comparisonStartDate}
+              max={comparisonEndDate}
+              onChange={(event) => setComparisonStartDate(event.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </label>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Fin período equivalente</p>
+            <p className="mt-1 text-base font-semibold text-gray-900">{comparisonEndDate}</p>
+            <p className="mt-1 text-xs text-gray-500">
+              Esta fecha se fija automáticamente como el día anterior al inicio del rango filtrado actual.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+          {[
+            {
+              label: 'Ventas',
+              current: totalSales,
+              previous: previousComparisonMetrics.previousSales,
+              change: previousComparisonMetrics.salesChangePct,
+              format: formatCOP,
+            },
+            {
+              label: 'Pedidos',
+              current: orderCount,
+              previous: previousComparisonMetrics.previousOrderCount,
+              change: previousComparisonMetrics.ordersChangePct,
+              format: (value: number) => `${Math.round(value)}`,
+            },
+            {
+              label: 'Ticket promedio',
+              current: averageTicket,
+              previous: previousComparisonMetrics.previousAverageTicket,
+              change: previousComparisonMetrics.ticketChangePct,
+              format: (value: number) => formatCOP(Math.round(value)),
+            },
+            {
+              label: 'Gastos',
+              current: totalExpenses,
+              previous: previousComparisonMetrics.previousExpenseTotal,
+              change: previousComparisonMetrics.expensesChangePct,
+              format: formatCOP,
+            },
+            {
+              label: 'Balance',
+              current: periodBalance,
+              previous: previousComparisonMetrics.previousBalance,
+              change: previousComparisonMetrics.balanceChangePct,
+              format: (value: number) => formatCOP(Math.round(value)),
+            },
+          ].map((metric) => {
+            const positive = metric.change >= 0;
+            const toneClass =
+              metric.label === 'Gastos'
+                ? positive ? 'text-rose-600' : 'text-emerald-600'
+                : positive ? 'text-emerald-600' : 'text-rose-600';
+
+            return (
+              <div key={metric.label} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500">{metric.label}</p>
+                <p className="mt-1 text-lg font-semibold text-gray-900">{metric.format(metric.current)}</p>
+                <p className="mt-1 text-xs text-gray-500">Anterior: {metric.format(metric.previous)}</p>
+                <p className={`mt-2 text-sm font-semibold ${toneClass}`}>
+                  {positive ? '+' : '-'}{Math.abs(metric.change).toFixed(1)}%
+                </p>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {analyticsAlerts.map((alert) => (
+            <article
+              key={alert.title}
+              className={`rounded-xl border p-4 ${
+                alert.tone === 'warning'
+                  ? 'border-amber-200 bg-amber-50'
+                  : alert.tone === 'positive'
+                    ? 'border-emerald-200 bg-emerald-50'
+                    : 'border-blue-200 bg-blue-50'
+              }`}
+            >
+              <p className="text-sm font-semibold text-gray-900">{alert.title}</p>
+              <p className="mt-2 text-sm text-gray-700">{alert.detail}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <section className="xl:col-span-2 ui-card ui-card-pad">
           <h3 className="text-lg font-semibold mb-4" style={{ color: COLORS.dark }}>
             Desempeño diario
           </h3>
           {dailySummary.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">Fecha</th>
-                    <th className="px-4 py-3 text-right font-medium text-gray-600">Pedidos</th>
-                    <th className="px-4 py-3 text-right font-medium text-gray-600">Ventas</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {dailySummary.map((entry) => (
-                    <tr key={entry.dateKey} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-700">{entry.displayDate}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{entry.orders}</td>
-                      <td className="px-4 py-3 text-right font-semibold" style={{ color: COLORS.dark }}>
-                        {formatCOP(entry.total)}
-                      </td>
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Mejor día en ventas</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-800">
+                    {bestSalesDay?.displayDate ?? '—'}
+                  </p>
+                  <p className="mt-1 text-lg font-semibold" style={{ color: COLORS.dark }}>
+                    {bestSalesDay ? formatCOP(bestSalesDay.total) : '—'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Día con más pedidos</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-800">
+                    {bestOrdersDay?.displayDate ?? '—'}
+                  </p>
+                  <p className="mt-1 text-lg font-semibold text-blue-600">
+                    {bestOrdersDay ? `${bestOrdersDay.orders} pedidos` : '—'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Lectura del gráfico</p>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Barras: ventas por día. Línea azul: cantidad de pedidos. Así ves si el crecimiento viene por más tráfico o por mayor ticket.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <DailyPerformanceChart data={dailySummaryChartData} />
+                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: COLORS.accent }} /> Ventas por día
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 border-t-2" style={{ borderColor: BALANCE_COLOR }} /> Pedidos por día
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">Fecha</th>
+                      <th className="px-4 py-3 text-right font-medium text-gray-600">Pedidos</th>
+                      <th className="px-4 py-3 text-right font-medium text-gray-600">Ventas</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {dailySummary.map((entry) => (
+                      <tr key={entry.dateKey} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-700">{entry.displayDate}</td>
+                        <td className="px-4 py-3 text-right text-gray-600">{entry.orders}</td>
+                        <td className="px-4 py-3 text-right font-semibold" style={{ color: COLORS.dark }}>
+                          {formatCOP(entry.total)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : (
             <p className="text-sm text-gray-500">No hay datos en el periodo seleccionado.</p>
