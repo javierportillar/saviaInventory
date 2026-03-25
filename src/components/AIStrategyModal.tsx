@@ -57,6 +57,7 @@ export function AIStrategyModal({ isOpen, onClose, orders }: AIStrategyModalProp
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<MarketingStrategyRecord[]>([]);
+  const [isStrategyDetailOpen, setIsStrategyDetailOpen] = useState(false);
 
   useEffect(() => {
     const savedKey = localStorage.getItem('savia_gemini_api_key');
@@ -97,7 +98,8 @@ export function AIStrategyModal({ isOpen, onClose, orders }: AIStrategyModalProp
   const summarizeOrders = (filteredOrders: Order[]) => {
     let totalSales = 0;
     const categories = new Map<string, number>();
-    const items = new Map<string, { quantity: number; amount: number }>();
+    const items = new Map<string, { quantity: number; amount: number; unitPrice: number; category: string }>();
+    const ordersByDay = new Map<string, { orders: number; total: number }>();
 
     filteredOrders.forEach((order) => {
       const allocations = getOrderAllocations(order);
@@ -110,6 +112,12 @@ export function AIStrategyModal({ isOpen, onClose, orders }: AIStrategyModalProp
           : order.total;
 
       totalSales += realIncome;
+
+      const dayKey = formatDateInputValue(order.timestamp);
+      const dayEntry = ordersByDay.get(dayKey) || { orders: 0, total: 0 };
+      dayEntry.orders += 1;
+      dayEntry.total += realIncome;
+      ordersByDay.set(dayKey, dayEntry);
       
       order.items.forEach(({ item, cantidad, precioUnitario }) => {
         const cat = item.categoria || 'Sin categoría';
@@ -118,9 +126,11 @@ export function AIStrategyModal({ isOpen, onClose, orders }: AIStrategyModalProp
         
         categories.set(cat, (categories.get(cat) || 0) + amt);
         
-        const itmRef = items.get(item.nombre) || { quantity: 0, amount: 0 };
+        const itmRef = items.get(item.nombre) || { quantity: 0, amount: 0, unitPrice: p, category: cat };
         itmRef.quantity += cantidad;
         itmRef.amount += amt;
+        itmRef.unitPrice = p;
+        itmRef.category = cat;
         items.set(item.nombre, itmRef);
       });
     });
@@ -135,7 +145,35 @@ export function AIStrategyModal({ isOpen, onClose, orders }: AIStrategyModalProp
       .sort((a, b) => b.quantity - a.quantity)
       .slice(0, 15);
 
-    return { totalSales, sortedCategories, sortedItems, count: filteredOrders.length };
+    const orderHistory = Array.from(ordersByDay.entries())
+      .map(([date, data]) => ({ date, ...data }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const detailedOrders = filteredOrders
+      .slice()
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+      .slice(0, 25)
+      .map((order) => ({
+        numero: order.numero,
+        fecha: order.timestamp.toLocaleString('es-CO', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        total: order.total,
+        items: order.items.map(({ item, cantidad, precioUnitario }) => ({
+          notas: item.notas,
+          nombre: item.nombre,
+          categoria: item.categoria || 'Sin categoría',
+          cantidad,
+          precioUnitario: typeof precioUnitario === 'number' ? precioUnitario : item.precio,
+          bowlCustomization: item.bowlCustomization,
+        })),
+      }));
+
+    return { totalSales, sortedCategories, sortedItems, orderHistory, detailedOrders, count: filteredOrders.length };
   };
 
   const buildPrompt = (summary: ReturnType<typeof summarizeOrders>) => {
@@ -147,11 +185,23 @@ La estrategia que generes se aplicará desde el ${stratStartDate} hasta el ${str
 - Cantidad de Pedidos: ${summary.count}
 - Ticket Promedio: ${formatCOP(summary.count > 0 ? Math.round(summary.totalSales / summary.count) : 0)}
 
+**Historial resumido de órdenes por día:**
+${summary.orderHistory.map(day => `- ${day.date}: ${day.orders} pedidos · ${formatCOP(Math.round(day.total))}`).join('\n')}
+
 **Las familias o categorías más fuertes (por valor de venta):**
 ${summary.sortedCategories.map(c => `- ${c.cat}: ${formatCOP(Math.round(c.amount))}`).join('\n')}
 
-**Top 15 Productos más vendidos (por unidades):**
-${summary.sortedItems.map(i => `- ${i.name}: ${i.quantity} uds vendidas (Total: ${formatCOP(Math.round(i.amount))})`).join('\n')}
+**Top 15 Productos más vendidos con valor unitario y tipo:**
+${summary.sortedItems.map(i => `- ${i.name} | Tipo: ${i.category} | Valor unitario: ${formatCOP(Math.round(i.unitPrice))} | ${i.quantity} uds vendidas | Total: ${formatCOP(Math.round(i.amount))}`).join('\n')}
+
+**Muestra del historial reciente de órdenes con ítems de caja:**
+${summary.detailedOrders.map(order => `- Pedido #${order.numero} | ${order.fecha} | Total ${formatCOP(Math.round(order.total))} | Ítems: ${order.items.map(item => {
+  const bowlDetail = item.bowlCustomization
+    ? ` | Bowl: tipo=${item.bowlCustomization.kind ?? 'n/a'}; bases=${item.bowlCustomization.bases?.join('/') || 'n/a'}; toppings=${item.bowlCustomization.toppings?.join('/') || 'n/a'}; proteina=${item.bowlCustomization.proteina ?? item.bowlCustomization.proteinas?.join('/') ?? 'n/a'}; extraCost=${formatCOP(Math.round(item.bowlCustomization.extraCost ?? 0))}`
+    : '';
+  const notesDetail = item.notas ? ` | Notas: ${item.notas}` : '';
+  return `${item.nombre} (${item.categoria}) x${item.cantidad} a ${formatCOP(Math.round(item.precioUnitario))}${bowlDetail}${notesDetail}`;
+}).join(', ')}`).join('\n')}
 
 **Instrucciones estrictas para la estrategia:**
 Con base en estos datos reales:
@@ -195,6 +245,7 @@ Formatea la respuesta en Markdown, siendo claro y profesional, enfocándote en s
       });
       const output = res.text;
       setResult(output);
+      setIsStrategyDetailOpen(true);
       const saved = await dataService.saveMarketingStrategy({
         analysisStartDate: evalStartDate,
         analysisEndDate: evalEndDate,
@@ -249,6 +300,33 @@ Formatea la respuesta en Markdown, siendo claro y profesional, enfocándote en s
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-5 py-6">
+          {isStrategyDetailOpen && result && (
+            <div className="h-full">
+              <div className="mb-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Bot size={20} className="text-indigo-600" />
+                  <h4 className="font-semibold text-indigo-900 text-xl">Detalle de estrategia IA</h4>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsStrategyDetailOpen(false)}
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+                >
+                  Volver
+                </button>
+              </div>
+              <div className="h-[calc(100%-52px)] rounded-xl border border-indigo-200 bg-indigo-50/30 p-6">
+                <div className="h-full overflow-y-auto pr-2">
+                  <div className="prose prose-sm max-w-none text-gray-800 prose-headings:text-gray-900 prose-p:text-gray-800 prose-strong:text-gray-900 prose-li:text-gray-800 prose-ul:pl-5 prose-ol:pl-5">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {result}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {!isStrategyDetailOpen && (
           <div className="grid gap-6 xl:grid-cols-[1.1fr,0.9fr]">
             <div className="space-y-6">
             
@@ -396,7 +474,10 @@ Formatea la respuesta en Markdown, siendo claro y profesional, enfocándote en s
                       <button
                         key={entry.id}
                         type="button"
-                        onClick={() => setResult(entry.content)}
+                        onClick={() => {
+                          setResult(entry.content);
+                          setIsStrategyDetailOpen(true);
+                        }}
                         className="w-full rounded-xl border border-gray-200 px-4 py-3 text-left hover:border-indigo-300 hover:bg-indigo-50/40 transition-colors"
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -428,6 +509,7 @@ Formatea la respuesta en Markdown, siendo claro y profesional, enfocándote en s
               </div>
             </div>
           </div>
+          )}
         </div>
 
         {/* Footer */}
