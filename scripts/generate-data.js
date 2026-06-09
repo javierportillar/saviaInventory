@@ -287,10 +287,10 @@ const CREDIT_EMPLOYEE_IDS = ['emp-01', 'emp-03', 'emp-06'];
 function generateOrdersForDay(date) {
   const dow = dayOfWeek(date);
   let numOrders;
-  if (dow === 0) numOrders = Math.random() < 0.3 ? randomInt(2, 5) : 0;
-  else if (dow === 6) numOrders = randomInt(6, 14);
-  else if (dow === 5) numOrders = randomInt(6, 12);
-  else numOrders = randomInt(4, 10);
+  if (dow === 0) numOrders = Math.random() < 0.3 ? randomInt(1, 3) : 0;
+  else if (dow === 6) numOrders = randomInt(3, 7);
+  else if (dow === 5) numOrders = randomInt(3, 7);
+  else numOrders = randomInt(2, 6);
 
   const orders = [];
   for (let i = 0; i < numOrders; i++) {
@@ -375,16 +375,15 @@ function generateAllOrders() {
     for (let month = startMonth; month <= endMonth; month++) {
       const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-      // Determinar cuántos días generar este mes
+      // Determinar cuántos días generar este mes (reducido para localStorage)
       let daysToGenerate;
       if (year === 2024) {
-        // Early 2024: sparse (5-8 days), late 2024: more (8-12 days)
-        daysToGenerate = month < 6 ? randomInt(5, 8) : randomInt(8, 12);
+        daysToGenerate = randomInt(2, 4);
       } else if (year === 2025) {
-        daysToGenerate = randomInt(10, 15);
+        daysToGenerate = randomInt(3, 6);
       } else {
-        // 2026: denso para que se vea bien en analítica
-        daysToGenerate = randomInt(12, 18);
+        // 2026: un poco más denso para analítica
+        daysToGenerate = randomInt(5, 9);
       }
 
       // Seleccionar días aleatorios del mes
@@ -408,9 +407,9 @@ function generateAllOrders() {
     }
   }
 
-  // Generate daily orders for the last 14 days so dashboard and "Últimos 7 días" show data
+  // Generate daily orders for the last 7 days so dashboard and "Últimos 7 días" show data
   const today = new Date();
-  for (let daysAgo = 0; daysAgo <= 14; daysAgo++) {
+  for (let daysAgo = 0; daysAgo <= 7; daysAgo++) {
     const d = new Date(today);
     d.setDate(d.getDate() - daysAgo);
     if (dayOfWeek(d) === 0) continue;
@@ -511,7 +510,7 @@ for (let year = 2024; year <= 2026; year++) {
   for (let month = 0; month <= endMonth; month++) {
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     // 1-3 insumos gastos
-    const numInsumos = randomInt(1, 3);
+    const numInsumos = randomInt(1, 2);
     for (let i = 0; i < numInsumos; i++) {
       gastoId++;
       const day = randomInt(1, daysInMonth);
@@ -568,7 +567,7 @@ let iphId = 0;
 const invItems = ALL_MENU_ITEMS.filter(i => i.inventarioCategoria === 'Inventariables');
 for (const item of invItems) {
   const basePrice = randomInt(2000, 25000);
-  for (let q = 0; q < 10; q++) {
+  for (let q = 0; q < 4; q++) {
     iphId++;
     const quarterMonth = q * 3;
     const y = 2024 + Math.floor(quarterMonth / 12);
@@ -801,7 +800,7 @@ for (const emp of EMPLEADOS) {
 const HORARIOS_SEMANALES = {};
 for (const emp of EMPLEADOS.filter(e => e.activo)) {
   const records = {};
-  for (let w = 0; w < 10; w++) {
+  for (let w = 0; w < 4; w++) {
     const baseDate = new Date(2025, 0, 6 + w * 7);
     const weekKey = `${baseDate.getFullYear()}-W${String(w + 1).padStart(2, '0')}`;
     const dayHours = {};

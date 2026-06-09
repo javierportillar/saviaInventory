@@ -441,6 +441,10 @@ export const initializeLocalData = (): void => {
     // En modo demo (deploy), forzamos la siembra completa de TODAS las keys
     // para evitar datos corruptos/parciales de deploys anteriores.
     console.info('[localData] Modo demo: forzando siembra completa de datos semilla.');
+    // Primero limpiamos cualquier key existente para evitar datos huérfanos
+    for (const [key] of seedKeys) {
+      try { localStorage.removeItem(key); } catch { /* ignore */ }
+    }
     for (const [key, data] of seedKeys) {
       setLocalData(key, data);
     }

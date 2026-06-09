@@ -7,6 +7,7 @@ import { Inventario } from './components/Inventario';
 import { Cocina } from './components/Cocina';
 import { Clientes } from './components/Clientes';
 import { Empleados } from './components/Empleados';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Gastos } from './components/Gastos';
 import { Contabilidad } from './components/Contabilidad';
 import { Login } from './components/Login';
@@ -639,7 +640,11 @@ function App() {
               onDeleteCustomer={handleDeleteCustomer}
             />
           )}
-          {module === 'empleados' && <Empleados user={user} />}
+          {module === 'empleados' && (
+            <ErrorBoundary>
+              <Empleados user={user} />
+            </ErrorBoundary>
+          )}
           {module === 'gastos' && (
             <Gastos
               focusRequest={gastosFocus}
