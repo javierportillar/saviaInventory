@@ -118,8 +118,12 @@ export function Empleados({ user }: EmpleadosProps) {
   }, []);
 
   useEffect(() => {
-    fetchEmpleados();
-    void loadPayrollSettings();
+    // Defer initial load slightly to ensure first render completes
+    const timer = setTimeout(() => {
+      fetchEmpleados();
+      void loadPayrollSettings();
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   const loadPayrollSettings = useCallback(async () => {
@@ -279,8 +283,12 @@ export function Empleados({ user }: EmpleadosProps) {
 
   useEffect(() => {
     if (empleados.length === 0) return;
-    loadBaseSchedules(empleados);
-    void loadWeeklyHoursForWeek(getCurrentWeekKey());
+    // Defer data loading to next tick to avoid main-thread congestion
+    const timer = setTimeout(() => {
+      loadBaseSchedules(empleados);
+      void loadWeeklyHoursForWeek(getCurrentWeekKey());
+    }, 0);
+    return () => clearTimeout(timer);
   }, [empleados, loadBaseSchedules, loadWeeklyHoursForWeek]);
 
   useEffect(() => {
