@@ -53,6 +53,9 @@ import { DEFAULT_PAYROLL_SETTINGS, normalizePayrollSettings } from '../utils/emp
 
 // Verificar si Supabase está disponible
 const isSupabaseAvailable = () => {
+  if (import.meta.env.VITE_DEMO_MODE === 'true') {
+    return false;
+  }
   return !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
 };
 
@@ -100,6 +103,7 @@ const APP_SETTINGS_DISCOUNT_KEY = 'caja_combo_descuento_bebidas';
 const PAYROLL_SETTINGS_STORAGE_KEY = 'savia-payroll-settings';
 const APP_SETTINGS_PAYROLL_KEY = 'empleados_nomina_config';
 const AI_STRATEGIES_STORAGE_KEY = 'savia-ai-strategies';
+const CREDIT_HISTORY_KEY = 'savia-employee-credit-history';
 const DEFAULT_APP_SETTINGS: AppSettings = {
   drinkComboDiscountEnabled: true,
   sandwichComboDiscountEnabled: true,
@@ -553,7 +557,8 @@ const mapSupabaseCreditHistoryEntry = (record: any): EmployeeCreditHistoryEntry 
 
 export const fetchEmployeeCredits = async (): Promise<EmployeeCreditRecord[]> => {
   if (!(await ensureSupabaseReady())) {
-    return [];
+    const localEntries = getLocalData<EmployeeCreditHistoryEntry[]>(CREDIT_HISTORY_KEY, []);
+    return buildCreditRecordsFromEntries(localEntries);
   }
 
   const { data, error } = await supabase
@@ -575,14 +580,15 @@ export const fetchEmployeeCredits = async (): Promise<EmployeeCreditRecord[]> =>
     throw error;
   }
 
+  const entries = (data ?? []).map(mapSupabaseCreditHistoryEntry).filter(Boolean) as EmployeeCreditHistoryEntry[];
+  return buildCreditRecordsFromEntries(entries);
+};
+
+const buildCreditRecordsFromEntries = (entries: EmployeeCreditHistoryEntry[]): EmployeeCreditRecord[] => {
   const records = new Map<string, { empleadoId: string; empleadoNombre?: string; saldo: number; history: EmployeeCreditHistoryEntry[] }>();
 
-  for (const entry of data ?? []) {
-    const normalized = mapSupabaseCreditHistoryEntry(entry);
-    if (!normalized) {
-      continue;
-    }
-
+  for (const normalized of entries) {
+    if (!normalized) continue;
     const key = normalized.empleadoId;
     let target = records.get(key);
     if (!target) {
@@ -629,7 +635,21 @@ export const addEmployeeCredit = async ({ empleadoId, monto, orderId, orderNumer
   }
 
   if (!(await ensureSupabaseReady())) {
-    throw new Error('No se pudo registrar el crédito de empleado porque la base de datos no está disponible.');
+    // Modo local: guardar en localStorage
+    const entry: EmployeeCreditHistoryEntry = {
+      id: `local-credit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      empleadoId,
+      orderId: orderId ?? undefined,
+      orderNumero: orderNumero ?? undefined,
+      monto: amount,
+      tipo: 'cargo',
+      timestamp: new Date().toISOString(),
+    };
+    const entries = getLocalData<EmployeeCreditHistoryEntry[]>(CREDIT_HISTORY_KEY, []);
+    entries.push(entry);
+    setLocalData(CREDIT_HISTORY_KEY, entries);
+    notifyEmployeeCreditUpdate();
+    return;
   }
 
   const payload = {
@@ -656,7 +676,14 @@ export const deleteEmployeeCreditHistoryEntry = async (entryId: string): Promise
   }
 
   if (!(await ensureSupabaseReady())) {
-    throw new Error('No se pudo eliminar el movimiento porque la base de datos no está disponible.');
+    // Modo local: eliminar de localStorage
+    const entries = getLocalData<EmployeeCreditHistoryEntry[]>(CREDIT_HISTORY_KEY, []);
+    const filtered = entries.filter((e) => e.id !== trimmedId);
+    if (filtered.length !== entries.length) {
+      setLocalData(CREDIT_HISTORY_KEY, filtered);
+      notifyEmployeeCreditUpdate();
+    }
+    return;
   }
 
   const { error } = await supabase
@@ -686,7 +713,21 @@ const settleEmployeeCreditBalance = async ({ empleadoId, monto, orderId, orderNu
   }
 
   if (!(await ensureSupabaseReady())) {
-    throw new Error('No se pudo registrar el abono del crédito porque la base de datos no está disponible.');
+    // Modo local: guardar abono en localStorage
+    const entry: EmployeeCreditHistoryEntry = {
+      id: `local-abono-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      empleadoId,
+      orderId: orderId ?? undefined,
+      orderNumero: orderNumero ?? undefined,
+      monto: amount,
+      tipo: 'abono',
+      timestamp: new Date().toISOString(),
+    };
+    const entries = getLocalData<EmployeeCreditHistoryEntry[]>(CREDIT_HISTORY_KEY, []);
+    entries.push(entry);
+    setLocalData(CREDIT_HISTORY_KEY, entries);
+    notifyEmployeeCreditUpdate();
+    return;
   }
 
   const payload = {

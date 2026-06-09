@@ -36,9 +36,15 @@ export default defineConfig(({ mode }) => {
   const productionBase = envBase ?? DEFAULT_PRODUCTION_BASE;
   const base = mode === 'production' ? productionBase : '/';
 
+  // Demo mode: en producción, ignorar Supabase y usar datos locales
+  const isDemo = mode === 'production' || env.VITE_DEMO_MODE === 'true';
+
   return {
     base,
     plugins: [react()],
+    define: {
+      'import.meta.env.VITE_DEMO_MODE': isDemo ? '"true"' : '"false"',
+    },
     optimizeDeps: {
       exclude: ['lucide-react'],
     },

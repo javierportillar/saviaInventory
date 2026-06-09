@@ -1,5 +1,20 @@
-import { MenuItem, Order, Customer, Empleado, Gasto } from '../types';
+import { MenuItem, Order, Customer, Empleado, Gasto, CajaPocket, ProvisionTransfer, InventoryPriceHistoryEntry, EmployeeCreditHistoryEntry, WeeklySchedule } from '../types';
 import { slugify } from '../utils/strings';
+import {
+  SEED_CUSTOMERS,
+  SEED_EMPLEADOS,
+  SEED_CAJA_BOLSILLOS,
+  SEED_HORARIOS_BASE,
+  SEED_HORARIOS_SEMANALES,
+  SEED_NEXT_ORDER_NUMBER,
+  SEED_ORDERS,
+  SEED_ORDER_METADATA,
+  SEED_GASTOS,
+  SEED_GASTO_INVENTARIO_ITEMS,
+  SEED_PROVISION_TRANSFERS,
+  SEED_INVENTORY_PRICE_HISTORY,
+  SEED_EMPLOYEE_CREDIT_HISTORY,
+} from './seedData';
 
 type MenuItemSeed = Omit<MenuItem, 'codigo'> & { codigo?: string };
 
@@ -310,6 +325,25 @@ export const INITIAL_DATA = {
   gastos: [] as Gasto[],
 };
 
+// Datos semilla completos (generados por scripts/generate-data.js)
+// Se cargan cuando localStorage está vacío
+export const SEED_DATA = {
+  'savia-menuItems': ALL_MENU_ITEMS,
+  'savia-customers': SEED_CUSTOMERS,
+  'savia-empleados': SEED_EMPLEADOS,
+  'savia-orders': SEED_ORDERS,
+  'savia-order-metadata': SEED_ORDER_METADATA,
+  'savia-gastos': SEED_GASTOS,
+  'savia-caja-bolsillos': SEED_CAJA_BOLSILLOS,
+  'savia-horarios-base': SEED_HORARIOS_BASE,
+  'savia-horarios-semanales': SEED_HORARIOS_SEMANALES,
+  'savia-provision-transfers': SEED_PROVISION_TRANSFERS,
+  'savia-gasto-inventario-items': SEED_GASTO_INVENTARIO_ITEMS,
+  'savia-inventory-price-history': SEED_INVENTORY_PRICE_HISTORY,
+  'savia-employee-credit-history': SEED_EMPLOYEE_CREDIT_HISTORY,
+  'savia-next-order-number': SEED_NEXT_ORDER_NUMBER,
+};
+
 // Funciones para manejo de localStorage
 export const getLocalData = <T>(key: string, defaultValue: T): T => {
   try {
@@ -380,9 +414,24 @@ const ensureSeeded = <T>(
 
 // Inicializar datos garantizando datos base consistentes
 export const initializeLocalData = (): void => {
-  ensureSeeded('savia-menuItems', INITIAL_DATA.menuItems, isNonEmptyArray, 'Productos del menú');
-  ensureSeeded('savia-orders', INITIAL_DATA.orders, isArray, 'Órdenes');
-  ensureSeeded('savia-customers', INITIAL_DATA.customers, isArray, 'Clientes');
-  ensureSeeded('savia-empleados', INITIAL_DATA.empleados, isArray, 'Empleados');
-  ensureSeeded('savia-gastos', INITIAL_DATA.gastos, isArray, 'Gastos');
+  const seedKeys: [string, unknown, (v: unknown) => boolean, string][] = [
+    ['savia-menuItems', ALL_MENU_ITEMS, isNonEmptyArray, 'Productos del menú'],
+    ['savia-customers', SEED_CUSTOMERS, isNonEmptyArray, 'Clientes'],
+    ['savia-empleados', SEED_EMPLEADOS, isNonEmptyArray, 'Empleados'],
+    ['savia-orders', SEED_ORDERS, isNonEmptyArray, 'Órdenes históricas'],
+    ['savia-order-metadata', SEED_ORDER_METADATA, (v) => typeof v === 'object' && v !== null, 'Metadata de órdenes'],
+    ['savia-gastos', SEED_GASTOS, isArray, 'Gastos'],
+    ['savia-caja-bolsillos', SEED_CAJA_BOLSILLOS, isNonEmptyArray, 'Bolsillos de caja'],
+    ['savia-horarios-base', SEED_HORARIOS_BASE, (v) => typeof v === 'object' && v !== null, 'Horarios base'],
+    ['savia-horarios-semanales', SEED_HORARIOS_SEMANALES, (v) => typeof v === 'object' && v !== null, 'Horarios semanales'],
+    ['savia-provision-transfers', SEED_PROVISION_TRANSFERS, isArray, 'Transferencias de provisión'],
+    ['savia-gasto-inventario-items', SEED_GASTO_INVENTARIO_ITEMS, (v) => typeof v === 'object' && v !== null, 'Items de gastos inventariables'],
+    ['savia-inventory-price-history', SEED_INVENTORY_PRICE_HISTORY, isArray, 'Historial de precios de inventario'],
+    ['savia-employee-credit-history', SEED_EMPLOYEE_CREDIT_HISTORY, isArray, 'Historial de crédito de empleados'],
+    ['savia-next-order-number', SEED_NEXT_ORDER_NUMBER, (v) => typeof v === 'number' && v > 0, 'Siguiente número de orden'],
+  ];
+
+  for (const [key, data, validator, desc] of seedKeys) {
+    ensureSeeded(key, data, validator, desc);
+  }
 };
