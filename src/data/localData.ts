@@ -1,4 +1,4 @@
-import { MenuItem, Order, Customer, Empleado, Gasto, CajaPocket, ProvisionTransfer, InventoryPriceHistoryEntry, EmployeeCreditHistoryEntry, WeeklySchedule } from '../types';
+import { MenuItem, Order, Customer, Empleado, Gasto, CajaPocket, ProvisionTransfer, InventoryPriceHistoryEntry, EmployeeCreditHistoryEntry, WeeklySchedule, MarketingStrategyRecord } from '../types';
 import { slugify } from '../utils/strings';
 import {
   SEED_CUSTOMERS,
@@ -14,6 +14,7 @@ import {
   SEED_PROVISION_TRANSFERS,
   SEED_INVENTORY_PRICE_HISTORY,
   SEED_EMPLOYEE_CREDIT_HISTORY,
+  SEED_AI_STRATEGIES,
 } from './seedData';
 
 type MenuItemSeed = Omit<MenuItem, 'codigo'> & { codigo?: string };
@@ -341,6 +342,7 @@ export const SEED_DATA = {
   'savia-gasto-inventario-items': SEED_GASTO_INVENTARIO_ITEMS,
   'savia-inventory-price-history': SEED_INVENTORY_PRICE_HISTORY,
   'savia-employee-credit-history': SEED_EMPLOYEE_CREDIT_HISTORY,
+  'savia-ai-strategies': SEED_AI_STRATEGIES,
   'savia-next-order-number': SEED_NEXT_ORDER_NUMBER,
 };
 
@@ -428,6 +430,7 @@ export const initializeLocalData = (): void => {
     ['savia-gasto-inventario-items', SEED_GASTO_INVENTARIO_ITEMS, (v) => typeof v === 'object' && v !== null, 'Items de gastos inventariables'],
     ['savia-inventory-price-history', SEED_INVENTORY_PRICE_HISTORY, isArray, 'Historial de precios de inventario'],
     ['savia-employee-credit-history', SEED_EMPLOYEE_CREDIT_HISTORY, isArray, 'Historial de crédito de empleados'],
+    ['savia-ai-strategies', SEED_AI_STRATEGIES, isArray, 'Estrategias de IA'],
     ['savia-next-order-number', SEED_NEXT_ORDER_NUMBER, (v) => typeof v === 'number' && v > 0, 'Siguiente número de orden'],
   ];
 
