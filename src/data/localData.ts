@@ -434,6 +434,19 @@ export const initializeLocalData = (): void => {
     ['savia-next-order-number', SEED_NEXT_ORDER_NUMBER, (v) => typeof v === 'number' && v > 0, 'Siguiente número de orden'],
   ];
 
+  const isDemoMode = typeof window !== 'undefined' &&
+    import.meta.env.VITE_DEMO_MODE === 'true';
+
+  if (isDemoMode) {
+    // En modo demo (deploy), forzamos la siembra completa de TODAS las keys
+    // para evitar datos corruptos/parciales de deploys anteriores.
+    console.info('[localData] Modo demo: forzando siembra completa de datos semilla.');
+    for (const [key, data] of seedKeys) {
+      setLocalData(key, data);
+    }
+    return;
+  }
+
   for (const [key, data, validator, desc] of seedKeys) {
     ensureSeeded(key, data, validator, desc);
   }
